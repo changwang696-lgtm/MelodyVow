@@ -103,6 +103,8 @@ type HistoryItem = {
   action: string
   audioUrl?: string
   downloadUrl?: string
+  sourceAudioUrl?: string
+  sourceDownloadUrl?: string
   createdAt?: string
   languageLabel?: string
   styleLabel?: string
@@ -139,6 +141,8 @@ type AdminSong = {
   updatedAt: string
   audioUrl?: string
   downloadUrl?: string
+  sourceAudioUrl?: string
+  sourceDownloadUrl?: string
   lyricSnippet?: string
   lyrics?: string
   error?: string
@@ -292,6 +296,8 @@ function sanitizeHistoryItem(item: HistoryItem) {
     ...item,
     audioUrl: playbackUrl,
     downloadUrl: item.downloadUrl || playbackUrl,
+    sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
+    sourceDownloadUrl: item.sourceDownloadUrl || item.downloadUrl || '',
   }
 }
 
@@ -2883,6 +2889,10 @@ function AdminDashboardPage({
                     <p><strong>曲风：</strong>{selectedSong.styleLabel}</p>
                     <p><strong>声音：</strong>{selectedSong.vocalLabel}</p>
                     <p><strong>错误信息：</strong>{selectedSong.error || '无'}</p>
+                    <p><strong>播放链接：</strong>{selectedSong.audioUrl || '无'}</p>
+                    <p><strong>下载链接：</strong>{selectedSong.downloadUrl || '无'}</p>
+                    <p><strong>原始 audio_url：</strong>{selectedSong.sourceAudioUrl || '无'}</p>
+                    <p><strong>原始 download_url：</strong>{selectedSong.sourceDownloadUrl || '无'}</p>
                     <p><strong>爱情故事：</strong>{selectedSong.story?.loveStory || '未填写'}</p>
                     <p><strong>相识经历：</strong>{selectedSong.story?.meetingStory || '未填写'}</p>
                     <p><strong>誓言关键词：</strong>{selectedSong.story?.vowKeywords || '未填写'}</p>
