@@ -132,7 +132,11 @@ function saveAdminData() {
 }
 
 function syncJobToAdminData(job) {
-  const preferredAudioUrl = pickPreferredAudioUrl(
+  const playbackUrl = pickPreferredAudioUrl(
+    job.tracks?.[0]?.audioUrl,
+    job.tracks?.[0]?.downloadUrl,
+  )
+  const downloadUrl = pickPreferredAudioUrl(
     job.tracks?.[0]?.downloadUrl,
     job.tracks?.[0]?.audioUrl,
   )
@@ -147,8 +151,8 @@ function syncJobToAdminData(job) {
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
-    audioUrl: preferredAudioUrl,
-    downloadUrl: preferredAudioUrl,
+    audioUrl: playbackUrl,
+    downloadUrl,
     lyricSnippet: String(job.lyrics || '').slice(0, 160),
     lyrics: job.lyrics || '',
     error: job.error || '',
@@ -238,6 +242,42 @@ function pickPreferredAudioUrl(...values) {
     .filter(Boolean)
 
   return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || candidates[0] || ''
+}
+
+function sanitizeDownloadFilename(name) {
+  const base = String(name || 'melodyvow-song')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+
+  return base || 'melodyvow-song'
+}
+
+function guessAudioExtension(sourceUrl, contentType) {
+  const normalizedType = String(contentType || '').toLowerCase()
+  if (normalizedType.includes('mpeg') || normalizedType.includes('mp3')) {
+    return 'mp3'
+  }
+  if (normalizedType.includes('wav')) {
+    return 'wav'
+  }
+  if (normalizedType.includes('x-m4a') || normalizedType.includes('mp4')) {
+    return 'm4a'
+  }
+  if (normalizedType.includes('ogg')) {
+    return 'ogg'
+  }
+
+  const pathname = (() => {
+    try {
+      return new URL(String(sourceUrl || '')).pathname
+    } catch {
+      return ''
+    }
+  })()
+  const matched = pathname.match(/\.([a-z0-9]{2,5})$/i)
+  return matched?.[1]?.toLowerCase() || 'mp3'
 }
 
 function reportDebugEvent(event) {
@@ -357,7 +397,8 @@ function validateGenerateInput(body) {
 }
 
 function mapSongToMemberHistory(song) {
-  const preferredAudioUrl = pickPreferredAudioUrl(song.downloadUrl, song.audioUrl)
+  const playbackUrl = pickPreferredAudioUrl(song.audioUrl, song.downloadUrl)
+  const downloadUrl = pickPreferredAudioUrl(song.downloadUrl, song.audioUrl)
 
   return {
     id: song.id,
@@ -365,8 +406,8 @@ function mapSongToMemberHistory(song) {
     subtitle: song.couple,
     status: song.status === 'ready' ? '已生成' : song.status,
     action: '下载音频',
-    audioUrl: preferredAudioUrl,
-    downloadUrl: preferredAudioUrl,
+    audioUrl: playbackUrl,
+    downloadUrl,
     createdAt: song.updatedAt || song.createdAt,
     languageLabel: song.languageLabel || '',
     styleLabel: song.styleLabel || '',
@@ -559,6 +600,13 @@ function normalizeTracksFromRaw(trackOrTracks) {
   return array
     .map((track) => {
       const playbackUrl = pickPreferredAudioUrl(
+        track?.audio_url,
+        track?.audioUrl,
+        track?.download_url,
+        track?.downloadUrl,
+        track?.stream_audio_url,
+      )
+      const downloadUrl = pickPreferredAudioUrl(
         track?.download_url,
         track?.downloadUrl,
         track?.audio_url,
@@ -571,7 +619,7 @@ function normalizeTracksFromRaw(trackOrTracks) {
         title: String(track?.title || '').trim(),
         duration: Number(track?.duration || 0) || 0,
         audioUrl: playbackUrl,
-        downloadUrl: playbackUrl,
+        downloadUrl,
         imageUrl: String(track?.image_url || track?.imageUrl || '').trim(),
         tags: String(track?.tags || '').trim(),
         prompt: String(track?.prompt || track?.text || track?.lyrics || '').trim(),
@@ -992,6 +1040,46 @@ app.get('/api/member/songs', (req, res) => {
   // #endregion
 
   res.json({ items })
+})
+
+app.get('/api/songs/:songId/download', async (req, res) => {
+  const songId = String(req.params.songId || '').trim()
+  const job = jobs.get(songId)
+  const storedSong = adminData.songs.find((item) => item.id === songId)
+  const title = job?.title || storedSong?.title || 'MelodyVow Song'
+  const sourceUrl = pickPreferredAudioUrl(
+    job?.tracks?.[0]?.downloadUrl,
+    storedSong?.downloadUrl,
+    job?.tracks?.[0]?.audioUrl,
+    storedSong?.audioUrl,
+  )
+
+  if (!sourceUrl) {
+    res.status(404).json({ message: '当前歌曲还没有可下载的音频链接。' })
+    return
+  }
+
+  try {
+    const upstream = await fetch(sourceUrl)
+    if (!upstream.ok) {
+      throw new Error(`音频源响应异常: ${upstream.status}`)
+    }
+
+    const contentType = upstream.headers.get('content-type') || 'audio/mpeg'
+    const extension = guessAudioExtension(sourceUrl, contentType)
+    const filename = `${sanitizeDownloadFilename(title)}.${extension}`
+    const buffer = Buffer.from(await upstream.arrayBuffer())
+
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Content-Length', String(buffer.length))
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`)
+    res.end(buffer)
+  } catch (error) {
+    res.status(502).json({
+      message: error instanceof Error ? error.message : '音频下载失败，请稍后再试。',
+    })
+  }
 })
 
 app.post('/api/suno/callback', (req, res) => {
