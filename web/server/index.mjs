@@ -14,6 +14,7 @@ const SUNO_MODEL = process.env.SUNO_MODEL ?? 'chirp-v4-5'
 const SUNO_GENERATE_URL = process.env.SUNO_GENERATE_URL ?? 'https://api.wike.cc/api/suno/generate'
 const SUNO_FEED_URL = process.env.SUNO_FEED_URL ?? 'https://api.wike.cc/api/suno/feed'
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '')
 const JOB_TTL_MS = 1000 * 60 * 60 * 6
 const POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS ?? 12000)
 const MAX_POLL_ATTEMPTS = Number(process.env.SUNO_POLL_MAX_ATTEMPTS ?? 40)
@@ -30,6 +31,27 @@ const adminSessions = new Map()
 
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
+app.use((req, res, next) => {
+  const requestOrigin = req.headers.origin
+
+  if (FRONTEND_ORIGIN && requestOrigin === FRONTEND_ORIGIN) {
+    res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN)
+  }
+  else if (!FRONTEND_ORIGIN && requestOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin)
+  }
+
+  res.setHeader('Vary', 'Origin')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+
+  next()
+})
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
