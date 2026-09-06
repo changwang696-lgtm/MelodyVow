@@ -71,6 +71,7 @@ type SongJob = {
   input: {
     groom: string
     bride: string
+    userEmail?: string
     occasion?: Occasion
     style: string
     languageCode: string
@@ -101,6 +102,7 @@ type HistoryItem = {
   status: string
   action: string
   audioUrl?: string
+  downloadUrl?: string
   createdAt?: string
   languageLabel?: string
   styleLabel?: string
@@ -182,6 +184,7 @@ type HomePageProps = {
   draft: SongDraft
   setDraft: Dispatch<SetStateAction<SongDraft>>
   onOpenModal: (message: string) => void
+  authSession: AuthSession | null
 }
 
 type StylesPageProps = {
@@ -561,6 +564,39 @@ function App() {
   }, [songHistory])
 
   useEffect(() => {
+    if (!authSession?.email) {
+      return
+    }
+
+    let disposed = false
+
+    const loadMemberSongs = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/member/songs?email=${encodeURIComponent(authSession.email)}`))
+        const data = (await response.json()) as { items?: HistoryItem[]; message?: string }
+
+        if (!response.ok) {
+          throw new Error(data.message || '会员歌单加载失败。')
+        }
+
+        if (!disposed && Array.isArray(data.items)) {
+          setSongHistory(data.items)
+        }
+      } catch (error) {
+        if (!disposed) {
+          console.error(error)
+        }
+      }
+    }
+
+    void loadMemberSongs()
+
+    return () => {
+      disposed = true
+    }
+  }, [authSession])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -618,6 +654,7 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              authSession={authSession}
             />
           }
         />
@@ -693,6 +730,7 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              authSession={authSession}
             />
           }
         />
@@ -973,7 +1011,7 @@ function SiteLayout({
   )
 }
 
-function HomePage({ locale, draft, setDraft, onOpenModal }: HomePageProps) {
+function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePageProps) {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -993,6 +1031,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal }: HomePageProps) {
         body: JSON.stringify({
           groom: draft.groom,
           bride: draft.bride,
+          userEmail: authSession?.email || '',
           occasion: draft.occasion,
           style: draft.style,
           styleLabel: getStyleLabel(locale, draft.style),
@@ -1583,6 +1622,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
       status: copy(locale, { zh: '已生成', en: 'Ready' }),
       action: copy(locale, { zh: '播放', en: 'Play' }),
       audioUrl: primaryTrackPlaybackUrl,
+      downloadUrl: primaryTrack?.downloadUrl || primaryTrackPlaybackUrl,
       createdAt: activeJob.updatedAt,
       languageLabel: draft.languageLabel,
       styleLabel: getStyleLabel(locale, draft.style),
@@ -2287,8 +2327,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
                 type="button"
                 className="primary-button compact"
                 onClick={() => {
-                  if (item.audioUrl) {
-                    window.open(item.audioUrl, '_blank', 'noopener,noreferrer')
+                  if (item.downloadUrl || item.audioUrl) {
+                    window.open(item.downloadUrl || item.audioUrl || '', '_blank', 'noopener,noreferrer')
                     return
                   }
 
@@ -2300,7 +2340,9 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
                   )
                 }}
               >
-                {item.action}
+                {item.downloadUrl || item.audioUrl
+                  ? copy(locale, { zh: '下载音频', en: 'Download Audio' })
+                  : item.action}
               </button>
             </article>
           ))}
