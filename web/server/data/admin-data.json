@@ -1,0 +1,32 @@
+{
+  "orders": [
+    {
+      "id": "ord-demo-001",
+      "couple": "Hao & Xin",
+      "plan": "Pro",
+      "amount": 199,
+      "status": "paid",
+      "email": "hao@example.com",
+      "note": "婚礼开场曲，需提前交付伴奏版。",
+      "createdAt": "2026-08-29T11:55:56.002Z"
+    },
+    {
+      "id": "ord-demo-002",
+      "couple": "Luna & Ethan",
+      "plan": "Premium",
+      "amount": 499,
+      "status": "processing",
+      "email": "luna@example.com",
+      "note": "需要双语版本和 first dance mix。",
+      "createdAt": "2026-08-29T11:55:56.002Z"
+    }
+  ],
+  "songs": [],
+  "config": {
+    "deepseekProvider": "DeepSeek",
+    "sunoProvider": "Suno",
+    "publicBaseUrl": "",
+    "allowSignup": true,
+    "notes": "后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。"
+  }
+}
