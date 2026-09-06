@@ -23,6 +23,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
 const ADMIN_DATA_FILE = path.join(DATA_DIR, 'admin-data.json')
+const DEBUG_ENV_FILE = path.join(process.cwd(), '.dbg', 'suno-expired-url.env')
 
 const jobs = new Map()
 const sunoTaskToJob = new Map()
@@ -131,6 +132,10 @@ function saveAdminData() {
 }
 
 function syncJobToAdminData(job) {
+  const preferredAudioUrl = pickPreferredAudioUrl(
+    job.tracks?.[0]?.downloadUrl,
+    job.tracks?.[0]?.audioUrl,
+  )
   const entry = {
     id: job.id,
     title: job.title || `${job.input.groom} & ${job.input.bride}`,
@@ -142,8 +147,8 @@ function syncJobToAdminData(job) {
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
-    audioUrl: job.tracks?.[0]?.audioUrl || '',
-    downloadUrl: job.tracks?.[0]?.downloadUrl || job.tracks?.[0]?.audioUrl || '',
+    audioUrl: preferredAudioUrl,
+    downloadUrl: preferredAudioUrl,
     lyricSnippet: String(job.lyrics || '').slice(0, 160),
     lyrics: job.lyrics || '',
     error: job.error || '',
@@ -153,6 +158,25 @@ function syncJobToAdminData(job) {
       vowKeywords: job.input.vowKeywords || '',
     },
   }
+
+  // #region debug-point B:sync-job-admin-data
+  reportDebugEvent({
+    hypothesisId: 'B',
+    location: 'web/server/index.mjs:syncJobToAdminData',
+    msg: '[DEBUG] Sync job entry to persisted admin data',
+    data: {
+      jobId: job.id,
+      status: job.status,
+      taskId: job.sunoTaskId || '',
+      trackCount: Array.isArray(job.tracks) ? job.tracks.length : 0,
+      firstTrackAudioUrl: job.tracks?.[0]?.audioUrl || '',
+      firstTrackDownloadUrl: job.tracks?.[0]?.downloadUrl || '',
+      persistedAudioUrl: entry.audioUrl,
+      persistedDownloadUrl: entry.downloadUrl,
+      email: entry.email,
+    },
+  })
+  // #endregion
 
   const nextSongs = [entry, ...adminData.songs.filter((item) => item.id !== entry.id)].slice(0, 100)
   adminData = {
@@ -202,6 +226,42 @@ function pickFirstDefined(...values) {
   }
 
   return undefined
+}
+
+function isExpiredSunoStreamUrl(value) {
+  return /^https?:\/\/audiopipe\.suno\.ai/i.test(String(value || '').trim())
+}
+
+function pickPreferredAudioUrl(...values) {
+  const candidates = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+
+  return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || candidates[0] || ''
+}
+
+function reportDebugEvent(event) {
+  let debugServerUrl = 'http://127.0.0.1:7777/event'
+  let debugSessionId = 'suno-expired-url'
+
+  try {
+    const envContent = fs.readFileSync(DEBUG_ENV_FILE, 'utf8')
+    debugServerUrl = envContent.match(/DEBUG_SERVER_URL=(.+)/)?.[1]?.trim() || debugServerUrl
+    debugSessionId = envContent.match(/DEBUG_SESSION_ID=(.+)/)?.[1]?.trim() || debugSessionId
+  } catch {}
+
+  void fetch(debugServerUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sessionId: debugSessionId,
+      runId: 'pre-fix',
+      ts: Date.now(),
+      ...event,
+    }),
+  }).catch(() => {})
 }
 
 function getDeepSeekKey() {
@@ -297,14 +357,16 @@ function validateGenerateInput(body) {
 }
 
 function mapSongToMemberHistory(song) {
+  const preferredAudioUrl = pickPreferredAudioUrl(song.downloadUrl, song.audioUrl)
+
   return {
     id: song.id,
     title: song.title,
     subtitle: song.couple,
     status: song.status === 'ready' ? '已生成' : song.status,
     action: '下载音频',
-    audioUrl: song.audioUrl || '',
-    downloadUrl: song.downloadUrl || song.audioUrl || '',
+    audioUrl: preferredAudioUrl,
+    downloadUrl: preferredAudioUrl,
     createdAt: song.updatedAt || song.createdAt,
     languageLabel: song.languageLabel || '',
     styleLabel: song.styleLabel || '',
@@ -464,6 +526,21 @@ async function createSunoTask(job, { title, lyrics, stylePrompt }) {
     data?.data?.taskId,
   )
 
+  // #region debug-point A:create-suno-task
+  reportDebugEvent({
+    hypothesisId: 'A',
+    location: 'web/server/index.mjs:createSunoTask',
+    msg: '[DEBUG] Created Suno task from generate API response',
+    data: {
+      jobId: job.id,
+      taskId: String(taskId || ''),
+      hasAudioUrl: Boolean(data?.data?.[0]?.audio_url || data?.data?.audio_url || data?.audio_url),
+      hasStreamAudioUrl: Boolean(data?.data?.[0]?.stream_audio_url || data?.data?.stream_audio_url || data?.stream_audio_url),
+      responseKeys: Object.keys(data || {}).slice(0, 12),
+    },
+  })
+  // #endregion
+
   if (!taskId) {
     throw new Error('Suno 没有返回 taskId。')
   }
@@ -480,25 +557,45 @@ function normalizeTracksFromRaw(trackOrTracks) {
       : []
 
   return array
-    .map((track) => ({
-      id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
-      title: String(track?.title || '').trim(),
-      duration: Number(track?.duration || 0) || 0,
-      // Prefer the stable audio URL first. stream_audio_url is often temporary and may expire.
-      audioUrl: String(track?.audio_url || track?.audioUrl || track?.stream_audio_url || '').trim(),
-      downloadUrl: String(track?.audio_url || track?.audioUrl || track?.stream_audio_url || '').trim(),
-      imageUrl: String(track?.image_url || track?.imageUrl || '').trim(),
-      tags: String(track?.tags || '').trim(),
-      prompt: String(track?.prompt || track?.text || track?.lyrics || '').trim(),
-      modelName: String(track?.model_name || track?.mv || SUNO_MODEL).trim(),
-    }))
+    .map((track) => {
+      const playbackUrl = pickPreferredAudioUrl(
+        track?.download_url,
+        track?.downloadUrl,
+        track?.audio_url,
+        track?.audioUrl,
+        track?.stream_audio_url,
+      )
+
+      return {
+        id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
+        title: String(track?.title || '').trim(),
+        duration: Number(track?.duration || 0) || 0,
+        audioUrl: playbackUrl,
+        downloadUrl: playbackUrl,
+        imageUrl: String(track?.image_url || track?.imageUrl || '').trim(),
+        tags: String(track?.tags || '').trim(),
+        prompt: String(track?.prompt || track?.text || track?.lyrics || '').trim(),
+        modelName: String(track?.model_name || track?.mv || SUNO_MODEL).trim(),
+      }
+    })
     .filter((track) => track.id || track.audioUrl || track.title)
 }
 
 function getNormalizedTaskState(payload) {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload
   const rawStatus = pickFirstDefined(data?.status, payload?.status)
-  const audioUrl = String(pickFirstDefined(data?.audio_url, data?.audioUrl, payload?.audio_url, payload?.audioUrl) || '').trim()
+  const audioUrl = pickPreferredAudioUrl(
+    data?.download_url,
+    data?.downloadUrl,
+    data?.audio_url,
+    data?.audioUrl,
+    payload?.download_url,
+    payload?.downloadUrl,
+    payload?.audio_url,
+    payload?.audioUrl,
+    data?.stream_audio_url,
+    payload?.stream_audio_url,
+  )
   const state = String(pickFirstDefined(data?.state, payload?.state) || '').trim().toLowerCase()
 
   if (rawStatus === 3 || rawStatus === '3' || state === 'completed' || audioUrl) {
@@ -530,6 +627,26 @@ function applySunoStatus(jobId, sunoPayload) {
       sunoPayload?.data?.lyric,
     ) || '',
   ).trim()
+
+  // #region debug-point B:apply-suno-status
+  reportDebugEvent({
+    hypothesisId: 'B',
+    location: 'web/server/index.mjs:applySunoStatus',
+    msg: '[DEBUG] Normalized Suno payload into track candidates',
+    data: {
+      jobId,
+      normalizedState,
+      payloadKeys: Object.keys((sunoPayload && typeof sunoPayload === 'object') ? sunoPayload : {}).slice(0, 12),
+      payloadDataType: Array.isArray(sunoPayload?.data) ? 'array' : typeof sunoPayload?.data,
+      trackCount: tracks.length,
+      firstTrackAudioUrl: tracks[0]?.audioUrl || '',
+      firstTrackDownloadUrl: tracks[0]?.downloadUrl || '',
+      firstTrackTitle: tracks[0]?.title || '',
+      currentStoredAudioUrl: current.tracks?.[0]?.audioUrl || '',
+      currentStoredDownloadUrl: current.tracks?.[0]?.downloadUrl || '',
+    },
+  })
+  // #endregion
 
   if (normalizedState === 'ready') {
     const primaryTrack = tracks[0] ?? null
@@ -565,6 +682,24 @@ async function fetchSunoTask(taskId) {
     },
     'Suno 状态查询',
   )
+
+  // #region debug-point A:fetch-suno-task
+  reportDebugEvent({
+    hypothesisId: 'A',
+    location: 'web/server/index.mjs:fetchSunoTask',
+    msg: '[DEBUG] Fetched Suno task status payload',
+    data: {
+      taskId,
+      rootKeys: Object.keys(data || {}).slice(0, 12),
+      dataKeys: Object.keys((data && typeof data.data === 'object' && !Array.isArray(data.data)) ? data.data : {}).slice(0, 12),
+      hasRootAudioUrl: Boolean(data?.audio_url || data?.audioUrl),
+      hasRootStreamAudioUrl: Boolean(data?.stream_audio_url),
+      hasNestedAudioUrl: Boolean(data?.data?.audio_url || data?.data?.audioUrl),
+      hasNestedStreamAudioUrl: Boolean(data?.data?.stream_audio_url),
+      nestedType: Array.isArray(data?.data) ? 'array' : typeof data?.data,
+    },
+  })
+  // #endregion
 
   return data?.data ?? data
 }
@@ -839,6 +974,22 @@ app.get('/api/member/songs', (req, res) => {
     .filter((song) => String(song.email || '').trim().toLowerCase() === email)
     .sort((left, right) => new Date(right.updatedAt || right.createdAt).getTime() - new Date(left.updatedAt || left.createdAt).getTime())
     .map(mapSongToMemberHistory)
+
+  // #region debug-point E:member-songs-response
+  reportDebugEvent({
+    hypothesisId: 'E',
+    location: 'web/server/index.mjs:/api/member/songs',
+    msg: '[DEBUG] Returned member song history items',
+    data: {
+      email,
+      itemCount: items.length,
+      firstItemId: items[0]?.id || '',
+      firstItemAudioUrl: items[0]?.audioUrl || '',
+      firstItemDownloadUrl: items[0]?.downloadUrl || '',
+      firstItemStatus: items[0]?.status || '',
+    },
+  })
+  // #endregion
 
   res.json({ items })
 })
