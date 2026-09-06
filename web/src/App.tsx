@@ -138,6 +138,7 @@ type AdminSong = {
   createdAt: string
   updatedAt: string
   audioUrl?: string
+  downloadUrl?: string
   lyricSnippet?: string
   lyrics?: string
   error?: string
@@ -244,9 +245,48 @@ const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
+const DEBUG_SESSION_ID = 'suno-expired-url'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
+
+function reportDebugEvent(event: Record<string, unknown>) {
+  void fetch(DEBUG_SERVER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      sessionId: DEBUG_SESSION_ID,
+      runId: 'pre-fix',
+      ts: Date.now(),
+      ...event,
+    }),
+  }).catch(() => {})
+}
+
+function isExpiredSunoStreamUrl(value: string | undefined) {
+  return /^https?:\/\/audiopipe\.suno\.ai/i.test(String(value || '').trim())
+}
+
+function pickPreferredPlayableUrl(...values: Array<string | undefined>) {
+  const candidates = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+
+  return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || ''
+}
+
+function sanitizeHistoryItem(item: HistoryItem) {
+  const playbackUrl = pickPreferredPlayableUrl(item.downloadUrl, item.audioUrl)
+
+  return {
+    ...item,
+    audioUrl: playbackUrl,
+    downloadUrl: playbackUrl,
+  }
 }
 
 function launchHomepageFireworks() {
@@ -452,7 +492,7 @@ function loadSongHistory() {
     }
 
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as HistoryItem[]) : []
+    return Array.isArray(parsed) ? (parsed as HistoryItem[]).map(sanitizeHistoryItem) : []
   } catch {
     return [] as HistoryItem[]
   }
@@ -569,6 +609,7 @@ function App() {
     }
 
     let disposed = false
+    setSongHistory([])
 
     const loadMemberSongs = async () => {
       try {
@@ -580,7 +621,22 @@ function App() {
         }
 
         if (!disposed && Array.isArray(data.items)) {
-          setSongHistory(data.items)
+          const nextItems = data.items.map(sanitizeHistoryItem)
+          // #region debug-point E:frontend-member-history
+          reportDebugEvent({
+            hypothesisId: 'E',
+            location: 'web/src/App.tsx:loadMemberSongs',
+            msg: '[DEBUG] Frontend loaded member song history',
+            data: {
+              email: authSession.email,
+              itemCount: nextItems.length,
+              firstItemId: nextItems[0]?.id || '',
+              firstItemAudioUrl: nextItems[0]?.audioUrl || '',
+              firstItemDownloadUrl: nextItems[0]?.downloadUrl || '',
+            },
+          })
+          // #endregion
+          setSongHistory(nextItems)
         }
       } catch (error) {
         if (!disposed) {
@@ -1639,6 +1695,21 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
       throw new Error('message' in data && data.message ? data.message : '任务查询失败。')
     }
 
+    // #region debug-point C:frontend-job-response
+    reportDebugEvent({
+      hypothesisId: 'C',
+      location: 'web/src/App.tsx:loadJob',
+      msg: '[DEBUG] Frontend loaded job payload',
+      data: {
+        jobId: currentJobId,
+        status: 'status' in data ? data.status : '',
+        trackCount: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks.length : 0,
+        firstTrackAudioUrl: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks[0]?.audioUrl || '' : '',
+        firstTrackDownloadUrl: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks[0]?.downloadUrl || '' : '',
+      },
+    })
+    // #endregion
+
     setJob(data as SongJob)
     return data as SongJob
   }
@@ -1883,7 +1954,22 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
             <button
               type="button"
               className="icon-button"
-              onClick={() => window.open(primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '', '_blank', 'noopener,noreferrer')}
+              onClick={() => {
+                // #region debug-point C:preview-download-click
+                reportDebugEvent({
+                  hypothesisId: 'C',
+                  location: 'web/src/App.tsx:previewDownloadClick',
+                  msg: '[DEBUG] User clicked preview download button',
+                  data: {
+                    jobId: activeJob?.id || '',
+                    chosenUrl: primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '',
+                    audioUrl: primaryTrack?.audioUrl || '',
+                    downloadUrl: primaryTrack?.downloadUrl || '',
+                  },
+                })
+                // #endregion
+                window.open(primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '', '_blank', 'noopener,noreferrer')
+              }}
               disabled={!primaryTrackPlaybackUrl}
             >
               ♡
@@ -1921,9 +2007,9 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
           <button
             type="button"
             className="primary-button wide"
-            onClick={() => navigate(primaryTrack?.audioUrl ? withLocale(locale, '/complete') : withLocale(locale))}
+            onClick={() => navigate(primaryTrackPlaybackUrl ? withLocale(locale, '/complete') : withLocale(locale))}
           >
-            {primaryTrack?.audioUrl
+            {primaryTrackPlaybackUrl
               ? copy(locale, { zh: '查看下载页', en: 'Open Download Page' })
               : copy(locale, { zh: '返回继续填写', en: 'Back to Homepage' })}
           </button>
@@ -2327,6 +2413,19 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
                 type="button"
                 className="primary-button compact"
                 onClick={() => {
+                  // #region debug-point C:account-download-click
+                  reportDebugEvent({
+                    hypothesisId: 'C',
+                    location: 'web/src/App.tsx:accountDownloadClick',
+                    msg: '[DEBUG] User clicked account history download button',
+                    data: {
+                      itemId: item.id,
+                      chosenUrl: item.downloadUrl || item.audioUrl || '',
+                      audioUrl: item.audioUrl || '',
+                      downloadUrl: item.downloadUrl || '',
+                    },
+                  })
+                  // #endregion
                   if (item.downloadUrl || item.audioUrl) {
                     window.open(item.downloadUrl || item.audioUrl || '', '_blank', 'noopener,noreferrer')
                     return
@@ -2368,8 +2467,8 @@ function AdminLoginPage({
   onLogin: (session: AdminSession) => void
 }) {
   const navigate = useNavigate()
-  const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('admin123')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -2415,11 +2514,11 @@ function AdminLoginPage({
       <div className="admin-login-card glass-card">
         <p className="mini-eyebrow">MelodyVow Admin</p>
         <h1>后台管理登录</h1>
-        <p className="admin-subtitle">先用本地管理账号登录，后面可以替换成真实后台权限系统。</p>
+        <p className="admin-subtitle">请输入部署环境中配置的后台账号与密码。</p>
         <div className="form-grid single">
           <label className="field">
             <span>后台账号</span>
-            <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin" />
+            <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入后台账号" />
           </label>
           <label className="field">
             <span>后台密码</span>
@@ -2427,7 +2526,7 @@ function AdminLoginPage({
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="admin123"
+              placeholder="请输入后台密码"
             />
           </label>
         </div>
@@ -2435,7 +2534,7 @@ function AdminLoginPage({
         <button type="button" className="primary-button wide" onClick={() => void handleSubmit()} disabled={isSubmitting}>
           {isSubmitting ? '登录中...' : '进入后台'}
         </button>
-        <p className="admin-tip">当前本地默认账号：`admin` / `admin123`，后续可通过服务端环境变量覆盖。</p>
+        <p className="admin-tip">生产环境请务必使用 Render 环境变量中的后台账号，不要在页面中暴露默认凭据。</p>
       </div>
     </div>
   )
@@ -2741,8 +2840,12 @@ function AdminDashboardPage({
                       <strong>歌词</strong>
                       <p>{selectedSong.lyrics || selectedSong.lyricSnippet || '暂无歌词内容。'}</p>
                     </div>
-                    {selectedSong.audioUrl ? (
-                      <button type="button" className="primary-button compact" onClick={() => window.open(selectedSong.audioUrl, '_blank', 'noopener,noreferrer')}>
+                    {selectedSong.downloadUrl || selectedSong.audioUrl ? (
+                      <button
+                        type="button"
+                        className="primary-button compact"
+                        onClick={() => window.open(selectedSong.downloadUrl || selectedSong.audioUrl || '', '_blank', 'noopener,noreferrer')}
+                      >
                         试听音频
                       </button>
                     ) : null}
