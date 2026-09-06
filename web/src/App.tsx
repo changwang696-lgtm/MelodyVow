@@ -175,6 +175,7 @@ type LayoutProps = {
   eyebrow: string
   active: string
   onOpenModal: (message: string) => void
+  authSession?: AuthSession | null
   homePanel?: ReactNode
   hideHero?: boolean
   children: ReactNode
@@ -212,6 +213,7 @@ type AuthPageProps = {
   selectedPlan: string
   onOpenModal: (message: string) => void
   onAuthSuccess: (session: AuthSession) => void
+  authSession: AuthSession | null
 }
 
 type AccountPageProps = {
@@ -748,6 +750,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
+              authSession={authSession}
             />
           }
         />
@@ -827,6 +830,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
+              authSession={authSession}
             />
           }
         />
@@ -890,12 +894,15 @@ function SiteLayout({
   eyebrow,
   active,
   onOpenModal: _onOpenModal,
+  authSession,
   homePanel,
   hideHero = false,
   children,
 }: LayoutProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const navigate = useNavigate()
+  const currentAuthSession = authSession ?? loadAuthSession()
+  const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
 
   const navItems = [
     { key: 'home', label: copy(locale, { zh: '首页', en: 'Home' }), to: withLocale(locale) },
@@ -916,8 +923,11 @@ function SiteLayout({
     },
     {
       key: 'account',
-      label: copy(locale, { zh: '登录会员', en: 'Account' }),
-      to: withLocale(locale, '/auth'),
+      label: copy(locale, {
+        zh: currentAuthSession?.email ? '会员中心' : '登录会员',
+        en: currentAuthSession?.email ? 'Account' : 'Login',
+      }),
+      to: accountPath,
     },
   ]
 
@@ -1075,10 +1085,22 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const memberEmail = authSession?.email?.trim() || ''
 
   useEffect(() => launchHomepageFireworks(), [])
 
   async function handleGenerateSong() {
+    if (!memberEmail) {
+      const message = copy(locale, {
+        zh: '请先登录会员后再生成歌曲，这样新生成的歌曲才能自动绑定到你的会员中心。',
+        en: 'Please log in before generating a song so it can be saved to your account automatically.',
+      })
+      setSubmitError(message)
+      onOpenModal(message)
+      navigate(withLocale(locale, '/auth'))
+      return
+    }
+
     setSubmitError('')
     setIsSubmitting(true)
 
@@ -1091,7 +1113,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
         body: JSON.stringify({
           groom: draft.groom,
           bride: draft.bride,
-          userEmail: authSession?.email || '',
+          userEmail: memberEmail,
           occasion: draft.occasion,
           style: draft.style,
           styleLabel: getStyleLabel(locale, draft.style),
@@ -1135,6 +1157,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
       eyebrow="MelodyVow"
       active="home"
       onOpenModal={onOpenModal}
+      authSession={authSession}
       homePanel={(
         <section className="home-phone-shell">
           <div className="phone-brand-block">
@@ -1275,6 +1298,18 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
               ? copy(locale, { zh: '正在生成歌词与歌曲...', en: 'Generating lyrics and song...' })
               : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
           </button>
+
+          <p className="helper-copy">
+            {memberEmail
+              ? copy(locale, {
+                zh: `当前已绑定会员邮箱：${memberEmail}`,
+                en: `Current account email: ${memberEmail}`,
+              })
+              : copy(locale, {
+                zh: '生成歌曲前请先登录会员，避免歌曲无法归档到会员中心。',
+                en: 'Please log in first so your generated songs are saved to your account.',
+              })}
+          </p>
 
           {submitError ? <p className="form-error">{submitError}</p> : null}
         </section>
@@ -2107,7 +2142,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan }: PricingPageProps
   )
 }
 
-function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess }: AuthPageProps) {
+function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, authSession }: AuthPageProps) {
   const navigate = useNavigate()
   const [tab, setTab] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
@@ -2117,6 +2152,10 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess }: A
   const [authError, setAuthError] = useState('')
   const [captchaInput, setCaptchaInput] = useState('')
   const [captchaChallenge, setCaptchaChallenge] = useState(createCaptchaChallenge)
+
+  if (authSession?.email) {
+    return <Navigate to={withLocale(locale, '/account')} replace />
+  }
 
   function refreshCaptcha() {
     setCaptchaChallenge(createCaptchaChallenge())
@@ -2199,6 +2238,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess }: A
       eyebrow="MelodyVow"
       active="account"
       onOpenModal={onOpenModal}
+      authSession={authSession}
       hideHero
     >
       <section className="auth-layout">
@@ -2308,6 +2348,10 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess }: A
 }
 
 function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }: AccountPageProps) {
+  if (!authSession?.email) {
+    return <Navigate to={withLocale(locale, '/auth')} replace />
+  }
+
   const menuItems = locale === 'zh'
     ? ['继续创作', '收藏夹', '最近生成', '账号设置', '帮助支持']
     : ['Continue', 'Favorites', 'Recent Generations', 'Account Settings', 'Support']

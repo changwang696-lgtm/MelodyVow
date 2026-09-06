@@ -244,6 +244,52 @@ function pickPreferredAudioUrl(...values) {
   return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || candidates[0] || ''
 }
 
+function getObjectValue(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function buildSunoCallbackPayload(req) {
+  const queryPayload = getObjectValue(req.query)
+  const bodyPayload = getObjectValue(req.body)
+  const nestedQuery = {
+    ...getObjectValue(bodyPayload.queryStringParameters),
+    ...getObjectValue(bodyPayload.query),
+    ...getObjectValue(bodyPayload.params),
+  }
+
+  return {
+    ...queryPayload,
+    ...nestedQuery,
+    ...bodyPayload,
+  }
+}
+
+function handleSunoCallback(req, res) {
+  const payload = buildSunoCallbackPayload(req)
+  const taskId = String(
+    pickFirstDefined(
+      payload?.taskId,
+      payload?.task_id,
+      payload?.data?.taskId,
+      payload?.data?.task_id,
+    ) || '',
+  ).trim()
+
+  if (!taskId) {
+    res.status(400).json({ ok: false, message: '缺少 taskId。' })
+    return
+  }
+
+  const jobId = sunoTaskToJob.get(taskId)
+  if (!jobId) {
+    res.json({ ok: true })
+    return
+  }
+
+  applySunoStatus(jobId, payload)
+  res.json({ ok: true })
+}
+
 function reportDebugEvent(event) {
   let debugServerUrl = 'http://127.0.0.1:7777/event'
   let debugSessionId = 'suno-expired-url'
@@ -1026,31 +1072,8 @@ app.get('/api/songs/:songId/download', async (req, res) => {
   res.redirect(302, sourceUrl)
 })
 
-app.post('/api/suno/callback', (req, res) => {
-  const payload = req.body && typeof req.body === 'object' ? req.body : {}
-  const taskId = String(
-    pickFirstDefined(
-      payload?.taskId,
-      payload?.task_id,
-      payload?.data?.taskId,
-      payload?.data?.task_id,
-    ) || '',
-  ).trim()
-
-  if (!taskId) {
-    res.status(400).json({ ok: false, message: '缺少 taskId。' })
-    return
-  }
-
-  const jobId = sunoTaskToJob.get(taskId)
-  if (!jobId) {
-    res.json({ ok: true })
-    return
-  }
-
-  applySunoStatus(jobId, payload)
-  res.json({ ok: true })
-})
+app.get('/api/suno/callback', handleSunoCallback)
+app.post('/api/suno/callback', handleSunoCallback)
 
 app.listen(PORT, () => {
   console.log(`MelodyVow API server listening on http://127.0.0.1:${PORT}`)
