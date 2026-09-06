@@ -2168,9 +2168,6 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess }: A
             <button type="button" className="ghost-button compact">
               Google
             </button>
-            <button type="button" className="ghost-button compact">
-              Apple
-            </button>
           </div>
         </article>
       </section>
