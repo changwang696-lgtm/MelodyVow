@@ -463,7 +463,8 @@ function normalizeTracksFromRaw(trackOrTracks) {
       id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
       title: String(track?.title || '').trim(),
       duration: Number(track?.duration || 0) || 0,
-      audioUrl: String(track?.stream_audio_url || track?.audio_url || track?.audioUrl || '').trim(),
+      // Prefer the stable audio URL first. stream_audio_url is often temporary and may expire.
+      audioUrl: String(track?.audio_url || track?.audioUrl || track?.stream_audio_url || '').trim(),
       downloadUrl: String(track?.audio_url || track?.audioUrl || track?.stream_audio_url || '').trim(),
       imageUrl: String(track?.image_url || track?.imageUrl || '').trim(),
       tags: String(track?.tags || '').trim(),
