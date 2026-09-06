@@ -240,6 +240,11 @@ const SONG_HISTORY_KEY = 'melodyvow-song-history'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+
+function apiUrl(path: string) {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
 
 function launchHomepageFireworks() {
   if (typeof window === 'undefined') {
@@ -980,7 +985,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal }: HomePageProps) {
     setIsSubmitting(true)
 
     try {
-      const response = await fetch('/api/generate-song', {
+      const response = await fetch(apiUrl('/api/generate-song'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1586,7 +1591,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   }, [activeJob, displayedTitle, draft, locale, onSaveHistory, primaryTrack])
 
   async function loadJob(currentJobId: string) {
-    const response = await fetch(`/api/jobs/${currentJobId}`)
+    const response = await fetch(apiUrl(`/api/jobs/${currentJobId}`))
     const data = (await response.json()) as SongJob | { message?: string }
 
     if (!response.ok) {
@@ -2339,7 +2344,7 @@ function AdminLoginPage({
     setIsSubmitting(true)
 
     try {
-      const response = await fetch('/api/admin/login', {
+      const response = await fetch(apiUrl('/api/admin/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2446,10 +2451,10 @@ function AdminDashboardPage({
         }
 
         const [overviewRes, songsRes, ordersRes, configRes] = await Promise.all([
-          fetch('/api/admin/overview', { headers }),
-          fetch('/api/admin/songs', { headers }),
-          fetch('/api/admin/orders', { headers }),
-          fetch('/api/admin/config', { headers }),
+          fetch(apiUrl('/api/admin/overview'), { headers }),
+          fetch(apiUrl('/api/admin/songs'), { headers }),
+          fetch(apiUrl('/api/admin/orders'), { headers }),
+          fetch(apiUrl('/api/admin/config'), { headers }),
         ])
 
         const [overviewData, songsData, ordersData, configData] = await Promise.all([
@@ -2506,7 +2511,7 @@ function AdminDashboardPage({
     setError('')
 
     try {
-      const response = await fetch('/api/admin/config', {
+      const response = await fetch(apiUrl('/api/admin/config'), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -2530,7 +2535,7 @@ function AdminDashboardPage({
 
   async function handleSelectSong(songId: string) {
     try {
-      const response = await fetch(`/api/admin/songs/${songId}`, {
+      const response = await fetch(apiUrl(`/api/admin/songs/${songId}`), {
         headers: {
           'x-admin-token': activeSession!.token,
         },
@@ -2547,7 +2552,7 @@ function AdminDashboardPage({
 
   async function handleSelectOrder(orderId: string) {
     try {
-      const response = await fetch(`/api/admin/orders/${orderId}`, {
+      const response = await fetch(apiUrl(`/api/admin/orders/${orderId}`), {
         headers: {
           'x-admin-token': activeSession!.token,
         },
@@ -2568,7 +2573,7 @@ function AdminDashboardPage({
     }
 
     try {
-      const response = await fetch(`/api/admin/orders/${selectedOrder.id}`, {
+      const response = await fetch(apiUrl(`/api/admin/orders/${selectedOrder.id}`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
