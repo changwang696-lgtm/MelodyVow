@@ -244,42 +244,6 @@ function pickPreferredAudioUrl(...values) {
   return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || candidates[0] || ''
 }
 
-function sanitizeDownloadFilename(name) {
-  const base = String(name || 'melodyvow-song')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 80)
-
-  return base || 'melodyvow-song'
-}
-
-function guessAudioExtension(sourceUrl, contentType) {
-  const normalizedType = String(contentType || '').toLowerCase()
-  if (normalizedType.includes('mpeg') || normalizedType.includes('mp3')) {
-    return 'mp3'
-  }
-  if (normalizedType.includes('wav')) {
-    return 'wav'
-  }
-  if (normalizedType.includes('x-m4a') || normalizedType.includes('mp4')) {
-    return 'm4a'
-  }
-  if (normalizedType.includes('ogg')) {
-    return 'ogg'
-  }
-
-  const pathname = (() => {
-    try {
-      return new URL(String(sourceUrl || '')).pathname
-    } catch {
-      return ''
-    }
-  })()
-  const matched = pathname.match(/\.([a-z0-9]{2,5})$/i)
-  return matched?.[1]?.toLowerCase() || 'mp3'
-}
-
 function reportDebugEvent(event) {
   let debugServerUrl = 'http://127.0.0.1:7777/event'
   let debugSessionId = 'suno-expired-url'
@@ -1046,7 +1010,6 @@ app.get('/api/songs/:songId/download', async (req, res) => {
   const songId = String(req.params.songId || '').trim()
   const job = jobs.get(songId)
   const storedSong = adminData.songs.find((item) => item.id === songId)
-  const title = job?.title || storedSong?.title || 'MelodyVow Song'
   const sourceUrl = pickPreferredAudioUrl(
     job?.tracks?.[0]?.downloadUrl,
     storedSong?.downloadUrl,
@@ -1059,27 +1022,8 @@ app.get('/api/songs/:songId/download', async (req, res) => {
     return
   }
 
-  try {
-    const upstream = await fetch(sourceUrl)
-    if (!upstream.ok) {
-      throw new Error(`音频源响应异常: ${upstream.status}`)
-    }
-
-    const contentType = upstream.headers.get('content-type') || 'audio/mpeg'
-    const extension = guessAudioExtension(sourceUrl, contentType)
-    const filename = `${sanitizeDownloadFilename(title)}.${extension}`
-    const buffer = Buffer.from(await upstream.arrayBuffer())
-
-    res.setHeader('Content-Type', contentType)
-    res.setHeader('Content-Length', String(buffer.length))
-    res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`)
-    res.end(buffer)
-  } catch (error) {
-    res.status(502).json({
-      message: error instanceof Error ? error.message : '音频下载失败，请稍后再试。',
-    })
-  }
+  res.setHeader('Cache-Control', 'no-store')
+  res.redirect(302, sourceUrl)
 })
 
 app.post('/api/suno/callback', (req, res) => {
