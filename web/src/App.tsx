@@ -279,13 +279,17 @@ function pickPreferredPlayableUrl(...values: Array<string | undefined>) {
   return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || ''
 }
 
+function getSongDownloadUrl(songId: string) {
+  return apiUrl(`/api/songs/${encodeURIComponent(songId)}/download`)
+}
+
 function sanitizeHistoryItem(item: HistoryItem) {
-  const playbackUrl = pickPreferredPlayableUrl(item.downloadUrl, item.audioUrl)
+  const playbackUrl = pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
 
   return {
     ...item,
     audioUrl: playbackUrl,
-    downloadUrl: playbackUrl,
+    downloadUrl: item.downloadUrl || playbackUrl,
   }
 }
 
@@ -1652,7 +1656,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   const jobId = params.get('job')
   const activeJob = jobId ? job : null
   const primaryTrack = activeJob?.tracks[0] ?? null
-  const primaryTrackPlaybackUrl = primaryTrack?.downloadUrl || primaryTrack?.audioUrl || ''
+  const primaryTrackPlaybackUrl = primaryTrack?.audioUrl || primaryTrack?.downloadUrl || ''
   const duration = primaryTrack?.duration ?? 0
   const displayedTitle = activeJob?.title ?? 'MelodyVow'
   const displayedLyrics = activeJob?.lyrics
@@ -1962,15 +1966,17 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
                   msg: '[DEBUG] User clicked preview download button',
                   data: {
                     jobId: activeJob?.id || '',
-                    chosenUrl: primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '',
+                    chosenUrl: activeJob?.id ? getSongDownloadUrl(activeJob.id) : '',
                     audioUrl: primaryTrack?.audioUrl || '',
                     downloadUrl: primaryTrack?.downloadUrl || '',
                   },
                 })
                 // #endregion
-                window.open(primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '', '_blank', 'noopener,noreferrer')
+                if (activeJob?.id) {
+                  window.open(getSongDownloadUrl(activeJob.id), '_blank', 'noopener,noreferrer')
+                }
               }}
-              disabled={!primaryTrackPlaybackUrl}
+              disabled={!primaryTrackPlaybackUrl || !activeJob?.id}
             >
               ♡
             </button>
@@ -2420,14 +2426,14 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
                     msg: '[DEBUG] User clicked account history download button',
                     data: {
                       itemId: item.id,
-                      chosenUrl: item.downloadUrl || item.audioUrl || '',
+                      chosenUrl: getSongDownloadUrl(item.id),
                       audioUrl: item.audioUrl || '',
                       downloadUrl: item.downloadUrl || '',
                     },
                   })
                   // #endregion
                   if (item.downloadUrl || item.audioUrl) {
-                    window.open(item.downloadUrl || item.audioUrl || '', '_blank', 'noopener,noreferrer')
+                    window.open(getSongDownloadUrl(item.id), '_blank', 'noopener,noreferrer')
                     return
                   }
 
@@ -2844,9 +2850,9 @@ function AdminDashboardPage({
                       <button
                         type="button"
                         className="primary-button compact"
-                        onClick={() => window.open(selectedSong.downloadUrl || selectedSong.audioUrl || '', '_blank', 'noopener,noreferrer')}
+                        onClick={() => window.open(getSongDownloadUrl(selectedSong.id), '_blank', 'noopener,noreferrer')}
                       >
-                        试听音频
+                        下载音频
                       </button>
                     ) : null}
                   </div>
