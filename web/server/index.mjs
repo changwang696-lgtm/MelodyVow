@@ -241,7 +241,7 @@ function pickPreferredAudioUrl(...values) {
     .map((value) => String(value || '').trim())
     .filter(Boolean)
 
-  return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || candidates[0] || ''
+  return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || ''
 }
 
 function getObjectValue(value) {
@@ -614,14 +614,12 @@ function normalizeTracksFromRaw(trackOrTracks) {
         track?.audioUrl,
         track?.download_url,
         track?.downloadUrl,
-        track?.stream_audio_url,
       )
       const downloadUrl = pickPreferredAudioUrl(
         track?.download_url,
         track?.downloadUrl,
         track?.audio_url,
         track?.audioUrl,
-        track?.stream_audio_url,
       )
 
       return {
@@ -651,8 +649,6 @@ function getNormalizedTaskState(payload) {
     payload?.downloadUrl,
     payload?.audio_url,
     payload?.audioUrl,
-    data?.stream_audio_url,
-    payload?.stream_audio_url,
   )
   const state = String(pickFirstDefined(data?.state, payload?.state) || '').trim().toLowerCase()
 
