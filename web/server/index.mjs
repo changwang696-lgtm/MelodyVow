@@ -140,6 +140,8 @@ function syncJobToAdminData(job) {
     job.tracks?.[0]?.downloadUrl,
     job.tracks?.[0]?.audioUrl,
   )
+  const sourceAudioUrl = pickPreferredAudioUrl(job.tracks?.[0]?.sourceAudioUrl)
+  const sourceDownloadUrl = pickPreferredAudioUrl(job.tracks?.[0]?.sourceDownloadUrl)
   const entry = {
     id: job.id,
     title: job.title || `${job.input.groom} & ${job.input.bride}`,
@@ -153,6 +155,8 @@ function syncJobToAdminData(job) {
     updatedAt: job.updatedAt,
     audioUrl: playbackUrl,
     downloadUrl,
+    sourceAudioUrl,
+    sourceDownloadUrl,
     lyricSnippet: String(job.lyrics || '').slice(0, 160),
     lyrics: job.lyrics || '',
     error: job.error || '',
@@ -175,8 +179,12 @@ function syncJobToAdminData(job) {
       trackCount: Array.isArray(job.tracks) ? job.tracks.length : 0,
       firstTrackAudioUrl: job.tracks?.[0]?.audioUrl || '',
       firstTrackDownloadUrl: job.tracks?.[0]?.downloadUrl || '',
+      firstTrackSourceAudioUrl: job.tracks?.[0]?.sourceAudioUrl || '',
+      firstTrackSourceDownloadUrl: job.tracks?.[0]?.sourceDownloadUrl || '',
       persistedAudioUrl: entry.audioUrl,
       persistedDownloadUrl: entry.downloadUrl,
+      persistedSourceAudioUrl: entry.sourceAudioUrl,
+      persistedSourceDownloadUrl: entry.sourceDownloadUrl,
       email: entry.email,
     },
   })
@@ -418,6 +426,8 @@ function mapSongToMemberHistory(song) {
     action: '下载音频',
     audioUrl: playbackUrl,
     downloadUrl,
+    sourceAudioUrl: pickPreferredAudioUrl(song.sourceAudioUrl, song.audioUrl),
+    sourceDownloadUrl: pickPreferredAudioUrl(song.sourceDownloadUrl, song.downloadUrl),
     createdAt: song.updatedAt || song.createdAt,
     languageLabel: song.languageLabel || '',
     styleLabel: song.styleLabel || '',
@@ -609,18 +619,10 @@ function normalizeTracksFromRaw(trackOrTracks) {
 
   return array
     .map((track) => {
-      const playbackUrl = pickPreferredAudioUrl(
-        track?.audio_url,
-        track?.audioUrl,
-        track?.download_url,
-        track?.downloadUrl,
-      )
-      const downloadUrl = pickPreferredAudioUrl(
-        track?.download_url,
-        track?.downloadUrl,
-        track?.audio_url,
-        track?.audioUrl,
-      )
+      const sourceAudioUrl = pickPreferredAudioUrl(track?.audio_url, track?.audioUrl)
+      const sourceDownloadUrl = pickPreferredAudioUrl(track?.download_url, track?.downloadUrl)
+      const playbackUrl = pickPreferredAudioUrl(sourceAudioUrl, sourceDownloadUrl)
+      const downloadUrl = pickPreferredAudioUrl(sourceDownloadUrl, sourceAudioUrl)
 
       return {
         id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
@@ -628,6 +630,8 @@ function normalizeTracksFromRaw(trackOrTracks) {
         duration: Number(track?.duration || 0) || 0,
         audioUrl: playbackUrl,
         downloadUrl,
+        sourceAudioUrl,
+        sourceDownloadUrl,
         imageUrl: String(track?.image_url || track?.imageUrl || '').trim(),
         tags: String(track?.tags || '').trim(),
         prompt: String(track?.prompt || track?.text || track?.lyrics || '').trim(),
