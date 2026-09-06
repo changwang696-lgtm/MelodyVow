@@ -1557,6 +1557,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   const jobId = params.get('job')
   const activeJob = jobId ? job : null
   const primaryTrack = activeJob?.tracks[0] ?? null
+  const primaryTrackPlaybackUrl = primaryTrack?.downloadUrl || primaryTrack?.audioUrl || ''
   const duration = primaryTrack?.duration ?? 0
   const displayedTitle = activeJob?.title ?? 'MelodyVow'
   const displayedLyrics = activeJob?.lyrics
@@ -1581,14 +1582,14 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
       ),
       status: copy(locale, { zh: '已生成', en: 'Ready' }),
       action: copy(locale, { zh: '播放', en: 'Play' }),
-      audioUrl: primaryTrack.audioUrl,
+      audioUrl: primaryTrackPlaybackUrl,
       createdAt: activeJob.updatedAt,
       languageLabel: draft.languageLabel,
       styleLabel: getStyleLabel(locale, draft.style),
       vocalLabel: getVocalLabel(locale, draft.vocal),
       lyricSnippet: summarizeStoryText(activeJob.lyrics ?? '', ''),
     })
-  }, [activeJob, displayedTitle, draft, locale, onSaveHistory, primaryTrack])
+  }, [activeJob, displayedTitle, draft, locale, onSaveHistory, primaryTrack, primaryTrackPlaybackUrl])
 
   async function loadJob(currentJobId: string) {
     const response = await fetch(apiUrl(`/api/jobs/${currentJobId}`))
@@ -1652,11 +1653,11 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   useEffect(() => {
     const audio = audioRef.current
 
-    if (!audio || !primaryTrack?.audioUrl) {
+    if (!audio || !primaryTrackPlaybackUrl) {
       return
     }
 
-    audio.src = primaryTrack.audioUrl
+    audio.src = primaryTrackPlaybackUrl
     audio.load()
 
     const tryAutoplay = async () => {
@@ -1680,7 +1681,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
     }
 
     void tryAutoplay()
-  }, [locale, primaryTrack?.audioUrl])
+  }, [locale, primaryTrackPlaybackUrl])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -1714,7 +1715,7 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   function togglePlayback() {
     const audio = audioRef.current
 
-    if (!audio || !primaryTrack?.audioUrl) {
+    if (!audio || !primaryTrackPlaybackUrl) {
       return
     }
 
@@ -1821,29 +1822,29 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
               max="100"
               value={progress}
               onChange={(event) => updateProgress(Number(event.target.value))}
-              disabled={!primaryTrack?.audioUrl}
+              disabled={!primaryTrackPlaybackUrl}
             />
             <span>{formatDuration(duration)}</span>
           </div>
 
           <div className="player-controls">
-            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!primaryTrack?.audioUrl}>
+            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!primaryTrackPlaybackUrl}>
               ↺
             </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!primaryTrack?.audioUrl}>
+            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!primaryTrackPlaybackUrl}>
               ⏮
             </button>
-            <button type="button" className="play-button" onClick={togglePlayback} disabled={!primaryTrack?.audioUrl}>
+            <button type="button" className="play-button" onClick={togglePlayback} disabled={!primaryTrackPlaybackUrl}>
               {playing ? '❚❚' : '▶'}
             </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!primaryTrack?.audioUrl}>
+            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!primaryTrackPlaybackUrl}>
               ⏭
             </button>
             <button
               type="button"
               className="icon-button"
               onClick={() => window.open(primaryTrack?.downloadUrl || primaryTrack?.audioUrl || '', '_blank', 'noopener,noreferrer')}
-              disabled={!primaryTrack?.audioUrl}
+              disabled={!primaryTrackPlaybackUrl}
             >
               ♡
             </button>
