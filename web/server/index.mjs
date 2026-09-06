@@ -135,6 +135,7 @@ function syncJobToAdminData(job) {
     id: job.id,
     title: job.title || `${job.input.groom} & ${job.input.bride}`,
     couple: `${job.input.groom} & ${job.input.bride}`,
+    email: job.input.userEmail || '',
     languageLabel: job.input.languageLabel,
     styleLabel: job.input.styleLabel || job.input.style,
     vocalLabel: job.input.vocalLabel,
@@ -142,6 +143,7 @@ function syncJobToAdminData(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     audioUrl: job.tracks?.[0]?.audioUrl || '',
+    downloadUrl: job.tracks?.[0]?.downloadUrl || job.tracks?.[0]?.audioUrl || '',
     lyricSnippet: String(job.lyrics || '').slice(0, 160),
     lyrics: job.lyrics || '',
     error: job.error || '',
@@ -261,6 +263,7 @@ function updateJob(jobId, patch) {
 function validateGenerateInput(body) {
   const groom = typeof body.groom === 'string' ? body.groom.trim() : ''
   const bride = typeof body.bride === 'string' ? body.bride.trim() : ''
+  const userEmail = typeof body.userEmail === 'string' ? body.userEmail.trim().toLowerCase() : ''
   const occasion = body.occasion === 'proposal' ? 'proposal' : 'wedding'
   const style = typeof body.style === 'string' ? body.style.trim() : ''
   const styleLabel = typeof body.styleLabel === 'string' ? body.styleLabel.trim() : ''
@@ -279,6 +282,7 @@ function validateGenerateInput(body) {
   return {
     groom,
     bride,
+    userEmail,
     occasion,
     style,
     styleLabel,
@@ -289,6 +293,23 @@ function validateGenerateInput(body) {
     loveStory,
     meetingStory,
     vowKeywords,
+  }
+}
+
+function mapSongToMemberHistory(song) {
+  return {
+    id: song.id,
+    title: song.title,
+    subtitle: song.couple,
+    status: song.status === 'ready' ? '已生成' : song.status,
+    action: '下载音频',
+    audioUrl: song.audioUrl || '',
+    downloadUrl: song.downloadUrl || song.audioUrl || '',
+    createdAt: song.updatedAt || song.createdAt,
+    languageLabel: song.languageLabel || '',
+    styleLabel: song.styleLabel || '',
+    vocalLabel: song.vocalLabel || '',
+    lyricSnippet: song.lyricSnippet || '',
   }
 }
 
@@ -804,6 +825,22 @@ app.get('/api/jobs/:jobId', (req, res) => {
   }
 
   res.json(job)
+})
+
+app.get('/api/member/songs', (req, res) => {
+  const email = String(req.query?.email || '').trim().toLowerCase()
+
+  if (!email) {
+    res.status(400).json({ message: '缺少会员邮箱。' })
+    return
+  }
+
+  const items = adminData.songs
+    .filter((song) => String(song.email || '').trim().toLowerCase() === email)
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt).getTime() - new Date(left.updatedAt || left.createdAt).getTime())
+    .map(mapSongToMemberHistory)
+
+  res.json({ items })
 })
 
 app.post('/api/suno/callback', (req, res) => {
