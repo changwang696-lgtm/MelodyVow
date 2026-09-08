@@ -137,7 +137,7 @@ function createDefaultAdminData() {
         heartBeans: 5,
         currency: 'CNY',
         badge: '',
-        features: ['5 爱心豆豆', 'AI 歌词', '名字入歌', 'MP3 下载'],
+        features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'],
       },
       {
         id: 'pro',
@@ -146,7 +146,7 @@ function createDefaultAdminData() {
         heartBeans: 15,
         currency: 'CNY',
         badge: '推荐',
-        features: ['15 爱心豆豆', '完整歌词', '婚礼版本', '高清音频'],
+        features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'],
       },
       {
         id: 'premium',
@@ -155,7 +155,7 @@ function createDefaultAdminData() {
         heartBeans: 40,
         currency: 'CNY',
         badge: '',
-        features: ['40 爱心豆豆', '真人演唱', '高级编曲', '双版本混音'],
+        features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'],
       },
     ],
     showcaseTracks: productShowcaseTracks,
@@ -466,7 +466,7 @@ function consumeHeartBeansFromMember(member, amount) {
   }
 
   if (currentBalance < heartBeans) {
-    throw new Error(`爱心豆豆不足：当前剩余 ${currentBalance}，本次需要 ${heartBeans}。`)
+    throw new Error(`订阅服务额度不足：当前剩余 ${currentBalance}，本次需要 ${heartBeans}。`)
   }
 
   const nextMember = {
@@ -1402,7 +1402,7 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
 
   if (currentStatus !== 'paid' && nextStatus === 'paid' && !hasGrantedBefore) {
     if (!nextEmail) {
-      res.status(400).json({ message: '订单缺少会员邮箱，无法发放爱心豆豆。' })
+      res.status(400).json({ message: '订单缺少会员邮箱，无法发放订阅服务额度。' })
       return
     }
 
@@ -1412,19 +1412,19 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
 
   if (currentStatus === 'paid' && (nextStatus === 'cancelled' || nextStatus === 'refunded')) {
     if (!hasGrantedBefore) {
-      res.status(400).json({ message: '当前订单尚未发放爱心豆豆，无需回收。' })
+      res.status(400).json({ message: '当前订单尚未发放订阅服务额度，无需回收。' })
       return
     }
 
     const member = findMemberByEmail(nextEmail)
     if (!member) {
-      res.status(400).json({ message: '会员不存在，无法回收已发放的爱心豆豆。' })
+      res.status(400).json({ message: '会员不存在，无法回收已发放的订阅服务额度。' })
       return
     }
 
     const currentBalance = normalizePositiveNumber(member.heartBeansBalance, 0)
     if (currentBalance < nextHeartBeans) {
-      res.status(400).json({ message: `会员当前仅剩 ${currentBalance} 爱心豆豆，无法回收该订单的 ${nextHeartBeans} 爱心豆豆。` })
+      res.status(400).json({ message: `会员当前仅剩 ${currentBalance} 点服务额度，无法回收该订单的 ${nextHeartBeans} 点服务额度。` })
       return
     }
 
@@ -1476,6 +1476,62 @@ app.get('/api/payment/methods', (_req, res) => {
       description: String(method.description || ''),
     }))
   res.json({ items })
+})
+
+app.post('/api/orders/lookup', (req, res) => {
+  const email = normalizeEmail(req.body?.email)
+  const orderId = String(req.body?.orderId || '').trim()
+  const memberToken = readMemberToken(req)
+  const session = memberToken ? memberSessions.get(memberToken) : null
+  const member = session ? findMemberByEmail(session.email) : null
+  const authenticatedEmail = member && !member.disabled ? normalizeEmail(member.email) : ''
+
+  if (!email) {
+    res.status(400).json({ message: '请输入下单邮箱。' })
+    return
+  }
+
+  if (authenticatedEmail !== email && !orderId) {
+    res.status(400).json({ message: '未登录查询时，请同时填写订单号。' })
+    return
+  }
+
+  const items = adminData.orders
+    .filter((order) => {
+      const orderEmail = normalizeEmail(order.email)
+      if (orderEmail !== email) {
+        return false
+      }
+
+      if (authenticatedEmail === email) {
+        return true
+      }
+
+      return String(order.id || '').trim() === orderId
+    })
+    .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())
+    .map((order) => {
+      const method = adminData.paymentMethods.find((item) => String(item.id || '').trim() === String(order.paymentMethod || '').trim())
+      return {
+        id: String(order.id || '').trim(),
+        plan: String(order.plan || '').trim(),
+        amount: normalizePositiveNumber(order.amount, 0),
+        status: String(order.status || '').trim(),
+        createdAt: String(order.createdAt || '').trim(),
+        paymentMethod: String(method?.name || order.paymentMethod || '').trim(),
+        note: String(order.note || '').trim(),
+      }
+    })
+
+  if (!items.length) {
+    res.status(404).json({ message: '没有找到匹配的订单记录，请确认邮箱和订单号是否正确。' })
+    return
+  }
+
+  res.json({
+    items,
+    authenticated: authenticatedEmail === email,
+  })
 })
 
 app.post('/api/payment/create-order', (req, res) => {
@@ -1799,7 +1855,7 @@ app.post('/api/generate-song', async (req, res) => {
   try {
     debitedMember = consumeHeartBeansFromMember(member, heartBeansPerGeneration)
   } catch (error) {
-    res.status(400).json({ message: error instanceof Error ? error.message : '爱心豆豆不足。' })
+    res.status(400).json({ message: error instanceof Error ? error.message : '订阅服务额度不足。' })
     return
   }
 
