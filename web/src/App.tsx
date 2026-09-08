@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import {
   NavLink,
@@ -103,6 +103,7 @@ type HistoryItem = {
   subtitle: string
   status: string
   action: string
+  variantLabel?: string
   audioUrl?: string
   downloadUrl?: string
   sourceAudioUrl?: string
@@ -150,6 +151,11 @@ type AdminSession = {
 
 type AdminSong = {
   id: string
+  jobId?: string
+  trackId?: string
+  trackIndex?: number
+  trackCount?: number
+  variantLabel?: string
   title: string
   couple: string
   email?: string
@@ -191,9 +197,14 @@ type AdminConfig = {
   sunoProvider: string
   publicBaseUrl: string
   allowSignup: boolean
+  enableChineseSite: boolean
   heartBeansPerGeneration: number
   paypalCheckoutUrl?: string
   notes: string
+}
+
+type PublicSiteConfig = {
+  enableChineseSite: boolean
 }
 
 type PlanItem = {
@@ -228,6 +239,10 @@ type AdminMember = {
   lastAuthAt?: string
   songs?: number
   lastSeenAt?: string
+  lastManualAdjustmentAmount?: number
+  lastManualAdjustmentNote?: string
+  lastManualAdjustmentAt?: string
+  lastManualAdjustmentBy?: string
 }
 
 type LayoutProps = {
@@ -355,6 +370,11 @@ type ShowcaseTrack = {
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
+const PUBLIC_SITE_CONFIG_KEY = 'melodyvow-public-site-config'
+const defaultPublicSiteConfig: PublicSiteConfig = {
+  enableChineseSite: false,
+}
+const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
@@ -404,6 +424,10 @@ function pickPreferredPlayableUrl(...values: Array<string | undefined>) {
 
 function getSongDownloadUrl(songId: string) {
   return apiUrl(`/api/songs/${encodeURIComponent(songId)}/download`)
+}
+
+function buildTrackHistoryId(jobId: string, index: number) {
+  return `${jobId}__track_${index + 1}`
 }
 
 function sanitizeHistoryItem(item: HistoryItem) {
@@ -748,6 +772,30 @@ function loadAdminSession() {
   }
 }
 
+function loadPublicSiteConfig() {
+  if (typeof window === 'undefined') {
+    return defaultPublicSiteConfig
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_SITE_CONFIG_KEY)
+    if (!raw) {
+      return defaultPublicSiteConfig
+    }
+
+    const parsed = JSON.parse(raw)
+    return {
+      enableChineseSite: Boolean(parsed?.enableChineseSite),
+    }
+  } catch {
+    return defaultPublicSiteConfig
+  }
+}
+
+function useSiteConfig() {
+  return useContext(SiteConfigContext)
+}
+
 function createCaptchaChallenge() {
   const left = Math.floor(Math.random() * 8) + 1
   const right = Math.floor(Math.random() * 8) + 1
@@ -772,7 +820,7 @@ function withLocale(locale: Locale, path = '') {
     return path ? `/en${path}` : '/en'
   }
 
-  return path || '/'
+  return path ? `/zh${path}` : '/zh'
 }
 
 function ScrollManager() {
@@ -788,14 +836,14 @@ function ScrollManager() {
 function App() {
   const location = useLocation()
   const [draft, setDraft] = useState<SongDraft>({
-    groom: '浩',
-    bride: '欣',
+    groom: '',
+    bride: '',
     occasion: 'wedding',
-    languageCode: 'zh',
-    languageLabel: 'Chinese Mandarin',
-    style: 'soft_pop',
-    vocal: 'female',
-    vocalLabel: 'Female Vocal',
+    languageCode: '',
+    languageLabel: '',
+    style: '',
+    vocal: '',
+    vocalLabel: '',
     loveStory: '',
     meetingStory: '',
     vowKeywords: '',
@@ -805,9 +853,47 @@ function App() {
   const [songHistory, setSongHistory] = useState<HistoryItem[]>(() => loadSongHistory())
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession())
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => loadAdminSession())
+  const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(() => loadPublicSiteConfig())
+  const [siteConfigReady, setSiteConfigReady] = useState(false)
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
   const activeMemberToken = authSession?.authToken?.trim() || ''
   const activeMemberEmail = authSession?.email?.trim() || ''
+
+  useEffect(() => {
+    let disposed = false
+
+    const loadSiteConfig = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/site-config'))
+        const result = (await readJsonSafe(response)) as PublicSiteConfig | { message?: string }
+        if (!response.ok) {
+          throw new Error('message' in result && result.message ? result.message : '站点配置加载失败。')
+        }
+
+        if (!disposed) {
+          const nextConfig = {
+            enableChineseSite: Boolean((result as PublicSiteConfig).enableChineseSite),
+          }
+          setSiteConfig(nextConfig)
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(PUBLIC_SITE_CONFIG_KEY, JSON.stringify(nextConfig))
+          }
+        }
+      } catch {
+        // Keep the last cached public config when the request fails.
+      } finally {
+        if (!disposed) {
+          setSiteConfigReady(true)
+        }
+      }
+    }
+
+    void loadSiteConfig()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = modalLocale === 'en' ? 'en' : 'zh-CN'
@@ -991,14 +1077,23 @@ function App() {
     setAdminSession(null)
   }
 
+  function renderChineseRoute(fallbackPath: string, element: ReactNode) {
+    return siteConfig.enableChineseSite ? element : <Navigate to={fallbackPath} replace />
+  }
+
+  if (!siteConfigReady) {
+    return <div className="app-loading-shell">Loading MelodyVow...</div>
+  }
+
   return (
-    <>
+    <SiteConfigContext.Provider value={siteConfig}>
       <ScrollManager />
 
       <Routes>
+        <Route path="/" element={<Navigate to="/en" replace />} />
         <Route
-          path="/"
-          element={
+          path="/zh"
+          element={renderChineseRoute('/en', (
             <HomePage
               locale="zh"
               draft={draft}
@@ -1007,25 +1102,25 @@ function App() {
               onLogout={handleLogout}
               authSession={authSession}
             />
-          }
+          ))}
         />
         <Route
-          path="/how-it-works"
-          element={<ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} />}
+          path="/zh/how-it-works"
+          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} />)}
         />
         <Route
-          path="/styles"
-          element={
+          path="/zh/styles"
+          element={renderChineseRoute('/en/styles', (
             <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
-          }
+          ))}
         />
         <Route
-          path="/preview"
-          element={<PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />}
+          path="/zh/preview"
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />)}
         />
         <Route
-          path="/pricing"
-          element={
+          path="/zh/pricing"
+          element={renderChineseRoute('/en/pricing', (
             <PricingPage
               locale="zh"
               selectedPlan={selectedPlan}
@@ -1033,17 +1128,17 @@ function App() {
               authSession={authSession}
               onLogout={handleLogout}
             />
-          }
+          ))}
         />
-        <Route path="/delivery-fulfillment" element={<LegalPage locale="zh" policy="delivery" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/privacy-policy" element={<LegalPage locale="zh" policy="privacy" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/terms-of-service" element={<LegalPage locale="zh" policy="terms" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/refund-policy" element={<LegalPage locale="zh" policy="refund" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/cancellation-policy" element={<LegalPage locale="zh" policy="cancellation" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/find-my-order" element={<LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="delivery" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="privacy" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="terms" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="refund" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="cancellation" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />)} />
         <Route
-          path="/checkout"
-          element={
+          path="/zh/checkout"
+          element={renderChineseRoute('/en/checkout', (
             <CheckoutPage
               locale="zh"
               selectedPlan={selectedPlan}
@@ -1051,11 +1146,11 @@ function App() {
               authSession={authSession}
               onLogout={handleLogout}
             />
-          }
+          ))}
         />
         <Route
-          path="/auth"
-          element={
+          path="/zh/auth"
+          element={renderChineseRoute('/en/auth', (
             <AuthPage
               locale="zh"
               draft={draft}
@@ -1065,11 +1160,11 @@ function App() {
               onLogout={handleLogout}
               authSession={authSession}
             />
-          }
+          ))}
         />
         <Route
-          path="/account"
-          element={
+          path="/zh/account"
+          element={renderChineseRoute('/en/account', (
             <AccountPage
               locale="zh"
               selectedPlan={selectedPlan}
@@ -1078,11 +1173,11 @@ function App() {
               onLogout={handleLogout}
               authSession={authSession}
             />
-          }
+          ))}
         />
         <Route
-          path="/complete"
-          element={
+          path="/zh/complete"
+          element={renderChineseRoute('/en/complete', (
             <CompletePage
               locale="zh"
               draft={draft}
@@ -1090,7 +1185,7 @@ function App() {
               authSession={authSession}
               onLogout={handleLogout}
             />
-          }
+          ))}
         />
         <Route
           path="/admin/login"
@@ -1198,7 +1293,7 @@ function App() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/en" replace />} />
       </Routes>
 
       {modalMessage ? (
@@ -1224,7 +1319,7 @@ function App() {
           </div>
         </div>
       ) : null}
-    </>
+    </SiteConfigContext.Provider>
   )
 }
 
@@ -1242,6 +1337,7 @@ function SiteLayout({
   plainPage = false,
   children,
 }: LayoutProps) {
+  const siteConfig = useSiteConfig()
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1350,19 +1446,21 @@ function SiteLayout({
         </nav>
 
         <div className="header-actions">
-          <button
-            type="button"
-            className="ghost-button locale-switch"
-            onClick={() =>
-              navigate(
-                locale === 'zh'
-                  ? withLocale('en', active === 'home' ? '' : activeToPath(active))
-                  : withLocale('zh', active === 'home' ? '' : activeToPath(active)),
-              )
-            }
-          >
-            {locale === 'zh' ? 'EN' : '中文'}
-          </button>
+          {siteConfig.enableChineseSite ? (
+            <button
+              type="button"
+              className="ghost-button locale-switch"
+              onClick={() =>
+                navigate(
+                  locale === 'zh'
+                    ? withLocale('en', active === 'home' ? '' : activeToPath(active))
+                    : withLocale('zh', active === 'home' ? '' : activeToPath(active)),
+                )
+              }
+            >
+              {locale === 'zh' ? 'EN' : '中文'}
+            </button>
+          ) : null}
           {currentAuthSession?.email ? (
             <div className="member-menu" ref={memberMenuRef}>
               <button
@@ -1526,10 +1624,28 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
   const [submitError, setSubmitError] = useState('')
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
+  const missingFields = [
+    !draft.groom.trim() ? copy(locale, { zh: '新郎姓名', en: 'groom name' }) : '',
+    !draft.bride.trim() ? copy(locale, { zh: '新娘姓名', en: 'bride name' }) : '',
+    !draft.loveStory.trim() ? copy(locale, { zh: '爱情故事', en: 'love story' }) : '',
+    !draft.languageCode.trim() ? copy(locale, { zh: '歌曲语言', en: 'song language' }) : '',
+    !draft.style.trim() ? copy(locale, { zh: '曲风偏好', en: 'music style' }) : '',
+    !draft.vocal.trim() ? copy(locale, { zh: '歌唱声音', en: 'singing voice' }) : '',
+  ].filter(Boolean)
+  const isHomeFormValid = missingFields.length === 0
 
   useEffect(() => launchHomepageFireworks(), [])
 
   async function handleGenerateSong() {
+    if (!isHomeFormValid) {
+      const message = copy(locale, {
+        zh: `请先完整填写并选择：${missingFields.join('、')}。`,
+        en: `Please complete these fields first: ${missingFields.join(', ')}.`,
+      })
+      setSubmitError(message)
+      return
+    }
+
     if (!memberEmail || !memberToken) {
       const message = copy(locale, {
         zh: '请先登录会员后再生成歌曲，这样新生成的歌曲才能自动绑定到你的会员中心。',
@@ -1686,11 +1802,14 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
                     return {
                       ...current,
                       languageCode: event.target.value,
-                      languageLabel: selected?.label ?? current.languageLabel,
+                      languageLabel: selected?.label ?? '',
                     }
                   })
                 }
               >
+                <option value="">
+                  {copy(locale, { zh: '请选择歌曲语言', en: 'Please select a language' })}
+                </option>
                 {songLanguages.map((language) => (
                   <option key={language.code} value={language.code}>
                     {`${language.label} / ${language.nativeLabel}`}
@@ -1705,6 +1824,9 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
                 value={draft.style}
                 onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
               >
+                <option value="">
+                  {copy(locale, { zh: '请选择曲风偏好', en: 'Please select a style' })}
+                </option>
                 {weddingStyleOptions.map((style) => (
                   <option key={style.id} value={style.id}>
                     {locale === 'zh' ? style.zhLabel : style.enLabel}
@@ -1721,10 +1843,13 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
                   setDraft((current) => ({
                     ...current,
                     vocal: event.target.value,
-                    vocalLabel: getVocalLabel(locale, event.target.value),
+                    vocalLabel: event.target.value ? getVocalLabel(locale, event.target.value) : '',
                   }))
                 }
               >
+                <option value="">
+                  {copy(locale, { zh: '请选择歌唱声音', en: 'Please select a voice' })}
+                </option>
                 {vocalOptions.map((vocal) => (
                   <option key={vocal.code} value={vocal.code}>
                     {locale === 'zh' ? vocal.zhLabel : vocal.enLabel}
@@ -1738,13 +1863,21 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
             type="button"
             className="primary-button wide home-phone-submit"
             onClick={() => void handleGenerateSong()}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !isHomeFormValid}
           >
             {isSubmitting
               ? copy(locale, { zh: '正在生成歌词与歌曲...', en: 'Generating lyrics and song...' })
               : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
           </button>
 
+          {!isHomeFormValid ? (
+            <p className="form-hint">
+              {copy(locale, {
+                zh: `请先完成这 6 项：${missingFields.join('、')}。`,
+                en: `Please complete all 6 required fields: ${missingFields.join(', ')}.`,
+              })}
+            </p>
+          ) : null}
           {submitError ? <p className="form-error">{submitError}</p> : null}
         </section>
       )}
@@ -2170,44 +2303,68 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
   const [progress, setProgress] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [autoplayNotice, setAutoplayNotice] = useState('')
+  const [generationHeartbeat, setGenerationHeartbeat] = useState(() => Date.now())
+  const [activeTrackIndex, setActiveTrackIndex] = useState(0)
   const params = new URLSearchParams(location.search)
   const jobId = params.get('job')
   const activeJob = jobId ? job : null
-  const primaryTrack = activeJob?.tracks[0] ?? null
-  const primaryTrackPlaybackUrl = primaryTrack?.audioUrl || primaryTrack?.downloadUrl || ''
-  const duration = primaryTrack?.duration ?? 0
-  const displayedTitle = activeJob?.title ?? 'MelodyVow'
+  const availableTracks = activeJob?.tracks ?? []
+  const safeActiveTrackIndex = availableTracks.length ? Math.min(activeTrackIndex, availableTracks.length - 1) : 0
+  const activeTrack = availableTracks[safeActiveTrackIndex] ?? availableTracks[0] ?? null
+  const activeTrackPlaybackUrl = activeTrack?.audioUrl || activeTrack?.downloadUrl || ''
+  const duration = activeTrack?.duration ?? 0
+  const generationDurationMs = 120000
+  const displayedTitle = activeTrack?.title ?? activeJob?.title ?? 'MelodyVow'
   const displayedLyrics = activeJob?.lyrics
     ?? (locale === 'zh'
       ? 'DeepSeek 生成的歌词会显示在这里。\nSuno 回调完成后，歌曲会自动尝试播放。'
       : 'Lyrics from DeepSeek will appear here.\nOnce Suno finishes the callback, the song will try to autoplay.')
+  const isGenerating = Boolean(activeJob && activeJob.status !== 'ready' && activeJob.status !== 'error')
+  const generationDots = Array.from({ length: 12 }, (_, index) => index)
+  const generationStartedAt = new Date(activeJob?.createdAt || activeJob?.updatedAt || generationHeartbeat).getTime()
+  const safeGenerationStartedAt = Number.isNaN(generationStartedAt) ? generationHeartbeat : generationStartedAt
+  const generationProgress = !activeJob
+    ? 0
+    : activeJob.status === 'ready'
+      ? 100
+      : activeJob.status === 'error'
+        ? 0
+        : Math.min(96, (Math.max(0, generationHeartbeat - safeGenerationStartedAt) / generationDurationMs) * 100)
 
   useEffect(() => {
-    if (!activeJob || activeJob.status !== 'ready' || !primaryTrack) {
+    const tracks = activeJob?.tracks ?? []
+    if (!activeJob || activeJob.status !== 'ready' || !tracks.length) {
       return
     }
 
-    onSaveHistory({
-      id: activeJob.id,
-      title: activeJob.title ?? displayedTitle,
-      subtitle: summarizeStoryText(
-        draft.loveStory || draft.meetingStory,
-        copy(locale, {
-          zh: `${draft.groom} & ${draft.bride} 的婚礼歌`,
-          en: `${draft.groom} & ${draft.bride}'s wedding song`,
-        }),
-      ),
-      status: copy(locale, { zh: '已生成', en: 'Ready' }),
-      action: copy(locale, { zh: '播放', en: 'Play' }),
-      audioUrl: primaryTrackPlaybackUrl,
-      downloadUrl: primaryTrack?.downloadUrl || primaryTrackPlaybackUrl,
-      createdAt: activeJob.updatedAt,
-      languageLabel: draft.languageLabel,
-      styleLabel: getStyleLabel(locale, draft.style),
-      vocalLabel: getVocalLabel(locale, draft.vocal),
-      lyricSnippet: summarizeStoryText(activeJob.lyrics ?? '', ''),
+    tracks.forEach((track, index) => {
+      const variantLabel = copy(locale, {
+        zh: `歌曲 ${index + 1}`,
+        en: `Version ${index + 1}`,
+      })
+      onSaveHistory({
+        id: buildTrackHistoryId(activeJob.id, index),
+        title: track.title || activeJob.title || displayedTitle,
+        subtitle: `${summarizeStoryText(
+          draft.loveStory || draft.meetingStory,
+          copy(locale, {
+            zh: `${draft.groom} & ${draft.bride} 的婚礼歌`,
+            en: `${draft.groom} & ${draft.bride}'s wedding song`,
+          }),
+        )} · ${variantLabel}`,
+        status: copy(locale, { zh: '已生成', en: 'Ready' }),
+        action: copy(locale, { zh: '播放', en: 'Play' }),
+        variantLabel,
+        audioUrl: track.audioUrl || track.downloadUrl || '',
+        downloadUrl: track.downloadUrl || track.audioUrl || '',
+        createdAt: activeJob.updatedAt,
+        languageLabel: draft.languageLabel,
+        styleLabel: getStyleLabel(locale, draft.style),
+        vocalLabel: getVocalLabel(locale, draft.vocal),
+        lyricSnippet: summarizeStoryText(activeJob.lyrics ?? '', ''),
+      })
     })
-  }, [activeJob, displayedTitle, draft, locale, onSaveHistory, primaryTrack, primaryTrackPlaybackUrl])
+  }, [activeJob, displayedTitle, draft, locale, onSaveHistory])
 
   async function loadJob(currentJobId: string) {
     const response = await fetch(apiUrl(`/api/jobs/${currentJobId}`))
@@ -2284,13 +2441,27 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
   }, [activeJob, jobId])
 
   useEffect(() => {
-    const audio = audioRef.current
-
-    if (!audio || !primaryTrackPlaybackUrl) {
+    if (!isGenerating) {
       return
     }
 
-    audio.src = primaryTrackPlaybackUrl
+    const timer = window.setInterval(() => {
+      setGenerationHeartbeat(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [isGenerating])
+
+  useEffect(() => {
+    const audio = audioRef.current
+
+    if (!audio || !activeTrackPlaybackUrl) {
+      return
+    }
+
+    audio.src = activeTrackPlaybackUrl
     audio.load()
 
     const tryAutoplay = async () => {
@@ -2314,7 +2485,7 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
     }
 
     void tryAutoplay()
-  }, [locale, primaryTrackPlaybackUrl])
+  }, [activeTrackPlaybackUrl, locale])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -2348,7 +2519,7 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
   function togglePlayback() {
     const audio = audioRef.current
 
-    if (!audio || !primaryTrackPlaybackUrl) {
+    if (!audio || !activeTrackPlaybackUrl) {
       return
     }
 
@@ -2419,6 +2590,37 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             </div>
           ) : null}
 
+          {activeJob && isGenerating ? (
+            <div className="generation-progress-card" aria-live="polite">
+              <p className="generation-progress-copy">
+                {copy(locale, {
+                  zh: '幸福正在慢慢向着您靠近！',
+                  en: 'Happiness is slowly making its way to you!',
+                })}
+              </p>
+              <div className="generation-progress-track" aria-hidden="true">
+                <div className="generation-progress-dots">
+                  {generationDots.map((dot) => (
+                    <span
+                      key={dot}
+                      className={`generation-progress-dot ${dot / (generationDots.length - 1) <= generationProgress / 100 ? 'active' : ''}`}
+                    />
+                  ))}
+                </div>
+                <img
+                  className="generation-progress-heart"
+                  src={pinkHeartImage}
+                  alt=""
+                  style={{ left: `calc(${generationProgress}% - 12px)` }}
+                />
+              </div>
+              <div className="generation-progress-meta">
+                <span>{copy(locale, { zh: '歌曲生成中', en: 'Generating song' })}</span>
+                <span>{`${Math.round(generationProgress)}%`}</span>
+              </div>
+            </div>
+          ) : null}
+
           {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           {!jobId ? (
@@ -2449,6 +2651,24 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             </div>
           </div>
 
+          {availableTracks.length > 1 ? (
+            <div className="preview-track-switcher">
+              {availableTracks.map((track, index) => (
+                <button
+                  key={track.id || buildTrackHistoryId(activeJob?.id || 'job', index)}
+                  type="button"
+                  className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
+                  onClick={() => setActiveTrackIndex(index)}
+                >
+                  {copy(locale, {
+                    zh: `歌曲 ${index + 1}`,
+                    en: `Version ${index + 1}`,
+                  })}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <div className="player-progress">
             <span>{formatDuration(currentTime)}</span>
             <input
@@ -2457,22 +2677,22 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
               max="100"
               value={progress}
               onChange={(event) => updateProgress(Number(event.target.value))}
-              disabled={!primaryTrackPlaybackUrl}
+              disabled={!activeTrackPlaybackUrl}
             />
             <span>{formatDuration(duration)}</span>
           </div>
 
           <div className="player-controls">
-            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!primaryTrackPlaybackUrl}>
+            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackPlaybackUrl}>
               ↺
             </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!primaryTrackPlaybackUrl}>
+            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackPlaybackUrl}>
               ⏮
             </button>
-            <button type="button" className="play-button" onClick={togglePlayback} disabled={!primaryTrackPlaybackUrl}>
+            <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackPlaybackUrl}>
               {playing ? '❚❚' : '▶'}
             </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!primaryTrackPlaybackUrl}>
+            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackPlaybackUrl}>
               ⏭
             </button>
             <button
@@ -2486,17 +2706,17 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
                   msg: '[DEBUG] User clicked preview download button',
                   data: {
                     jobId: activeJob?.id || '',
-                    chosenUrl: activeJob?.id ? getSongDownloadUrl(activeJob.id) : '',
-                    audioUrl: primaryTrack?.audioUrl || '',
-                    downloadUrl: primaryTrack?.downloadUrl || '',
+                    chosenUrl: activeTrack ? getSongDownloadUrl(buildTrackHistoryId(activeJob?.id || '', activeTrackIndex)) : '',
+                    audioUrl: activeTrack?.audioUrl || '',
+                    downloadUrl: activeTrack?.downloadUrl || '',
                   },
                 })
                 // #endregion
-                if (activeJob?.id) {
-                  window.open(getSongDownloadUrl(activeJob.id), '_blank', 'noopener,noreferrer')
+                if (activeJob?.id && activeTrack) {
+                  window.open(getSongDownloadUrl(buildTrackHistoryId(activeJob.id, activeTrackIndex)), '_blank', 'noopener,noreferrer')
                 }
               }}
-              disabled={!primaryTrackPlaybackUrl || !activeJob?.id}
+              disabled={!activeTrackPlaybackUrl || !activeJob?.id}
             >
               ♡
             </button>
@@ -2523,6 +2743,9 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             <li>{copy(locale, { zh: `语言：${draft.languageLabel}`, en: `Language: ${draft.languageLabel}` })}</li>
             <li>{copy(locale, { zh: `曲风：${getStyleLabel(locale, draft.style)}`, en: `Style: ${getStyleLabel(locale, draft.style)}` })}</li>
             <li>{copy(locale, { zh: `声音：${getVocalLabel(locale, draft.vocal)}`, en: `Voice: ${getVocalLabel(locale, draft.vocal)}` })}</li>
+            {availableTracks.length > 1 ? (
+              <li>{copy(locale, { zh: `当前歌曲：第 ${safeActiveTrackIndex + 1} 首 / 共 ${availableTracks.length} 首`, en: `Current track: ${safeActiveTrackIndex + 1} / ${availableTracks.length}` })}</li>
+            ) : null}
             <li>
               {activeJob
                 ? copy(locale, { zh: `状态：${getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled)}`, en: `Status: ${getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled)}` })
@@ -2533,9 +2756,9 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
           <button
             type="button"
             className="primary-button wide"
-            onClick={() => navigate(primaryTrackPlaybackUrl ? withLocale(locale, '/complete') : withLocale(locale))}
+            onClick={() => navigate(activeTrackPlaybackUrl ? withLocale(locale, '/complete') : withLocale(locale))}
           >
-            {primaryTrackPlaybackUrl
+            {activeTrackPlaybackUrl
               ? copy(locale, { zh: '查看下载页', en: 'Open Download Page' })
               : copy(locale, { zh: '返回继续填写', en: 'Back to Homepage' })}
           </button>
@@ -3161,6 +3384,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                 <p className="account-song-subtitle">{item.subtitle}</p>
                 <div className="account-song-meta">
                   <span>{item.status}</span>
+                  {item.variantLabel ? <span>{item.variantLabel}</span> : null}
                   {item.languageLabel ? <span>{item.languageLabel}</span> : null}
                   {item.styleLabel ? <span>{item.styleLabel}</span> : null}
                 </div>
@@ -3308,6 +3532,9 @@ function AdminDashboardPage({
   const [songs, setSongs] = useState<AdminSong[]>([])
   const [members, setMembers] = useState<AdminMember[]>([])
   const [selectedMember, setSelectedMember] = useState<AdminMember | null>(null)
+  const [memberSearch, setMemberSearch] = useState('')
+  const [manualTopupAmount, setManualTopupAmount] = useState('0')
+  const [manualTopupNote, setManualTopupNote] = useState('')
   const [orders, setOrders] = useState<AdminOrder[]>([])
   const [selectedSong, setSelectedSong] = useState<AdminSong | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null)
@@ -3319,6 +3546,7 @@ function AdminDashboardPage({
     sunoProvider: '',
     publicBaseUrl: '',
     allowSignup: true,
+    enableChineseSite: false,
     heartBeansPerGeneration: 1,
     paypalCheckoutUrl: '',
     notes: '',
@@ -3516,6 +3744,21 @@ function AdminDashboardPage({
       return
     }
 
+    const topupAmount = Math.max(0, Number(manualTopupAmount || 0))
+    const currentBalance = Number(selectedMember.heartBeansBalance ?? 0)
+    const manualNote = manualTopupNote.trim()
+    const nextMemberPayload: AdminMember = {
+      ...selectedMember,
+      heartBeansBalance: currentBalance + topupAmount,
+    }
+
+    if (topupAmount > 0 || manualNote) {
+      nextMemberPayload.lastManualAdjustmentAmount = topupAmount
+      nextMemberPayload.lastManualAdjustmentNote = manualNote
+      nextMemberPayload.lastManualAdjustmentAt = new Date().toISOString()
+      nextMemberPayload.lastManualAdjustmentBy = activeSession?.profile.username || 'admin'
+    }
+
     try {
       const response = await fetch(apiUrl(`/api/admin/members/${encodeURIComponent(selectedMember.email)}`), {
         method: 'PATCH',
@@ -3523,7 +3766,7 @@ function AdminDashboardPage({
           'Content-Type': 'application/json',
           'x-admin-token': activeSession!.token,
         },
-        body: JSON.stringify(selectedMember),
+        body: JSON.stringify(nextMemberPayload),
       })
       const result = (await readJsonSafe(response)) as AdminMember | { message?: string }
       if (!response.ok) {
@@ -3533,6 +3776,8 @@ function AdminDashboardPage({
       const saved = result as AdminMember
       setSelectedMember(saved)
       setMembers((current) => current.map((item) => (item.email === saved.email ? { ...item, ...saved } : item)))
+      setManualTopupAmount('0')
+      setManualTopupNote('')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '会员信息保存失败。')
     }
@@ -3655,6 +3900,31 @@ function AdminDashboardPage({
     { key: 'config', label: '配置' },
   ] as const
 
+  const filteredMembers = members.filter((item) => {
+    const keyword = memberSearch.trim().toLowerCase()
+    if (!keyword) {
+      return true
+    }
+
+    return [item.email, item.plan, item.disabled ? 'disabled' : 'active']
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword))
+  })
+
+  const selectedMemberOrders = selectedMember
+    ? orders
+        .filter((item) => String(item.email || '').trim().toLowerCase() === selectedMember.email.toLowerCase())
+        .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())
+    : []
+  const selectedMemberPaidOrders = selectedMemberOrders.filter((item) => item.status === 'paid')
+  const selectedMemberSongs = selectedMember
+    ? songs
+        .filter((item) => String(item.email || '').trim().toLowerCase() === selectedMember.email.toLowerCase())
+        .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime())
+    : []
+  const successfulSongCount = selectedMemberSongs.filter((item) => item.status === 'ready').length
+  const failedSongCount = selectedMemberSongs.filter((item) => item.status === 'error').length
+
   return (
     <div className="admin-shell">
       <header className="admin-header glass-card">
@@ -3714,26 +3984,40 @@ function AdminDashboardPage({
 
           {!loading && tab === 'members' ? (
             <section className="admin-detail-layout">
-              <section className="admin-table glass-card">
+              <section className="admin-table glass-card admin-members-table">
                 <div className="admin-table-head">
                   <strong>会员管理</strong>
-                  <span>{members.length} 条</span>
+                  <span>{filteredMembers.length} / {members.length} 条</span>
                 </div>
+                <label className="field admin-member-search">
+                  <span>搜索会员</span>
+                  <input
+                    value={memberSearch}
+                    onChange={(event) => setMemberSearch(event.target.value)}
+                    placeholder="按邮箱、套餐或状态筛选"
+                  />
+                </label>
                 <div className="admin-table-list">
-                  {members.map((item) => (
+                  {filteredMembers.map((item) => (
                     <button
                       key={item.email}
                       type="button"
-                      className="admin-table-row admin-select-row"
-                      onClick={() => setSelectedMember(item)}
+                      className={`admin-table-row admin-select-row admin-member-row ${selectedMember?.email === item.email ? 'is-active' : ''}`}
+                      onClick={() => {
+                        setSelectedMember(item)
+                        setManualTopupAmount('0')
+                        setManualTopupNote('')
+                      }}
                     >
-                      <div>
+                      <div className="admin-member-row-main">
                         <h3>{item.email}</h3>
-                        <p>{item.plan || '-'} · {item.heartBeansBalance ?? 0} 点服务额度</p>
+                        <p>{item.plan || '未设置套餐'}</p>
                       </div>
-                      <div>{typeof item.songs === 'number' ? item.songs : '-'}</div>
-                      <div>{item.disabled ? 'disabled' : 'active'}</div>
-                      <div>{item.lastSeenAt ? new Date(item.lastSeenAt).toLocaleDateString('zh-CN') : '-'}</div>
+                      <div className="admin-member-row-meta">
+                        <span className="soft-pill">{item.heartBeansBalance ?? 0} 点</span>
+                        <span className="soft-pill">{typeof item.songs === 'number' ? `${item.songs} 首` : '0 首'}</span>
+                        <span className={`soft-pill ${item.disabled ? '' : 'accent'}`}>{item.disabled ? '禁用' : '正常'}</span>
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -3746,32 +4030,72 @@ function AdminDashboardPage({
                 </div>
                 {selectedMember ? (
                   <div className="admin-detail-stack">
-                    <label className="field">
-                      <span>Email</span>
-                      <input value={selectedMember.email} readOnly />
-                    </label>
-                    <label className="field">
-                      <span>套餐</span>
-                      <select
-                        value={selectedMember.plan || ''}
-                        onChange={(event) => setSelectedMember((current) => current ? { ...current, plan: event.target.value } : current)}
-                      >
-                        <option value="">未设置</option>
-                        {plans.map((plan) => (
-                          <option key={plan.id} value={plan.name}>
-                            {plan.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>服务额度余额</span>
-                      <input
-                        type="number"
-                        value={selectedMember.heartBeansBalance ?? 0}
-                        onChange={(event) => setSelectedMember((current) => current ? { ...current, heartBeansBalance: Number(event.target.value) } : current)}
-                      />
-                    </label>
+                    <section className="admin-member-summary-grid">
+                      <article className="admin-mini-card">
+                        <span>当前套餐</span>
+                        <strong>{selectedMember.plan || '未设置'}</strong>
+                      </article>
+                      <article className="admin-mini-card">
+                        <span>服务额度余额</span>
+                        <strong>{selectedMember.heartBeansBalance ?? 0}</strong>
+                      </article>
+                      <article className="admin-mini-card">
+                        <span>生成成功</span>
+                        <strong>{successfulSongCount}</strong>
+                      </article>
+                      <article className="admin-mini-card">
+                        <span>生成失败</span>
+                        <strong>{failedSongCount}</strong>
+                      </article>
+                    </section>
+
+                    <section className="admin-member-edit-grid">
+                      <label className="field">
+                        <span>Email</span>
+                        <input value={selectedMember.email} readOnly />
+                      </label>
+                      <label className="field">
+                        <span>套餐</span>
+                        <select
+                          value={selectedMember.plan || ''}
+                          onChange={(event) => setSelectedMember((current) => current ? { ...current, plan: event.target.value } : current)}
+                        >
+                          <option value="">未设置</option>
+                          {plans.map((plan) => (
+                            <option key={plan.id} value={plan.name}>
+                              {plan.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>服务额度余额</span>
+                        <input
+                          type="number"
+                          value={selectedMember.heartBeansBalance ?? 0}
+                          onChange={(event) => setSelectedMember((current) => current ? { ...current, heartBeansBalance: Number(event.target.value) } : current)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>手动补服务额度</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={manualTopupAmount}
+                          onChange={(event) => setManualTopupAmount(event.target.value)}
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>补额度备注</span>
+                        <textarea
+                          value={manualTopupNote}
+                          onChange={(event) => setManualTopupNote(event.target.value)}
+                          rows={3}
+                          placeholder="例如：售后补发、人工赠送、测试补偿"
+                        />
+                      </label>
+                    </section>
+
                     <label className="admin-switch">
                       <input
                         type="checkbox"
@@ -3780,6 +4104,72 @@ function AdminDashboardPage({
                       />
                       <span>禁用会员</span>
                     </label>
+
+                    <section className="admin-member-insight-grid">
+                      <article className="glass-card admin-inline-card">
+                        <div className="admin-inline-head">
+                          <strong>购买套餐信息</strong>
+                          <span>{selectedMemberPaidOrders.length} 笔</span>
+                        </div>
+                        <div className="admin-inline-list">
+                          {selectedMemberOrders.length ? selectedMemberOrders.slice(0, 4).map((item) => (
+                            <div key={item.id} className="admin-inline-row">
+                              <div>
+                                <strong>{item.plan || '未命名套餐'}</strong>
+                                <p>{item.id} · ¥{item.amount}</p>
+                              </div>
+                              <div className="admin-inline-meta">
+                                <span className={`soft-pill ${item.status === 'paid' ? 'accent' : ''}`}>{item.status}</span>
+                                <span>{item.createdAt ? new Date(item.createdAt).toLocaleDateString('zh-CN') : '-'}</span>
+                              </div>
+                            </div>
+                          )) : <p className="empty-state compact">还没有订单记录。</p>}
+                        </div>
+                      </article>
+
+                      <article className="glass-card admin-inline-card">
+                        <div className="admin-inline-head">
+                          <strong>后台手动补额度信息</strong>
+                          <span>{selectedMember.lastManualAdjustmentAt ? '最近一次' : '暂无'}</span>
+                        </div>
+                        <div className="admin-inline-list">
+                          {selectedMember.lastManualAdjustmentAt ? (
+                            <div className="admin-inline-row">
+                              <div>
+                                <strong>+{selectedMember.lastManualAdjustmentAmount ?? 0} 点服务额度</strong>
+                                <p>{selectedMember.lastManualAdjustmentNote || '未填写备注'}</p>
+                              </div>
+                              <div className="admin-inline-meta">
+                                <span>{selectedMember.lastManualAdjustmentBy || activeSession.profile.username}</span>
+                                <span>{new Date(selectedMember.lastManualAdjustmentAt).toLocaleString('zh-CN')}</span>
+                              </div>
+                            </div>
+                          ) : <p className="empty-state compact">还没有手动补额度记录。</p>}
+                        </div>
+                      </article>
+
+                      <article className="glass-card admin-inline-card">
+                        <div className="admin-inline-head">
+                          <strong>生成歌曲信息</strong>
+                          <span>{selectedMemberSongs.length} 条</span>
+                        </div>
+                        <div className="admin-inline-list">
+                          {selectedMemberSongs.length ? selectedMemberSongs.slice(0, 5).map((item) => (
+                            <div key={item.id} className="admin-inline-row">
+                              <div>
+                                <strong>{item.title || item.couple || '未命名歌曲'}</strong>
+                                <p>{item.couple || item.email || '-'}</p>
+                              </div>
+                              <div className="admin-inline-meta">
+                                <span className={`soft-pill ${item.status === 'ready' ? 'accent' : ''}`}>{item.status === 'ready' ? '成功' : item.status === 'error' ? '失败' : item.status}</span>
+                                <span>{new Date(item.updatedAt || item.createdAt).toLocaleDateString('zh-CN')}</span>
+                              </div>
+                            </div>
+                          )) : <p className="empty-state compact">还没有生成歌曲记录。</p>}
+                        </div>
+                      </article>
+                    </section>
+
                     <button type="button" className="primary-button" onClick={() => void handleSaveMember()}>
                       保存会员修改
                     </button>
@@ -3803,7 +4193,7 @@ function AdminDashboardPage({
                     <button key={item.id} type="button" className="admin-table-row admin-select-row" onClick={() => void handleSelectSong(item.id)}>
                       <div>
                         <h3>{item.title}</h3>
-                        <p>{item.couple}</p>
+                        <p>{item.variantLabel ? `${item.couple} · ${item.variantLabel}` : item.couple}</p>
                       </div>
                       <div>{item.languageLabel}</div>
                       <div>{item.styleLabel}</div>
@@ -3836,6 +4226,7 @@ function AdminDashboardPage({
                       />
                     </label>
                     <p><strong>新人：</strong>{selectedSong.couple}</p>
+                    <p><strong>版本：</strong>{selectedSong.variantLabel || '单首歌曲'}</p>
                     <p><strong>语言：</strong>{selectedSong.languageLabel}</p>
                     <p><strong>曲风：</strong>{selectedSong.styleLabel}</p>
                     <p><strong>声音：</strong>{selectedSong.vocalLabel}</p>
@@ -4361,6 +4752,14 @@ function AdminDashboardPage({
                   onChange={(event) => setConfig((current) => ({ ...current, allowSignup: event.target.checked }))}
                 />
                 <span>允许前台用户注册</span>
+              </label>
+              <label className="admin-switch">
+                <input
+                  type="checkbox"
+                  checked={config.enableChineseSite}
+                  onChange={(event) => setConfig((current) => ({ ...current, enableChineseSite: event.target.checked }))}
+                />
+                <span>开启首页中英文切换</span>
               </label>
               <button type="button" className="primary-button" onClick={() => void handleSaveConfig()} disabled={savingConfig}>
                 {savingConfig ? '保存中...' : '保存后台配置'}

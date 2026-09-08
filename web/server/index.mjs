@@ -108,6 +108,10 @@ function normalizePositiveNumber(value, fallback = 0) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
 }
 
+function normalizeBoolean(value, fallback = false) {
+  return typeof value === 'boolean' ? value : fallback
+}
+
 function getDefaultHeartBeansForPlan(input) {
   const key = `${String(input?.id || '').trim()} ${String(input?.name || '').trim()}`.toLowerCase()
 
@@ -205,6 +209,7 @@ function createDefaultAdminData() {
       sunoProvider: 'Suno',
       publicBaseUrl: PUBLIC_BASE_URL || '',
       allowSignup: true,
+      enableChineseSite: false,
       heartBeansPerGeneration: 1,
       paypalCheckoutUrl: '',
       notes: '后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。',
@@ -260,6 +265,8 @@ function loadAdminData() {
       config: {
         ...defaults.config,
         ...(parsed?.config ?? {}),
+        allowSignup: normalizeBoolean(parsed?.config?.allowSignup, defaults.config.allowSignup),
+        enableChineseSite: normalizeBoolean(parsed?.config?.enableChineseSite, defaults.config.enableChineseSite),
         heartBeansPerGeneration: normalizePositiveNumber(parsed?.config?.heartBeansPerGeneration, defaults.config.heartBeansPerGeneration),
       },
     }
@@ -291,19 +298,12 @@ function getPaymentCheckoutUrl(method) {
   return ''
 }
 
+function buildPersistedTrackSongId(jobId, index) {
+  return `${String(jobId || '').trim()}__track_${index + 1}`
+}
+
 function syncJobToAdminData(job) {
-  const playbackUrl = pickPreferredAudioUrl(
-    job.tracks?.[0]?.audioUrl,
-    job.tracks?.[0]?.downloadUrl,
-  )
-  const downloadUrl = pickPreferredAudioUrl(
-    job.tracks?.[0]?.downloadUrl,
-    job.tracks?.[0]?.audioUrl,
-  )
-  const sourceAudioUrl = pickPreferredAudioUrl(job.tracks?.[0]?.sourceAudioUrl)
-  const sourceDownloadUrl = pickPreferredAudioUrl(job.tracks?.[0]?.sourceDownloadUrl)
-  const entry = {
-    id: job.id,
+  const baseEntry = {
     title: job.title || `${job.input.groom} & ${job.input.bride}`,
     couple: `${job.input.groom} & ${job.input.bride}`,
     email: job.input.userEmail || '',
@@ -313,10 +313,6 @@ function syncJobToAdminData(job) {
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
-    audioUrl: playbackUrl,
-    downloadUrl,
-    sourceAudioUrl,
-    sourceDownloadUrl,
     lyricSnippet: String(job.lyrics || '').slice(0, 160),
     lyrics: job.lyrics || '',
     error: job.error || '',
@@ -326,6 +322,35 @@ function syncJobToAdminData(job) {
       vowKeywords: job.input.vowKeywords || '',
     },
   }
+  const trackCount = Array.isArray(job.tracks) ? job.tracks.length : 0
+  const entries = trackCount
+    ? job.tracks.map((track, index) => ({
+        ...baseEntry,
+        id: buildPersistedTrackSongId(job.id, index),
+        jobId: job.id,
+        trackId: String(track?.id || '').trim(),
+        trackIndex: index,
+        trackCount,
+        variantLabel: trackCount > 1 ? `Version ${index + 1}` : '',
+        title: String(track?.title || '').trim() || baseEntry.title,
+        audioUrl: pickPreferredAudioUrl(track?.audioUrl, track?.downloadUrl),
+        downloadUrl: pickPreferredAudioUrl(track?.downloadUrl, track?.audioUrl),
+        sourceAudioUrl: pickPreferredAudioUrl(track?.sourceAudioUrl, track?.audioUrl),
+        sourceDownloadUrl: pickPreferredAudioUrl(track?.sourceDownloadUrl, track?.downloadUrl),
+      }))
+    : [{
+        ...baseEntry,
+        id: job.id,
+        jobId: job.id,
+        trackId: '',
+        trackIndex: 0,
+        trackCount: 0,
+        variantLabel: '',
+        audioUrl: '',
+        downloadUrl: '',
+        sourceAudioUrl: '',
+        sourceDownloadUrl: '',
+      }]
 
   // #region debug-point B:sync-job-admin-data
   reportDebugEvent({
@@ -341,16 +366,20 @@ function syncJobToAdminData(job) {
       firstTrackDownloadUrl: job.tracks?.[0]?.downloadUrl || '',
       firstTrackSourceAudioUrl: job.tracks?.[0]?.sourceAudioUrl || '',
       firstTrackSourceDownloadUrl: job.tracks?.[0]?.sourceDownloadUrl || '',
-      persistedAudioUrl: entry.audioUrl,
-      persistedDownloadUrl: entry.downloadUrl,
-      persistedSourceAudioUrl: entry.sourceAudioUrl,
-      persistedSourceDownloadUrl: entry.sourceDownloadUrl,
-      email: entry.email,
+      persistedEntryCount: entries.length,
+      firstPersistedAudioUrl: entries[0]?.audioUrl || '',
+      firstPersistedDownloadUrl: entries[0]?.downloadUrl || '',
+      firstPersistedSourceAudioUrl: entries[0]?.sourceAudioUrl || '',
+      firstPersistedSourceDownloadUrl: entries[0]?.sourceDownloadUrl || '',
+      email: entries[0]?.email || '',
     },
   })
   // #endregion
 
-  const nextSongs = [entry, ...adminData.songs.filter((item) => item.id !== entry.id)].slice(0, 100)
+  const nextSongs = [
+    ...entries,
+    ...adminData.songs.filter((item) => item.id !== job.id && item.jobId !== job.id),
+  ].slice(0, 100)
   adminData = {
     ...adminData,
     songs: nextSongs,
@@ -772,7 +801,7 @@ function mapSongToMemberHistory(song) {
   return {
     id: song.id,
     title: song.title,
-    subtitle: song.couple,
+    subtitle: song.variantLabel ? `${song.couple} · ${song.variantLabel}` : song.couple,
     status: song.status === 'ready' ? '已生成' : song.status,
     action: '下载音频',
     audioUrl: playbackUrl,
@@ -783,6 +812,7 @@ function mapSongToMemberHistory(song) {
     languageLabel: song.languageLabel || '',
     styleLabel: song.styleLabel || '',
     vocalLabel: song.vocalLabel || '',
+    variantLabel: song.variantLabel || '',
     lyricSnippet: song.lyricSnippet || '',
   }
 }
@@ -1451,11 +1481,19 @@ app.patch('/api/admin/config', requireAdminAuth, (req, res) => {
     config: {
       ...adminData.config,
       ...patch,
+      allowSignup: normalizeBoolean(patch.allowSignup, adminData.config.allowSignup),
+      enableChineseSite: normalizeBoolean(patch.enableChineseSite, adminData.config.enableChineseSite),
       heartBeansPerGeneration: normalizePositiveNumber(patch.heartBeansPerGeneration, adminData.config.heartBeansPerGeneration),
     },
   }
   saveAdminData()
   res.json(adminData.config)
+})
+
+app.get('/api/site-config', (_req, res) => {
+  res.json({
+    enableChineseSite: normalizeBoolean(adminData.config.enableChineseSite, false),
+  })
 })
 
 app.get('/api/plans', (_req, res) => {
@@ -1942,13 +1980,17 @@ app.get('/api/member/songs', requireMemberAuth, (req, res) => {
 
 app.get('/api/songs/:songId/download', async (req, res) => {
   const songId = String(req.params.songId || '').trim()
-  const job = jobs.get(songId)
   const storedSong = adminData.songs.find((item) => item.id === songId)
+  const relatedJobId = String(storedSong?.jobId || songId).trim()
+  const job = jobs.get(relatedJobId)
+  const relatedTrack = Number.isInteger(storedSong?.trackIndex)
+    ? job?.tracks?.[storedSong.trackIndex]
+    : job?.tracks?.[0]
   const sourceUrl = pickPreferredAudioUrl(
-    job?.tracks?.[0]?.downloadUrl,
     storedSong?.downloadUrl,
-    job?.tracks?.[0]?.audioUrl,
     storedSong?.audioUrl,
+    relatedTrack?.downloadUrl,
+    relatedTrack?.audioUrl,
   )
 
   if (!sourceUrl) {

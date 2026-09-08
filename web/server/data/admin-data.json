@@ -27,6 +27,8 @@
     "sunoProvider": "Suno",
     "publicBaseUrl": "",
     "allowSignup": true,
+    "enableChineseSite": false,
+    "heartBeansPerGeneration": 1,
     "notes": "后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。"
   }
 }
