@@ -29,6 +29,49 @@ const jobs = new Map()
 const sunoTaskToJob = new Map()
 const activePolls = new Set()
 const adminSessions = new Map()
+const memberSessions = new Map()
+
+const productShowcaseTracks = [
+  {
+    id: 'showcase-soft-pop',
+    title: { zh: '爱的誓言', en: 'Our Vow in Melody' },
+    meta: {
+      zh: '婚礼样片 · 温柔流行 · 女声',
+      en: 'Wedding Demo · Soft Pop · Female Vocal',
+    },
+    blurb: {
+      zh: '适合婚礼开场与仪式入场，旋律温柔、情绪稳定。',
+      en: 'Ideal for ceremony entrances with a soft and uplifting mood.',
+    },
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+  },
+  {
+    id: 'showcase-cinematic',
+    title: { zh: '星光告白', en: 'Starlight Promise' },
+    meta: {
+      zh: '求婚样片 · 电影配乐感 · 男女对唱',
+      en: 'Proposal Demo · Cinematic · Duet',
+    },
+    blurb: {
+      zh: '更适合求婚视频和情绪递进场景，层次感更强。',
+      en: 'Built for proposal videos with a more cinematic emotional arc.',
+    },
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+  },
+  {
+    id: 'showcase-folk',
+    title: { zh: '把名字写成歌', en: 'Your Names as a Song' },
+    meta: {
+      zh: '婚礼样片 · 清新民谣 · 男声',
+      en: 'Wedding Demo · Folk Pop · Male Vocal',
+    },
+    blurb: {
+      zh: '适合婚礼暖场、成长回顾和轻松互动环节播放。',
+      en: 'A lighter folk-pop demo for warm-up moments and story recaps.',
+    },
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+  },
+]
 
 app.use(express.json({ limit: '1mb' }))
 app.use(express.urlencoded({ extended: true }))
@@ -43,8 +86,8 @@ app.use((req, res, next) => {
   }
 
   res.setHeader('Vary', 'Origin')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-token, x-member-token')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
 
   if (req.method === 'OPTIONS') {
     res.status(204).end()
@@ -60,14 +103,85 @@ function ensureDataDir() {
   }
 }
 
+function normalizePositiveNumber(value, fallback = 0) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function getDefaultHeartBeansForPlan(input) {
+  const key = `${String(input?.id || '').trim()} ${String(input?.name || '').trim()}`.toLowerCase()
+
+  if (key.includes('starter')) {
+    return 5
+  }
+
+  if (key.includes('premium')) {
+    return 40
+  }
+
+  if (key.includes('pro')) {
+    return 15
+  }
+
+  return 0
+}
+
 function createDefaultAdminData() {
   return {
+    members: [],
+    plans: [
+      {
+        id: 'starter',
+        name: 'Starter',
+        price: 89,
+        heartBeans: 5,
+        currency: 'CNY',
+        badge: '',
+        features: ['5 爱心豆豆', 'AI 歌词', '名字入歌', 'MP3 下载'],
+      },
+      {
+        id: 'pro',
+        name: 'Pro',
+        price: 199,
+        heartBeans: 15,
+        currency: 'CNY',
+        badge: '推荐',
+        features: ['15 爱心豆豆', '完整歌词', '婚礼版本', '高清音频'],
+      },
+      {
+        id: 'premium',
+        name: 'Premium',
+        price: 499,
+        heartBeans: 40,
+        currency: 'CNY',
+        badge: '',
+        features: ['40 爱心豆豆', '真人演唱', '高级编曲', '双版本混音'],
+      },
+    ],
+    showcaseTracks: productShowcaseTracks,
+    paymentMethods: [
+      {
+        id: 'paypal',
+        name: 'PayPal',
+        enabled: true,
+        envKey: 'PAYPAL_CHECKOUT_URL',
+        description: 'PayPal Checkout',
+      },
+      {
+        id: 'alipay',
+        name: '支付宝',
+        enabled: false,
+        envKey: 'ALIPAY_CHECKOUT_URL',
+        description: 'Alipay payment link',
+      },
+    ],
     orders: [
       {
         id: 'ord-demo-001',
         couple: 'Hao & Xin',
         plan: 'Pro',
         amount: 199,
+        heartBeans: 15,
         status: 'paid',
         email: 'hao@example.com',
         note: '婚礼开场曲，需提前交付伴奏版。',
@@ -78,6 +192,7 @@ function createDefaultAdminData() {
         couple: 'Luna & Ethan',
         plan: 'Premium',
         amount: 499,
+        heartBeans: 40,
         status: 'processing',
         email: 'luna@example.com',
         note: '需要双语版本和 first dance mix。',
@@ -90,6 +205,8 @@ function createDefaultAdminData() {
       sunoProvider: 'Suno',
       publicBaseUrl: PUBLIC_BASE_URL || '',
       allowSignup: true,
+      heartBeansPerGeneration: 1,
+      paypalCheckoutUrl: '',
       notes: '后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。',
     },
   }
@@ -97,9 +214,10 @@ function createDefaultAdminData() {
 
 function loadAdminData() {
   ensureDataDir()
+  const defaults = createDefaultAdminData()
 
   if (!fs.existsSync(ADMIN_DATA_FILE)) {
-    const initialData = createDefaultAdminData()
+    const initialData = defaults
     fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(initialData, null, 2), 'utf8')
     return initialData
   }
@@ -108,17 +226,45 @@ function loadAdminData() {
     const raw = fs.readFileSync(ADMIN_DATA_FILE, 'utf8')
     const parsed = JSON.parse(raw)
     return {
-      ...createDefaultAdminData(),
+      ...defaults,
       ...parsed,
-      orders: Array.isArray(parsed?.orders) ? parsed.orders : createDefaultAdminData().orders,
+      members: Array.isArray(parsed?.members)
+        ? parsed.members.map((member) => ({
+            ...member,
+            email: String(member?.email || '').trim().toLowerCase(),
+            heartBeansBalance: normalizePositiveNumber(member?.heartBeansBalance, 0),
+          }))
+        : [],
+      plans: Array.isArray(parsed?.plans) && parsed.plans.length
+        ? parsed.plans.map((plan) => ({
+            ...plan,
+            id: String(plan?.id || ''),
+            name: String(plan?.name || ''),
+            price: normalizePositiveNumber(plan?.price, 0),
+            heartBeans: normalizePositiveNumber(plan?.heartBeans, getDefaultHeartBeansForPlan(plan)),
+            currency: String(plan?.currency || 'CNY'),
+            badge: String(plan?.badge || ''),
+            features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
+          }))
+        : defaults.plans,
+      showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
+      paymentMethods: Array.isArray(parsed?.paymentMethods) && parsed.paymentMethods.length ? parsed.paymentMethods : defaults.paymentMethods,
+      orders: Array.isArray(parsed?.orders)
+        ? parsed.orders.map((order) => ({
+            ...order,
+            heartBeans: normalizePositiveNumber(order?.heartBeans, getDefaultHeartBeansForPlan({ name: order?.plan })),
+            heartBeansGrantedAt: String(order?.heartBeansGrantedAt || '').trim(),
+          }))
+        : createDefaultAdminData().orders,
       songs: Array.isArray(parsed?.songs) ? parsed.songs : [],
       config: {
-        ...createDefaultAdminData().config,
+        ...defaults.config,
         ...(parsed?.config ?? {}),
+        heartBeansPerGeneration: normalizePositiveNumber(parsed?.config?.heartBeansPerGeneration, defaults.config.heartBeansPerGeneration),
       },
     }
   } catch {
-    const fallback = createDefaultAdminData()
+    const fallback = defaults
     fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(fallback, null, 2), 'utf8')
     return fallback
   }
@@ -129,6 +275,20 @@ let adminData = loadAdminData()
 function saveAdminData() {
   ensureDataDir()
   fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(adminData, null, 2), 'utf8')
+}
+
+function getPaymentCheckoutUrl(method) {
+  const envKey = String(method?.envKey || '').trim()
+  const fromEnv = envKey ? String(process.env[envKey] || '').trim() : ''
+  if (fromEnv) {
+    return fromEnv
+  }
+
+  if (String(method?.id || '').trim() === 'paypal') {
+    return String(adminData.config.paypalCheckoutUrl || '').trim()
+  }
+
+  return ''
 }
 
 function syncJobToAdminData(job) {
@@ -218,6 +378,197 @@ function requireAdminAuth(req, res, next) {
 
   req.adminSession = session
   next()
+}
+
+function readMemberToken(req) {
+  const header = req.headers['x-member-token']
+  if (Array.isArray(header)) {
+    return header[0] || ''
+  }
+
+  return String(header || '')
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function findMemberByEmail(email) {
+  const normalizedEmail = normalizeEmail(email)
+  return adminData.members.find((item) => normalizeEmail(item.email) === normalizedEmail) || null
+}
+
+function upsertMember(member) {
+  const nextMember = {
+    ...member,
+    email: normalizeEmail(member.email),
+    heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0),
+  }
+
+  adminData = {
+    ...adminData,
+    members: [nextMember, ...adminData.members.filter((item) => normalizeEmail(item.email) !== normalizeEmail(member.email))].slice(0, 5000),
+  }
+  saveAdminData()
+}
+
+function awardHeartBeansToMember(email, amount, planName) {
+  const normalizedEmail = normalizeEmail(email)
+  const heartBeans = normalizePositiveNumber(amount, 0)
+
+  if (!normalizedEmail || heartBeans <= 0) {
+    return null
+  }
+
+  const member = findMemberByEmail(normalizedEmail) || { email: normalizedEmail }
+  const nextMember = {
+    ...member,
+    email: normalizedEmail,
+    plan: String(planName || member.plan || '').trim(),
+    heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0) + heartBeans,
+    updatedAt: nowIso(),
+  }
+
+  upsertMember(nextMember)
+  return nextMember
+}
+
+function refundHeartBeansToMember(member, amount) {
+  const heartBeans = normalizePositiveNumber(amount, 0)
+  const currentBalance = normalizePositiveNumber(member?.heartBeansBalance, 0)
+
+  if (heartBeans <= 0) {
+    return {
+      ...member,
+      heartBeansBalance: currentBalance,
+    }
+  }
+
+  const nextMember = {
+    ...member,
+    heartBeansBalance: currentBalance + heartBeans,
+    updatedAt: nowIso(),
+  }
+
+  upsertMember(nextMember)
+  return nextMember
+}
+
+function consumeHeartBeansFromMember(member, amount) {
+  const heartBeans = normalizePositiveNumber(amount, 0)
+  const currentBalance = normalizePositiveNumber(member?.heartBeansBalance, 0)
+
+  if (heartBeans <= 0) {
+    return {
+      ...member,
+      heartBeansBalance: currentBalance,
+    }
+  }
+
+  if (currentBalance < heartBeans) {
+    throw new Error(`爱心豆豆不足：当前剩余 ${currentBalance}，本次需要 ${heartBeans}。`)
+  }
+
+  const nextMember = {
+    ...member,
+    heartBeansBalance: currentBalance - heartBeans,
+    updatedAt: nowIso(),
+  }
+
+  upsertMember(nextMember)
+  return nextMember
+}
+
+function createPasswordHash(password) {
+  const salt = crypto.randomBytes(16).toString('hex')
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${hash}`
+}
+
+function verifyPassword(password, storedValue) {
+  const raw = String(storedValue || '').trim()
+  if (!raw) {
+    return false
+  }
+
+  const [salt, storedHash] = raw.split(':')
+  if (!salt || !storedHash) {
+    return false
+  }
+
+  const storedBuffer = Buffer.from(storedHash, 'hex')
+  const derivedBuffer = crypto.scryptSync(password, salt, storedBuffer.length)
+  return storedBuffer.length === derivedBuffer.length && crypto.timingSafeEqual(storedBuffer, derivedBuffer)
+}
+
+function createMemberSession(member) {
+  const token = crypto.randomUUID()
+  const session = {
+    token,
+    email: normalizeEmail(member.email),
+    createdAt: nowIso(),
+  }
+
+  memberSessions.set(token, session)
+
+  return {
+    token,
+    profile: {
+      email: normalizeEmail(member.email),
+      partnerName: String(member.partnerName || '').trim(),
+      plan: String(member.plan || '').trim(),
+      heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0),
+      lastAuthAt: member.lastAuthAt || nowIso(),
+      avatarUrl: String(member.avatarUrl || '').trim(),
+    },
+  }
+}
+
+function requireMemberAuth(req, res, next) {
+  const token = readMemberToken(req)
+  const session = token ? memberSessions.get(token) : null
+
+  if (!session) {
+    res.status(401).json({ message: '会员登录已失效，请重新登录。' })
+    return
+  }
+
+  const member = findMemberByEmail(session.email)
+  if (!member) {
+    memberSessions.delete(token)
+    res.status(401).json({ message: '会员账号不存在，请重新登录。' })
+    return
+  }
+
+  if (member.disabled) {
+    memberSessions.delete(token)
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  req.memberSession = session
+  req.member = member
+  next()
+}
+
+function getValidMemberFromToken(token) {
+  const session = token ? memberSessions.get(token) : null
+  if (!session) {
+    return { session: null, member: null, error: '请先登录会员后再继续。', status: 401 }
+  }
+
+  const member = findMemberByEmail(session.email)
+  if (!member) {
+    memberSessions.delete(token)
+    return { session: null, member: null, error: '会员账号不存在，请重新登录。', status: 401 }
+  }
+
+  if (member.disabled) {
+    memberSessions.delete(token)
+    return { session: null, member: null, error: '该会员账号已被禁用，请联系管理员。', status: 403 }
+  }
+
+  return { session, member, error: '', status: 200 }
 }
 
 function nowIso() {
@@ -854,6 +1205,120 @@ app.post('/api/admin/login', (req, res) => {
   })
 })
 
+app.post('/api/member/signup', (req, res) => {
+  if (!adminData.config.allowSignup) {
+    res.status(403).json({ message: '当前暂未开放会员注册，请联系管理员。' })
+    return
+  }
+
+  const email = normalizeEmail(req.body?.email)
+  const password = String(req.body?.password || '').trim()
+  const partnerName = String(req.body?.partnerName || '').trim()
+
+  if (!email) {
+    res.status(400).json({ message: '请先填写邮箱。' })
+    return
+  }
+
+  if (!password) {
+    res.status(400).json({ message: '请先填写密码。' })
+    return
+  }
+
+  if (password.length < 6) {
+    res.status(400).json({ message: '密码至少需要 6 位。' })
+    return
+  }
+
+  if (!partnerName) {
+    res.status(400).json({ message: '注册时请填写伴侣姓名。' })
+    return
+  }
+
+  const existing = findMemberByEmail(email)
+  if (existing?.disabled) {
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  if (existing?.passwordHash) {
+    res.status(409).json({ message: '该邮箱已注册，请直接登录。' })
+    return
+  }
+
+  const timestamp = nowIso()
+  const nextMember = {
+    ...existing,
+    email,
+    partnerName,
+    passwordHash: createPasswordHash(password),
+    heartBeansBalance: normalizePositiveNumber(existing?.heartBeansBalance, 0),
+    createdAt: existing?.createdAt || timestamp,
+    updatedAt: timestamp,
+    lastAuthAt: timestamp,
+    disabled: false,
+  }
+
+  upsertMember(nextMember)
+  res.status(existing ? 200 : 201).json(createMemberSession(nextMember))
+})
+
+app.post('/api/member/login', (req, res) => {
+  const email = normalizeEmail(req.body?.email)
+  const password = String(req.body?.password || '').trim()
+
+  if (!email) {
+    res.status(400).json({ message: '请先填写邮箱。' })
+    return
+  }
+
+  if (!password) {
+    res.status(400).json({ message: '请先填写密码。' })
+    return
+  }
+
+  const member = findMemberByEmail(email)
+  if (!member || !String(member.passwordHash || '').trim()) {
+    res.status(401).json({ message: '该邮箱尚未注册，请先创建会员账户。' })
+    return
+  }
+
+  if (member.disabled) {
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  if (!verifyPassword(password, member.passwordHash)) {
+    res.status(401).json({ message: '邮箱或密码错误。' })
+    return
+  }
+
+  const nextMember = {
+    ...member,
+    lastAuthAt: nowIso(),
+    updatedAt: nowIso(),
+  }
+
+  upsertMember(nextMember)
+  res.json(createMemberSession(nextMember))
+})
+
+app.get('/api/member/session', requireMemberAuth, (req, res) => {
+  res.json({
+    email: normalizeEmail(req.member.email),
+    partnerName: String(req.member.partnerName || '').trim(),
+    plan: String(req.member.plan || '').trim(),
+    heartBeansBalance: normalizePositiveNumber(req.member.heartBeansBalance, 0),
+    lastAuthAt: req.member.lastAuthAt || '',
+    avatarUrl: String(req.member.avatarUrl || '').trim(),
+  })
+})
+
+app.post('/api/member/logout', requireMemberAuth, (req, res) => {
+  memberSessions.delete(readMemberToken(req))
+  res.json({ ok: true })
+})
+
 app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
   const songs = adminData.songs
   const orders = adminData.orders
@@ -920,10 +1385,51 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
 
   const current = adminData.orders[orderIndex]
   const patch = req.body && typeof req.body === 'object' ? req.body : {}
+  const nextStatus = String(patch.status || current.status || '').trim()
+  const currentStatus = String(current.status || '').trim()
+  const nextEmail = normalizeEmail(patch.email || current.email)
+  const nextPlan = String(patch.plan || current.plan || '').trim()
+  const nextHeartBeans = normalizePositiveNumber(patch.heartBeans, normalizePositiveNumber(current.heartBeans, getDefaultHeartBeansForPlan({ name: nextPlan })))
   const next = {
     ...current,
     ...patch,
     id: current.id,
+    email: nextEmail,
+    plan: nextPlan,
+    heartBeans: nextHeartBeans,
+  }
+  const hasGrantedBefore = Boolean(String(current.heartBeansGrantedAt || '').trim())
+
+  if (currentStatus !== 'paid' && nextStatus === 'paid' && !hasGrantedBefore) {
+    if (!nextEmail) {
+      res.status(400).json({ message: '订单缺少会员邮箱，无法发放爱心豆豆。' })
+      return
+    }
+
+    awardHeartBeansToMember(nextEmail, nextHeartBeans, nextPlan)
+    next.heartBeansGrantedAt = nowIso()
+  }
+
+  if (currentStatus === 'paid' && (nextStatus === 'cancelled' || nextStatus === 'refunded')) {
+    if (!hasGrantedBefore) {
+      res.status(400).json({ message: '当前订单尚未发放爱心豆豆，无需回收。' })
+      return
+    }
+
+    const member = findMemberByEmail(nextEmail)
+    if (!member) {
+      res.status(400).json({ message: '会员不存在，无法回收已发放的爱心豆豆。' })
+      return
+    }
+
+    const currentBalance = normalizePositiveNumber(member.heartBeansBalance, 0)
+    if (currentBalance < nextHeartBeans) {
+      res.status(400).json({ message: `会员当前仅剩 ${currentBalance} 爱心豆豆，无法回收该订单的 ${nextHeartBeans} 爱心豆豆。` })
+      return
+    }
+
+    consumeHeartBeansFromMember(member, nextHeartBeans)
+    next.heartBeansGrantedAt = ''
   }
 
   adminData = {
@@ -939,18 +1445,332 @@ app.get('/api/admin/config', requireAdminAuth, (_req, res) => {
 })
 
 app.patch('/api/admin/config', requireAdminAuth, (req, res) => {
+  const patch = req.body && typeof req.body === 'object' ? req.body : {}
   adminData = {
     ...adminData,
     config: {
       ...adminData.config,
-      ...(req.body && typeof req.body === 'object' ? req.body : {}),
+      ...patch,
+      heartBeansPerGeneration: normalizePositiveNumber(patch.heartBeansPerGeneration, adminData.config.heartBeansPerGeneration),
     },
   }
   saveAdminData()
   res.json(adminData.config)
 })
 
+app.get('/api/plans', (_req, res) => {
+  res.json({ items: adminData.plans })
+})
+
+app.get('/api/showcase/tracks', (_req, res) => {
+  const items = adminData.showcaseTracks.length ? adminData.showcaseTracks : productShowcaseTracks
+  res.json({ items })
+})
+
+app.get('/api/payment/methods', (_req, res) => {
+  const items = adminData.paymentMethods
+    .filter((method) => Boolean(method?.enabled))
+    .map((method) => ({
+      id: String(method.id || ''),
+      name: String(method.name || ''),
+      description: String(method.description || ''),
+    }))
+  res.json({ items })
+})
+
+app.post('/api/payment/create-order', (req, res) => {
+  const planId = String(req.body?.planId || '').trim()
+  const methodId = String(req.body?.methodId || '').trim()
+  const memberToken = readMemberToken(req)
+  const { session: memberSession, error, status } = getValidMemberFromToken(memberToken)
+
+  if (!memberSession) {
+    res.status(status).json({ message: error })
+    return
+  }
+
+  const email = normalizeEmail(memberSession.email)
+  const plan = adminData.plans.find((item) => String(item.id) === planId) || null
+  if (!plan) {
+    res.status(400).json({ message: '套餐不存在。' })
+    return
+  }
+
+  const method = adminData.paymentMethods.find((item) => String(item.id) === methodId && Boolean(item.enabled)) || null
+  if (!method) {
+    res.status(400).json({ message: '支付方式不可用。' })
+    return
+  }
+
+  const checkoutUrl = getPaymentCheckoutUrl(method)
+  if (!checkoutUrl) {
+    res.status(400).json({ message: '该支付方式未配置收款链接。' })
+    return
+  }
+
+  const orderId = `ord-${crypto.randomUUID()}`
+  const nextOrder = {
+    id: orderId,
+    couple: '',
+    plan: plan.name,
+    amount: plan.price,
+    heartBeans: normalizePositiveNumber(plan.heartBeans, getDefaultHeartBeansForPlan(plan)),
+    status: 'pending',
+    email,
+    note: `${method.name} checkout`,
+    paymentMethod: method.id,
+    createdAt: nowIso(),
+  }
+  adminData = {
+    ...adminData,
+    orders: [nextOrder, ...adminData.orders].slice(0, 5000),
+  }
+  saveAdminData()
+  res.json({ orderId, checkoutUrl })
+})
+
+app.get('/api/admin/payment-methods', requireAdminAuth, (_req, res) => {
+  res.json({ items: adminData.paymentMethods })
+})
+
+app.put('/api/admin/payment-methods', requireAdminAuth, (req, res) => {
+  const items = req.body && typeof req.body === 'object' ? req.body.items : null
+  if (!Array.isArray(items)) {
+    res.status(400).json({ message: 'paymentMethods.items 格式不正确。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    paymentMethods: items,
+  }
+  saveAdminData()
+  res.json({ items: adminData.paymentMethods })
+})
+
+app.get('/api/admin/members', requireAdminAuth, (_req, res) => {
+  const lookup = new Map()
+
+  adminData.songs.forEach((song) => {
+    const email = String(song.email || '').trim().toLowerCase()
+    if (!email) {
+      return
+    }
+
+    const existing = lookup.get(email) || { email, plan: '', songs: 0, lastSeenAt: '' }
+    const nextLast = song.updatedAt || song.createdAt || ''
+    const nextLastSeenAt = !existing.lastSeenAt || new Date(nextLast).getTime() > new Date(existing.lastSeenAt).getTime()
+      ? nextLast
+      : existing.lastSeenAt
+
+    lookup.set(email, {
+      ...existing,
+      songs: Number(existing.songs || 0) + 1,
+      lastSeenAt: nextLastSeenAt,
+    })
+  })
+
+  adminData.orders.forEach((order) => {
+    const email = String(order.email || '').trim().toLowerCase()
+    if (!email) {
+      return
+    }
+
+    const existing = lookup.get(email) || { email, plan: '', songs: 0, lastSeenAt: '' }
+    const createdAt = order.createdAt || ''
+    const nextLastSeenAt = !existing.lastSeenAt || (createdAt && new Date(createdAt).getTime() > new Date(existing.lastSeenAt).getTime())
+      ? createdAt
+      : existing.lastSeenAt
+
+    lookup.set(email, {
+      ...existing,
+      plan: order.status === 'paid' ? order.plan || existing.plan || '' : existing.plan || '',
+      lastSeenAt: nextLastSeenAt,
+    })
+  })
+
+  adminData.members.forEach((member) => {
+    const email = String(member.email || '').trim().toLowerCase()
+    if (!email) {
+      return
+    }
+
+    const existing = lookup.get(email) || { email, plan: '', songs: 0, lastSeenAt: '' }
+    lookup.set(email, {
+      ...existing,
+      ...member,
+      email,
+      plan: member.plan || existing.plan || '',
+      lastSeenAt: member.lastAuthAt || existing.lastSeenAt || '',
+    })
+  })
+
+  const items = Array.from(lookup.values())
+    .sort((left, right) => new Date(right.lastSeenAt || 0).getTime() - new Date(left.lastSeenAt || 0).getTime())
+
+  res.json({ items })
+})
+
+app.patch('/api/admin/members/:email', requireAdminAuth, (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase()
+  if (!email) {
+    res.status(400).json({ message: '缺少会员邮箱。' })
+    return
+  }
+
+  const patch = req.body && typeof req.body === 'object' ? req.body : {}
+  const current = adminData.members.find((item) => String(item.email || '').trim().toLowerCase() === email) || { email }
+  const next = {
+    ...current,
+    ...patch,
+    email,
+  }
+
+  adminData = {
+    ...adminData,
+    members: [next, ...adminData.members.filter((item) => String(item.email || '').trim().toLowerCase() !== email)].slice(0, 5000),
+  }
+  saveAdminData()
+  res.json(next)
+})
+
+app.get('/api/admin/plans', requireAdminAuth, (_req, res) => {
+  res.json({ items: adminData.plans })
+})
+
+app.put('/api/admin/plans', requireAdminAuth, (req, res) => {
+  const items = req.body && typeof req.body === 'object' ? req.body.items : null
+  if (!Array.isArray(items)) {
+    res.status(400).json({ message: 'plans.items 格式不正确。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    plans: items,
+  }
+  saveAdminData()
+  res.json({ items: adminData.plans })
+})
+
+app.get('/api/admin/showcase-tracks', requireAdminAuth, (_req, res) => {
+  res.json({ items: adminData.showcaseTracks })
+})
+
+app.put('/api/admin/showcase-tracks', requireAdminAuth, (req, res) => {
+  const items = req.body && typeof req.body === 'object' ? req.body.items : null
+  if (!Array.isArray(items)) {
+    res.status(400).json({ message: 'showcaseTracks.items 格式不正确。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    showcaseTracks: items,
+  }
+  saveAdminData()
+  res.json({ items: adminData.showcaseTracks })
+})
+
+app.patch('/api/admin/songs/:songId', requireAdminAuth, (req, res) => {
+  const songIndex = adminData.songs.findIndex((item) => item.id === req.params.songId)
+  if (songIndex === -1) {
+    res.status(404).json({ message: '歌曲记录不存在。' })
+    return
+  }
+
+  const current = adminData.songs[songIndex]
+  const patch = req.body && typeof req.body === 'object' ? req.body : {}
+  const next = {
+    ...current,
+    ...patch,
+    id: current.id,
+  }
+
+  adminData = {
+    ...adminData,
+    songs: adminData.songs.map((item, index) => (index === songIndex ? next : item)),
+  }
+  saveAdminData()
+  res.json(next)
+})
+
+app.delete('/api/admin/songs/:songId', requireAdminAuth, (req, res) => {
+  const songId = String(req.params.songId || '').trim()
+  const exists = adminData.songs.some((item) => item.id === songId)
+  if (!exists) {
+    res.status(404).json({ message: '歌曲记录不存在。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    songs: adminData.songs.filter((item) => item.id !== songId),
+  }
+  saveAdminData()
+  res.json({ ok: true })
+})
+
+app.post('/api/paypal/create-order', (req, res) => {
+  const planId = String(req.body?.planId || '').trim()
+  const memberToken = readMemberToken(req)
+  const { session: memberSession, error, status } = getValidMemberFromToken(memberToken)
+
+  if (!memberSession) {
+    res.status(status).json({ message: error })
+    return
+  }
+
+  const email = normalizeEmail(memberSession.email)
+  const plan = adminData.plans.find((item) => String(item.id) === planId) || null
+  if (!plan) {
+    res.status(400).json({ message: '套餐不存在。' })
+    return
+  }
+
+  const method = adminData.paymentMethods.find((item) => String(item.id) === 'paypal') || {
+    id: 'paypal',
+    name: 'PayPal',
+    enabled: true,
+    envKey: 'PAYPAL_CHECKOUT_URL',
+    description: 'PayPal Checkout',
+  }
+  const checkoutUrl = getPaymentCheckoutUrl(method)
+  if (!checkoutUrl) {
+    res.status(400).json({ message: '未配置 PayPal 收费链接。' })
+    return
+  }
+
+  const orderId = `ord-${crypto.randomUUID()}`
+  const nextOrder = {
+    id: orderId,
+    couple: '',
+    plan: plan.name,
+    amount: plan.price,
+    heartBeans: normalizePositiveNumber(plan.heartBeans, getDefaultHeartBeansForPlan(plan)),
+    status: 'pending',
+    email,
+    note: 'PayPal checkout',
+    paymentMethod: 'paypal',
+    createdAt: nowIso(),
+  }
+  adminData = {
+    ...adminData,
+    orders: [nextOrder, ...adminData.orders].slice(0, 5000),
+  }
+  saveAdminData()
+  res.json({ orderId, checkoutUrl })
+})
+
 app.post('/api/generate-song', async (req, res) => {
+  const memberToken = readMemberToken(req)
+  const { session: memberSession, member, error, status } = getValidMemberFromToken(memberToken)
+
+  if (!memberSession) {
+    res.status(status).json({ message: error })
+    return
+  }
+
   if (!getDeepSeekKey()) {
     res.status(500).json({ message: '缺少 DEEPSEEK_API_KEY。' })
     return
@@ -964,9 +1784,22 @@ app.post('/api/generate-song', async (req, res) => {
   let input
 
   try {
-    input = validateGenerateInput(req.body)
+    input = validateGenerateInput({
+      ...req.body,
+      userEmail: memberSession.email,
+    })
   } catch (error) {
     res.status(400).json({ message: error instanceof Error ? error.message : '请求参数错误。' })
+    return
+  }
+
+  const heartBeansPerGeneration = normalizePositiveNumber(adminData.config.heartBeansPerGeneration, 1)
+  let debitedMember = null
+
+  try {
+    debitedMember = consumeHeartBeansFromMember(member, heartBeansPerGeneration)
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : '爱心豆豆不足。' })
     return
   }
 
@@ -997,6 +1830,10 @@ app.post('/api/generate-song', async (req, res) => {
       callbackEnabled: Boolean(PUBLIC_BASE_URL),
     })
   } catch (error) {
+    if (debitedMember) {
+      refundHeartBeansToMember(debitedMember, heartBeansPerGeneration)
+    }
+
     updateJob(job.id, {
       status: 'error',
       error: error instanceof Error ? error.message : '生成失败，请稍后再试。',
@@ -1020,13 +1857,8 @@ app.get('/api/jobs/:jobId', (req, res) => {
   res.json(job)
 })
 
-app.get('/api/member/songs', (req, res) => {
-  const email = String(req.query?.email || '').trim().toLowerCase()
-
-  if (!email) {
-    res.status(400).json({ message: '缺少会员邮箱。' })
-    return
-  }
+app.get('/api/member/songs', requireMemberAuth, (req, res) => {
+  const email = normalizeEmail(req.member.email)
 
   const items = adminData.songs
     .filter((song) => String(song.email || '').trim().toLowerCase() === email)

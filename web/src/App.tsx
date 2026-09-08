@@ -7,6 +7,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useSearchParams,
 } from 'react-router-dom'
 import confetti from 'canvas-confetti'
 import './App.css'
@@ -24,6 +25,7 @@ import heroTitleImage from '../images/11.png'
 import phoneDiscImage from '../images/12.png'
 import { songLanguages } from './data/songLanguages'
 import { vocalOptions, weddingStyleOptions } from './data/weddingMusicOptions'
+import { readJsonSafe } from './readJsonSafe'
 
 type Locale = 'zh' | 'en'
 type Occasion = 'wedding' | 'proposal'
@@ -113,12 +115,29 @@ type HistoryItem = {
 }
 
 type AuthSession = {
+  authToken: string
   email: string
   partnerName: string
   plan: string
+  heartBeansBalance?: number
   mode: 'login' | 'signup'
   welcomeMessage: string
   lastAuthAt: string
+  avatarUrl?: string
+}
+
+type MemberProfile = {
+  email: string
+  partnerName: string
+  plan: string
+  heartBeansBalance?: number
+  lastAuthAt: string
+  avatarUrl?: string
+}
+
+type MemberAuthResponse = {
+  token: string
+  profile: MemberProfile
 }
 
 type AdminSession = {
@@ -133,6 +152,7 @@ type AdminSong = {
   id: string
   title: string
   couple: string
+  email?: string
   languageLabel: string
   styleLabel: string
   vocalLabel: string
@@ -158,6 +178,8 @@ type AdminOrder = {
   couple: string
   plan: string
   amount: number
+  heartBeans?: number
+  heartBeansGrantedAt?: string
   status: string
   createdAt: string
   email?: string
@@ -169,7 +191,43 @@ type AdminConfig = {
   sunoProvider: string
   publicBaseUrl: string
   allowSignup: boolean
+  heartBeansPerGeneration: number
+  paypalCheckoutUrl?: string
   notes: string
+}
+
+type PlanItem = {
+  id: string
+  name: string
+  price: number
+  heartBeans?: number
+  currency?: string
+  badge?: string
+  features?: string[]
+}
+
+type PaymentMethod = {
+  id: string
+  name: string
+  description?: string
+}
+
+type PaymentMethodAdmin = {
+  id: string
+  name: string
+  enabled: boolean
+  envKey: string
+  description?: string
+}
+
+type AdminMember = {
+  email: string
+  plan?: string
+  heartBeansBalance?: number
+  disabled?: boolean
+  lastAuthAt?: string
+  songs?: number
+  lastSeenAt?: string
 }
 
 type LayoutProps = {
@@ -179,6 +237,7 @@ type LayoutProps = {
   eyebrow: string
   active: string
   onOpenModal: (message: string) => void
+  onLogout?: () => void
   authSession?: AuthSession | null
   homePanel?: ReactNode
   hideHero?: boolean
@@ -190,6 +249,7 @@ type HomePageProps = {
   draft: SongDraft
   setDraft: Dispatch<SetStateAction<SongDraft>>
   onOpenModal: (message: string) => void
+  onLogout: () => void
   authSession: AuthSession | null
 }
 
@@ -197,18 +257,32 @@ type StylesPageProps = {
   locale: Locale
   draft: SongDraft
   setDraft: Dispatch<SetStateAction<SongDraft>>
+  authSession: AuthSession | null
+  onLogout: () => void
 }
 
 type PreviewPageProps = {
   locale: Locale
   draft: SongDraft
   onSaveHistory: (item: HistoryItem) => void
+  authSession: AuthSession | null
+  onLogout: () => void
 }
 
 type PricingPageProps = {
   locale: Locale
   selectedPlan: string
   setSelectedPlan: Dispatch<SetStateAction<string>>
+  authSession: AuthSession | null
+  onLogout: () => void
+}
+
+type CheckoutPageProps = {
+  locale: Locale
+  selectedPlan: string
+  setSelectedPlan: Dispatch<SetStateAction<string>>
+  authSession: AuthSession | null
+  onLogout: () => void
 }
 
 type AuthPageProps = {
@@ -217,6 +291,7 @@ type AuthPageProps = {
   selectedPlan: string
   onOpenModal: (message: string) => void
   onAuthSuccess: (session: AuthSession) => void
+  onLogout: () => void
   authSession: AuthSession | null
 }
 
@@ -225,6 +300,7 @@ type AccountPageProps = {
   selectedPlan: string
   onOpenModal: (message: string) => void
   history: HistoryItem[]
+  onLogout: () => void
   authSession: AuthSession | null
 }
 
@@ -232,10 +308,14 @@ type CompletePageProps = {
   locale: Locale
   draft: SongDraft
   onOpenModal: (message: string) => void
+  authSession: AuthSession | null
+  onLogout: () => void
 }
 
 type ShowcasePageProps = {
   locale: Locale
+  authSession: AuthSession | null
+  onLogout: () => void
 }
 
 type ShowcaseTrack = {
@@ -256,6 +336,17 @@ const DEBUG_SESSION_ID = 'suno-expired-url'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
+
+function getMemberAuthHeaders(session: AuthSession | null | undefined) {
+  const token = session?.authToken?.trim()
+  const headers: Record<string, string> = {}
+
+  if (token) {
+    headers['x-member-token'] = token
+  }
+
+  return headers
 }
 
 function reportDebugEvent(event: Record<string, unknown>) {
@@ -602,6 +693,8 @@ function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession())
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => loadAdminSession())
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
+  const activeMemberToken = authSession?.authToken?.trim() || ''
+  const activeMemberEmail = authSession?.email?.trim() || ''
 
   useEffect(() => {
     document.documentElement.lang = modalLocale === 'en' ? 'en' : 'zh-CN'
@@ -616,19 +709,26 @@ function App() {
   }, [songHistory])
 
   useEffect(() => {
-    if (!authSession?.email) {
+    if (!activeMemberToken || !activeMemberEmail) {
       return
     }
 
     let disposed = false
-    setSongHistory([])
 
     const loadMemberSongs = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/member/songs?email=${encodeURIComponent(authSession.email)}`))
-        const data = (await response.json()) as { items?: HistoryItem[]; message?: string }
+        const response = await fetch(apiUrl('/api/member/songs'), {
+          headers: {
+            'x-member-token': activeMemberToken,
+          },
+        })
+        const data = (await readJsonSafe(response)) as { items?: HistoryItem[]; message?: string }
 
         if (!response.ok) {
+          if (!disposed && (response.status === 401 || response.status === 403)) {
+            setAuthSession(null)
+            setSongHistory([])
+          }
           throw new Error(data.message || '会员歌单加载失败。')
         }
 
@@ -640,7 +740,7 @@ function App() {
             location: 'web/src/App.tsx:loadMemberSongs',
             msg: '[DEBUG] Frontend loaded member song history',
             data: {
-              email: authSession.email,
+              email: activeMemberEmail,
               itemCount: nextItems.length,
               firstItemId: nextItems[0]?.id || '',
               firstItemAudioUrl: nextItems[0]?.audioUrl || '',
@@ -662,7 +762,62 @@ function App() {
     return () => {
       disposed = true
     }
-  }, [authSession])
+  }, [activeMemberEmail, activeMemberToken])
+
+  useEffect(() => {
+    if (!activeMemberToken) {
+      return
+    }
+
+    let disposed = false
+
+    const syncMemberSession = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/member/session'), {
+          headers: {
+            'x-member-token': activeMemberToken,
+          },
+        })
+        const data = (await readJsonSafe(response)) as Partial<MemberProfile> & { message?: string }
+
+        if (!response.ok) {
+          if (!disposed && (response.status === 401 || response.status === 403)) {
+            setAuthSession(null)
+            setSongHistory([])
+          }
+          return
+        }
+
+        if (!disposed && data.email) {
+          setAuthSession((current) => {
+            if (!current || current.authToken !== activeMemberToken) {
+              return current
+            }
+
+            return {
+              ...current,
+              email: data.email || current.email,
+              partnerName: data.partnerName || current.partnerName,
+              plan: data.plan || current.plan,
+              heartBeansBalance: typeof data.heartBeansBalance === 'number' ? data.heartBeansBalance : current.heartBeansBalance,
+              lastAuthAt: data.lastAuthAt || current.lastAuthAt,
+              avatarUrl: data.avatarUrl || current.avatarUrl,
+            }
+          })
+        }
+      } catch (error) {
+        if (!disposed) {
+          console.error(error)
+        }
+      }
+    }
+
+    void syncMemberSession()
+
+    return () => {
+      disposed = true
+    }
+  }, [activeMemberToken])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -698,7 +853,21 @@ function App() {
   }
 
   function handleAuthSuccess(session: AuthSession) {
+    setSongHistory([])
     setAuthSession(session)
+  }
+
+  function handleLogout() {
+    const currentSession = authSession
+    if (currentSession?.authToken) {
+      void fetch(apiUrl('/api/member/logout'), {
+        method: 'POST',
+        headers: getMemberAuthHeaders(currentSession),
+      }).catch(() => {})
+    }
+
+    setAuthSession(null)
+    setSongHistory([])
   }
 
   function handleAdminLogin(session: AdminSession) {
@@ -722,21 +891,25 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
         />
         <Route
           path="/how-it-works"
-          element={<ShowcasePage locale="zh" />}
+          element={<ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} />}
         />
         <Route
           path="/styles"
           element={
-            <StylesPage locale="zh" draft={draft} setDraft={setDraft} />
+            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
           }
         />
-        <Route path="/preview" element={<PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} />} />
+        <Route
+          path="/preview"
+          element={<PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />}
+        />
         <Route
           path="/pricing"
           element={
@@ -744,6 +917,20 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
+              authSession={authSession}
+              onLogout={handleLogout}
+            />
+          }
+        />
+        <Route
+          path="/checkout"
+          element={
+            <CheckoutPage
+              locale="zh"
+              selectedPlan={selectedPlan}
+              setSelectedPlan={setSelectedPlan}
+              authSession={authSession}
+              onLogout={handleLogout}
             />
           }
         />
@@ -756,6 +943,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
@@ -768,6 +956,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               history={songHistory}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
@@ -779,6 +968,8 @@ function App() {
               locale="zh"
               draft={draft}
               onOpenModal={setModalMessage}
+              authSession={authSession}
+              onLogout={handleLogout}
             />
           }
         />
@@ -799,23 +990,24 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
         />
         <Route
           path="/en/how-it-works"
-          element={<ShowcasePage locale="en" />}
+          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} />}
         />
         <Route
           path="/en/styles"
           element={
-            <StylesPage locale="en" draft={draft} setDraft={setDraft} />
+            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
           }
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} onSaveHistory={saveHistory} />}
+          element={<PreviewPage locale="en" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />}
         />
         <Route
           path="/en/pricing"
@@ -824,6 +1016,20 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
+              authSession={authSession}
+              onLogout={handleLogout}
+            />
+          }
+        />
+        <Route
+          path="/en/checkout"
+          element={
+            <CheckoutPage
+              locale="en"
+              selectedPlan={selectedPlan}
+              setSelectedPlan={setSelectedPlan}
+              authSession={authSession}
+              onLogout={handleLogout}
             />
           }
         />
@@ -836,6 +1042,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
@@ -848,6 +1055,7 @@ function App() {
               selectedPlan={selectedPlan}
               onOpenModal={setModalMessage}
               history={songHistory}
+              onLogout={handleLogout}
               authSession={authSession}
             />
           }
@@ -859,6 +1067,8 @@ function App() {
               locale="en"
               draft={draft}
               onOpenModal={setModalMessage}
+              authSession={authSession}
+              onLogout={handleLogout}
             />
           }
         />
@@ -900,15 +1110,44 @@ function SiteLayout({
   eyebrow,
   active,
   onOpenModal: _onOpenModal,
+  onLogout,
   authSession,
   homePanel,
   hideHero = false,
   children,
 }: LayoutProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [memberMenuOpen, setMemberMenuOpen] = useState(false)
+  const memberMenuRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
   const currentAuthSession = authSession ?? loadAuthSession()
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
+  const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
+  const memberAvatarUrl = currentAuthSession?.avatarUrl?.trim()
+
+  useEffect(() => {
+    setMemberMenuOpen(false)
+  }, [active])
+
+  useEffect(() => {
+    if (!memberMenuOpen) {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!target || !(target instanceof Node)) {
+        return
+      }
+
+      if (memberMenuRef.current && !memberMenuRef.current.contains(target)) {
+        setMemberMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [memberMenuOpen])
 
   const navItems = [
     { key: 'home', label: copy(locale, { zh: '首页', en: 'Home' }), to: withLocale(locale) },
@@ -994,13 +1233,51 @@ function SiteLayout({
           >
             {locale === 'zh' ? 'EN' : '中文'}
           </button>
-          <button
-            type="button"
-            className="primary-button header-cta"
-            onClick={() => navigate(withLocale(locale, '/pricing'))}
-          >
-            {copy(locale, { zh: '升级套餐', en: 'Upgrade' })}
-          </button>
+          {currentAuthSession?.email ? (
+            <div className="member-menu" ref={memberMenuRef}>
+              <button
+                type="button"
+                className="member-avatar-button"
+                onClick={() => setMemberMenuOpen((value) => !value)}
+                aria-label={copy(locale, { zh: '打开会员菜单', en: 'Open member menu' })}
+                aria-haspopup="menu"
+                aria-expanded={memberMenuOpen}
+              >
+                {memberAvatarUrl ? (
+                  <img className="member-avatar-image" src={memberAvatarUrl} alt="" />
+                ) : (
+                  <span className="member-avatar-initial">{memberInitial}</span>
+                )}
+              </button>
+              {memberMenuOpen ? (
+                <div className="member-menu-popover" role="menu">
+                  <button
+                    type="button"
+                    className="member-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setMemberMenuOpen(false)
+                      navigate(withLocale(locale, '/account'))
+                    }}
+                  >
+                    {copy(locale, { zh: '会员中心', en: 'Account' })}
+                  </button>
+                  <button
+                    type="button"
+                    className="member-menu-item danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setMemberMenuOpen(false)
+                      onLogout?.()
+                      navigate(withLocale(locale, '/auth'))
+                    }}
+                  >
+                    {copy(locale, { zh: '退出登录', en: 'Log out' })}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -1087,16 +1364,17 @@ function SiteLayout({
   )
 }
 
-function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePageProps) {
+function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession }: HomePageProps) {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const memberEmail = authSession?.email?.trim() || ''
+  const memberToken = authSession?.authToken?.trim() || ''
 
   useEffect(() => launchHomepageFireworks(), [])
 
   async function handleGenerateSong() {
-    if (!memberEmail) {
+    if (!memberEmail || !memberToken) {
       const message = copy(locale, {
         zh: '请先登录会员后再生成歌曲，这样新生成的歌曲才能自动绑定到你的会员中心。',
         en: 'Please log in before generating a song so it can be saved to your account automatically.',
@@ -1115,6 +1393,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...getMemberAuthHeaders(authSession),
         },
         body: JSON.stringify({
           groom: draft.groom,
@@ -1133,9 +1412,13 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
         }),
       })
 
-      const result = (await response.json()) as { jobId?: string; message?: string }
+      const result = (await readJsonSafe(response)) as { jobId?: string; message?: string }
 
       if (!response.ok || !result.jobId) {
+        if (response.status === 401 || response.status === 403) {
+            onLogout()
+            navigate(withLocale(locale, '/auth'))
+        }
         throw new Error(result.message ?? '生成请求失败，请稍后再试。')
       }
 
@@ -1163,6 +1446,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
       eyebrow="MelodyVow"
       active="home"
       onOpenModal={onOpenModal}
+      onLogout={onLogout}
       authSession={authSession}
       homePanel={(
         <section className="home-phone-shell">
@@ -1305,18 +1589,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, authSession }: HomePag
               : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
           </button>
 
-          <p className="helper-copy">
-            {memberEmail
-              ? copy(locale, {
-                zh: `当前已绑定会员邮箱：${memberEmail}`,
-                en: `Current account email: ${memberEmail}`,
-              })
-              : copy(locale, {
-                zh: '生成歌曲前请先登录会员，避免歌曲无法归档到会员中心。',
-                en: 'Please log in first so your generated songs are saved to your account.',
-              })}
-          </p>
-
           {submitError ? <p className="form-error">{submitError}</p> : null}
         </section>
       )}
@@ -1359,9 +1631,10 @@ function getJobStatusLabel(locale: Locale, status: GenerationStatus, callbackEna
   }
 }
 
-function ShowcasePage({ locale }: ShowcasePageProps) {
+function ShowcasePage({ locale, authSession, onLogout }: ShowcasePageProps) {
   const navigate = useNavigate()
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [tracks, setTracks] = useState<ShowcaseTrack[]>(productShowcaseTracks)
   const [activeTrackId, setActiveTrackId] = useState(productShowcaseTracks[0]?.id ?? '')
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -1369,7 +1642,36 @@ function ShowcasePage({ locale }: ShowcasePageProps) {
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState('')
   const [shouldAutoplay, setShouldAutoplay] = useState(false)
-  const activeTrack = productShowcaseTracks.find((track) => track.id === activeTrackId) ?? productShowcaseTracks[0]
+  const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? tracks[0]
+
+  useEffect(() => {
+    let disposed = false
+
+    async function loadTracks() {
+      try {
+        const response = await fetch(apiUrl('/api/showcase/tracks'))
+        const data = (await response.json()) as { items?: ShowcaseTrack[]; message?: string }
+        if (!response.ok) {
+          throw new Error(data.message || '加载样片失败。')
+        }
+        const items = Array.isArray(data.items) ? data.items : []
+        if (!disposed && items.length) {
+          setTracks(items)
+          setActiveTrackId((current) => (items.some((track) => track.id === current) ? current : items[0].id))
+        }
+      } catch (loadError) {
+        if (!disposed) {
+          setError(loadError instanceof Error ? loadError.message : '加载样片失败。')
+        }
+      }
+    }
+
+    void loadTracks()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -1534,6 +1836,8 @@ function ShowcasePage({ locale }: ShowcasePageProps) {
       eyebrow="MelodyVow"
       active="how"
       onOpenModal={() => undefined}
+      onLogout={onLogout}
+      authSession={authSession}
       hideHero
     >
       <section className="showcase-layout">
@@ -1619,7 +1923,7 @@ function ShowcasePage({ locale }: ShowcasePageProps) {
           </article>
 
           <div className="showcase-track-list">
-            {productShowcaseTracks.map((track, index) => {
+            {tracks.map((track, index) => {
               const isActive = track.id === activeTrackId
 
               return (
@@ -1648,7 +1952,9 @@ function ShowcasePage({ locale }: ShowcasePageProps) {
   )
 }
 
-function StylesPage({ locale, draft, setDraft }: StylesPageProps) {
+function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPageProps) {
+  const navigate = useNavigate()
+
   return (
     <SiteLayout
       locale={locale}
@@ -1657,6 +1963,8 @@ function StylesPage({ locale, draft, setDraft }: StylesPageProps) {
       eyebrow="MelodyVow"
       active="styles"
       onOpenModal={() => undefined}
+      onLogout={onLogout}
+      authSession={authSession}
       hideHero
     >
       <section className="styles-grid styles-page-grid">
@@ -1671,7 +1979,10 @@ function StylesPage({ locale, draft, setDraft }: StylesPageProps) {
             <button
               type="button"
               className="primary-button compact"
-              onClick={() => setDraft((current) => ({ ...current, style: card.id }))}
+              onClick={() => {
+                setDraft((current) => ({ ...current, style: card.id }))
+                navigate(withLocale(locale))
+              }}
             >
               {copy(locale, { zh: '选择曲风', en: 'Select Style' })}
             </button>
@@ -1682,7 +1993,7 @@ function StylesPage({ locale, draft, setDraft }: StylesPageProps) {
   )
 }
 
-function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
+function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: PreviewPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -1918,6 +2229,8 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
       eyebrow="MelodyVow"
       active="styles"
       onOpenModal={() => undefined}
+      onLogout={onLogout}
+      authSession={authSession}
     >
       <section className="preview-layout">
         <article className="glass-panel player-panel">
@@ -2077,20 +2390,55 @@ function PreviewPage({ locale, draft, onSaveHistory }: PreviewPageProps) {
   )
 }
 
-function PricingPage({ locale, selectedPlan, setSelectedPlan }: PricingPageProps) {
+function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLogout }: PricingPageProps) {
   const navigate = useNavigate()
+  const [plans, setPlans] = useState<PlanItem[]>([])
+  const [, setLoadingPlans] = useState(true)
 
-  const plans = locale === 'zh'
-    ? [
-        { name: 'Starter', price: '¥89', desc: ['5 次生成', 'AI 歌词', '名字入歌', 'MP3 下载'] },
-        { name: 'Pro', price: '¥199', desc: ['完整歌词', '婚礼版本', '高清音频', '适合现场播放'], badge: '推荐' },
-        { name: 'Premium', price: '¥499', desc: ['真人演唱', '高级编曲', '双版本混音', 'USB 礼盒'] },
-      ]
-    : [
-        { name: 'Starter', price: '¥89', desc: ['5 previews', 'AI lyrics', 'Names in song', 'MP3 download'] },
-        { name: 'Pro', price: '¥199', desc: ['Full lyrics', 'Wedding version', 'HD audio', 'Most balanced choice'], badge: 'Recommended' },
-        { name: 'Premium', price: '¥499', desc: ['Real singer', 'Custom arrangement', 'Dual mix', 'Gift-box delivery'] },
-      ]
+  useEffect(() => {
+    let disposed = false
+
+    const fallbackPlans: PlanItem[] = locale === 'zh'
+      ? [
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 爱心豆豆', 'AI 歌词', '名字入歌', 'MP3 下载'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '推荐', features: ['15 爱心豆豆', '完整歌词', '婚礼版本', '高清音频'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 爱心豆豆', '真人演唱', '高级编曲', '双版本混音'] },
+        ]
+      : [
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 Heart Beans', 'AI lyrics', 'Names in song', 'MP3 download'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: 'Recommended', features: ['15 Heart Beans', 'Full lyrics', 'Wedding version', 'HD audio'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 Heart Beans', 'Real singer', 'Custom arrangement', 'Dual mix'] },
+        ]
+
+    async function loadPlans() {
+      setLoadingPlans(true)
+      try {
+        const response = await fetch(apiUrl('/api/plans'))
+        const data = (await response.json()) as { items?: PlanItem[]; message?: string }
+        if (!response.ok) {
+          throw new Error(data.message || '套餐加载失败。')
+        }
+        const items = Array.isArray(data.items) ? data.items : []
+        if (!disposed) {
+          setPlans(items.length ? items : fallbackPlans)
+        }
+      } catch {
+        if (!disposed) {
+          setPlans(fallbackPlans)
+        }
+      } finally {
+        if (!disposed) {
+          setLoadingPlans(false)
+        }
+      }
+    }
+
+    void loadPlans()
+
+    return () => {
+      disposed = true
+    }
+  }, [locale])
 
   return (
     <SiteLayout
@@ -2100,6 +2448,8 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan }: PricingPageProps
       eyebrow="MelodyVow"
       active="pricing"
       onOpenModal={() => undefined}
+      onLogout={onLogout}
+      authSession={authSession}
       hideHero
     >
       <section className="pricing-grid pricing-page-grid">
@@ -2111,16 +2461,20 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan }: PricingPageProps
             {plan.badge ? <span className="corner-badge">{plan.badge}</span> : null}
             <div className="step-badge">{plan.name.slice(0, 1)}</div>
             <h3>{plan.name}</h3>
-            <div className="price-tag">{plan.price}</div>
+            <div className="price-tag">{plan.currency === 'CNY' || !plan.currency ? `¥${plan.price}` : `${plan.price}`}</div>
+            <p>{copy(locale, { zh: `包含 ${plan.heartBeans || 0} 爱心豆豆`, en: `${plan.heartBeans || 0} Heart Beans included` })}</p>
             <ul>
-              {plan.desc.map((item) => (
+              {(plan.features || []).map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
             <button
               type="button"
               className="primary-button compact"
-              onClick={() => setSelectedPlan(plan.name)}
+              onClick={() => {
+                setSelectedPlan(plan.name)
+                navigate(withLocale(locale, `/checkout?planId=${encodeURIComponent(plan.id)}`))
+              }}
             >
               {copy(locale, { zh: '选择此套餐', en: 'Choose This Plan' })}
             </button>
@@ -2128,27 +2482,180 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan }: PricingPageProps
         ))}
       </section>
 
-      <section className="glass-panel recommendation-bar">
-        <p>
-          {copy(locale, {
-            zh: `当前建议：${selectedPlan}。如果你还不确定，先从 Pro 开始，试听满意后再升级。`,
-            en: `Current recommendation: ${selectedPlan}. Start with Pro and upgrade after preview if needed.`,
-          })}
-        </p>
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => navigate(withLocale(locale, '/auth'))}
-        >
-          {copy(locale, { zh: '继续下单', en: 'Continue to Account' })}
-        </button>
-      </section>
-
     </SiteLayout>
   )
 }
 
-function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, authSession }: AuthPageProps) {
+function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLogout }: CheckoutPageProps) {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const requestedPlanId = String(searchParams.get('planId') || '').trim()
+  const [plans, setPlans] = useState<PlanItem[]>([])
+  const [methods, setMethods] = useState<PaymentMethod[]>([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let disposed = false
+
+    const fallbackPlans: PlanItem[] = [
+      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: [] },
+      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '', features: [] },
+      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: [] },
+    ]
+
+    async function loadCheckoutData() {
+      setLoading(true)
+      setError('')
+      try {
+        const [plansRes, methodsRes] = await Promise.all([
+          fetch(apiUrl('/api/plans')),
+          fetch(apiUrl('/api/payment/methods')),
+        ])
+        const [plansData, methodsData] = await Promise.all([plansRes.json(), methodsRes.json()])
+        const nextPlans = Array.isArray(plansData.items) ? (plansData.items as PlanItem[]) : fallbackPlans
+        const nextMethods = Array.isArray(methodsData.items) ? (methodsData.items as PaymentMethod[]) : []
+
+        if (!disposed) {
+          setPlans(nextPlans.length ? nextPlans : fallbackPlans)
+          setMethods(nextMethods)
+        }
+      } catch (loadError) {
+        if (!disposed) {
+          setPlans(fallbackPlans)
+          setMethods([])
+          setError(loadError instanceof Error ? loadError.message : '支付信息加载失败。')
+        }
+      } finally {
+        if (!disposed) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadCheckoutData()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  const selectedById = plans.find((plan) => plan.id === requestedPlanId)
+  const selectedByName = plans.find((plan) => plan.name === selectedPlan)
+  const activePlan = selectedById || selectedByName || plans[0] || null
+
+  useEffect(() => {
+    if (!activePlan) {
+      return
+    }
+
+    if (activePlan.name !== selectedPlan) {
+      setSelectedPlan(activePlan.name)
+    }
+  }, [activePlan, selectedPlan, setSelectedPlan])
+
+  async function handleStartPayment(method: PaymentMethod) {
+    setError('')
+
+    if (!activePlan) {
+      setError(copy(locale, { zh: '套餐信息缺失。', en: 'Missing plan information.' }))
+      return
+    }
+
+    if (!authSession?.email) {
+      navigate(withLocale(locale, '/auth'))
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      const response = await fetch(apiUrl('/api/payment/create-order'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getMemberAuthHeaders(authSession),
+        },
+        body: JSON.stringify({
+          planId: activePlan.id,
+          methodId: method.id,
+        }),
+      })
+      const result = (await response.json()) as { checkoutUrl?: string; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '创建订单失败。')
+      }
+      if (!result.checkoutUrl) {
+        throw new Error('收款链接为空。')
+      }
+
+      window.open(result.checkoutUrl, '_blank', 'noopener,noreferrer')
+    } catch (payError) {
+      setError(payError instanceof Error ? payError.message : '创建订单失败。')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <SiteLayout
+      locale={locale}
+      title=""
+      subtitle=""
+      eyebrow="MelodyVow"
+      active="pricing"
+      onOpenModal={() => undefined}
+      onLogout={onLogout}
+      authSession={authSession}
+      hideHero
+    >
+      <section className="pricing-grid pricing-page-grid">
+        <article className="glass-card pricing-card selected">
+          <div className="admin-table-head">
+            <strong>{copy(locale, { zh: '订单确认', en: 'Checkout' })}</strong>
+            <span>{activePlan ? activePlan.name : '-'}</span>
+          </div>
+          {loading ? <p className="empty-state">{copy(locale, { zh: '加载中...', en: 'Loading...' })}</p> : null}
+          {!loading && activePlan ? (
+            <>
+              <div className="price-tag">{activePlan.currency === 'CNY' || !activePlan.currency ? `¥${activePlan.price}` : `${activePlan.price}`}</div>
+              <p>{copy(locale, { zh: `到账 ${activePlan.heartBeans || 0} 爱心豆豆`, en: `${activePlan.heartBeans || 0} Heart Beans will be added` })}</p>
+              <button type="button" className="ghost-button compact" onClick={() => navigate(withLocale(locale, '/pricing'))}>
+                {copy(locale, { zh: '返回选择套餐', en: 'Back to Pricing' })}
+              </button>
+            </>
+          ) : null}
+        </article>
+
+        <article className="glass-card pricing-card">
+          <div className="admin-table-head">
+            <strong>{copy(locale, { zh: '选择支付方式', en: 'Payment Methods' })}</strong>
+            <span>{methods.length ? `${methods.length}` : '-'}</span>
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+          {!loading && !methods.length ? (
+            <p className="empty-state">{copy(locale, { zh: '暂无可用支付方式，请联系管理员在后台启用。', en: 'No payment methods available. Please contact the admin to enable one.' })}</p>
+          ) : null}
+          <div className="admin-detail-stack">
+            {methods.map((method) => (
+              <button
+                key={method.id}
+                type="button"
+                className="primary-button"
+                disabled={submitting || loading}
+                onClick={() => void handleStartPayment(method)}
+              >
+                {method.name}
+              </button>
+            ))}
+          </div>
+        </article>
+      </section>
+    </SiteLayout>
+  )
+}
+
+function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onLogout, authSession }: AuthPageProps) {
   const navigate = useNavigate()
   const [tab, setTab] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
@@ -2158,6 +2665,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
   const [authError, setAuthError] = useState('')
   const [captchaInput, setCaptchaInput] = useState('')
   const [captchaChallenge, setCaptchaChallenge] = useState(createCaptchaChallenge)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (authSession?.email) {
     return <Navigate to={withLocale(locale, '/account')} replace />
@@ -2168,7 +2676,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
     setCaptchaInput('')
   }
 
-  function handleAuthSubmit() {
+  async function handleAuthSubmit() {
     setAuthError('')
 
     if (!email.trim()) {
@@ -2220,20 +2728,55 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
         : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
     })
 
-    onAuthSuccess({
-      email: email.trim(),
-      partnerName: normalizedPartnerName,
-      plan: selectedPlan,
-      mode: tab,
-      welcomeMessage: successMessage,
-      lastAuthAt: new Date().toISOString(),
-    })
+    setIsSubmitting(true)
 
-    onOpenModal(
-      successMessage,
-    )
-    refreshCaptcha()
-    navigate(withLocale(locale, '/account'))
+    try {
+      const endpoint = tab === 'login' ? '/api/member/login' : '/api/member/signup'
+      const response = await fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          partnerName: normalizedPartnerName,
+        }),
+      })
+
+      const result = (await readJsonSafe(response)) as MemberAuthResponse & { message?: string }
+
+      if (!response.ok || !result.token || !result.profile?.email) {
+        throw new Error(result.message || copy(locale, {
+          zh: tab === 'login' ? '会员登录失败。' : '会员注册失败。',
+          en: tab === 'login' ? 'Login failed.' : 'Sign up failed.',
+        }))
+      }
+
+      onAuthSuccess({
+        authToken: result.token,
+        email: result.profile.email,
+        partnerName: result.profile.partnerName || normalizedPartnerName,
+        plan: result.profile.plan || selectedPlan,
+        heartBeansBalance: typeof result.profile.heartBeansBalance === 'number' ? result.profile.heartBeansBalance : 0,
+        mode: tab,
+        welcomeMessage: successMessage,
+        lastAuthAt: result.profile.lastAuthAt || new Date().toISOString(),
+        avatarUrl: result.profile.avatarUrl,
+      })
+
+      onOpenModal(successMessage)
+      refreshCaptcha()
+      navigate(withLocale(locale, '/account'))
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : copy(locale, {
+        zh: tab === 'login' ? '会员登录失败。' : '会员注册失败。',
+        en: tab === 'login' ? 'Login failed.' : 'Sign up failed.',
+      }))
+      refreshCaptcha()
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -2244,6 +2787,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
       eyebrow="MelodyVow"
       active="account"
       onOpenModal={onOpenModal}
+      onLogout={onLogout}
       authSession={authSession}
       hideHero
     >
@@ -2335,9 +2879,12 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
           <button
             type="button"
             className="primary-button wide"
-            onClick={handleAuthSubmit}
+            disabled={isSubmitting}
+            onClick={() => void handleAuthSubmit()}
           >
-            {tab === 'login'
+            {isSubmitting
+              ? copy(locale, { zh: '提交中...', en: 'Submitting...' })
+              : tab === 'login'
               ? copy(locale, { zh: '立即登录', en: 'Log In' })
               : copy(locale, { zh: '创建账户', en: 'Create Account' })}
           </button>
@@ -2353,20 +2900,19 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, aut
   )
 }
 
-function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }: AccountPageProps) {
+function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession }: AccountPageProps) {
   if (!authSession?.email) {
     return <Navigate to={withLocale(locale, '/auth')} replace />
   }
 
-  const menuItems = locale === 'zh'
-    ? ['继续创作', '收藏夹', '最近生成', '账号设置', '帮助支持']
-    : ['Continue', 'Favorites', 'Recent Generations', 'Account Settings', 'Support']
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
       ? 'Hao & Xin'
       : 'Hao & Xin'
   const memberLabel = authSession?.email ?? copy(locale, { zh: '未登录访客', en: 'Guest User' })
+  const currentPlanLabel = authSession?.plan?.trim() || selectedPlan
+  const heartBeansBalance = Number(authSession?.heartBeansBalance || 0)
   const welcomeTitle = copy(locale, {
     zh: authSession?.mode === 'signup' ? '欢迎加入 MelodyVow 会员' : '欢迎回来',
     en: authSession?.mode === 'signup' ? 'Welcome to MelodyVow' : 'Welcome Back',
@@ -2387,89 +2933,66 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
   return (
     <SiteLayout
       locale={locale}
-      title={copy(locale, { zh: '我的婚礼歌曲', en: 'My Wedding Songs' })}
-      subtitle={copy(locale, {
-        zh: '管理你的专属婚礼歌曲、歌词和音频文件',
-        en: 'Manage your custom wedding songs, lyrics and audio files.',
-      })}
-      eyebrow="MelodyVow"
+      title=""
+      subtitle=""
+      eyebrow=""
       active="account"
       onOpenModal={onOpenModal}
+      onLogout={onLogout}
+      authSession={authSession}
+      hideHero
     >
-      <section className="glass-panel profile-strip">
-        <div className="avatar-circle">{(authSession?.email?.[0] ?? 'M').toUpperCase()}</div>
-        <div>
-          <h3>{displayName}</h3>
-          <p className="profile-email">{memberLabel}</p>
-          <div className="tag-row">
-            <span className="soft-pill accent">{selectedPlan} Member</span>
-            {authTime ? (
-              <span className="soft-pill">{copy(locale, { zh: `最近验证 ${authTime}`, en: `Verified ${authTime}` })}</span>
-            ) : null}
-          </div>
-        </div>
-        <button type="button" className="primary-button compact">
-          {copy(locale, { zh: '升级至高级版', en: 'Upgrade to Premium' })}
-        </button>
-      </section>
+      <section className="account-layout">
+        <aside className="account-sidebar">
+          <section className="glass-card account-member-card">
+            <h3>{displayName}</h3>
+            <p className="account-member-email">{memberLabel}</p>
+            <div className="tag-row">
+              <span className="soft-pill accent">{currentPlanLabel} Member</span>
+              <span className="soft-pill">{copy(locale, { zh: `${heartBeansBalance} 爱心豆豆`, en: `${heartBeansBalance} Heart Beans` })}</span>
+              {authTime ? (
+                <span className="soft-pill">{copy(locale, { zh: `最近验证 ${authTime}`, en: `Verified ${authTime}` })}</span>
+              ) : null}
+            </div>
+          </section>
 
-      <section className="glass-card welcome-card">
-        <div className="welcome-copy">
-          <p className="mini-eyebrow">{welcomeTitle}</p>
-          <h3>{copy(locale, { zh: '会员中心已为你准备好', en: 'Your Member Dashboard Is Ready' })}</h3>
-          <p>{welcomeCopy}</p>
-        </div>
-        <div className="welcome-metrics">
-          <div className="metric-chip">
-            <strong>{history.length}</strong>
-            <span>{copy(locale, { zh: '首生成品', en: 'Songs Saved' })}</span>
-          </div>
-          <div className="metric-chip">
-            <strong>{selectedPlan}</strong>
-            <span>{copy(locale, { zh: '当前套餐', en: 'Current Plan' })}</span>
-          </div>
-        </div>
-      </section>
+          <section className="glass-card account-welcome-card">
+            <p className="mini-eyebrow">{welcomeTitle}</p>
+            <h3>{copy(locale, { zh: '会员中心已为你准备好', en: 'Your Member Dashboard Is Ready' })}</h3>
+            <p>{welcomeCopy}</p>
+            <div className="account-metrics">
+              <div className="account-metric">
+                <strong>{history.length}</strong>
+                <span>{copy(locale, { zh: '首生成品', en: 'Songs Saved' })}</span>
+              </div>
+              <div className="account-metric">
+                <strong>{currentPlanLabel}</strong>
+                <span>{copy(locale, { zh: '当前套餐', en: 'Current Plan' })}</span>
+              </div>
+              <div className="account-metric">
+                <strong>{heartBeansBalance}</strong>
+                <span>{copy(locale, { zh: '爱心豆豆', en: 'Heart Beans' })}</span>
+              </div>
+            </div>
+          </section>
+        </aside>
 
-      <section className="history-layout">
-        <div className="history-list">
-          {history.length === 0 ? (
-            <article className="glass-card history-card empty-history-card">
-              <div className="history-copy">
-                <span className="step-badge">0</span>
-                <h3>{copy(locale, { zh: '还没有生成记录', en: 'No Songs Yet' })}</h3>
-                <p>
-                  {copy(locale, {
-                    zh: '去首页填写你们的名字、故事和风格，生成后的歌单会自动出现在这里。',
-                    en: 'Go to the homepage and create your first song. Completed generations will appear here automatically.',
-                  })}
-                </p>
-              </div>
-            </article>
-          ) : null}
-          {history.map((item, index) => (
-            <article key={item.id} className="glass-card history-card">
-              <div className="cover-art small">
-                <img className="cover-disc" src={recordImage} alt="" />
-                <img className="cover-couple" src={coupleImage} alt="" />
-              </div>
-              <div className="history-copy">
-                <span className="step-badge">{index + 1}</span>
-                <h3>{item.title}</h3>
-                <p>{item.subtitle}</p>
-                <div className="status-row">
+        <section className="account-song-list">
+          {history.map((item) => (
+            <article key={item.id} className="glass-card account-song-row">
+              <div className="account-song-main">
+                <h3 className="account-song-title">{item.title}</h3>
+                <p className="account-song-subtitle">{item.subtitle}</p>
+                <div className="account-song-meta">
                   <span>{item.status}</span>
-                  <span>{item.languageLabel ?? ''}</span>
-                  <span>{item.styleLabel ?? ''}</span>
+                  {item.languageLabel ? <span>{item.languageLabel}</span> : null}
+                  {item.styleLabel ? <span>{item.styleLabel}</span> : null}
                 </div>
-                {item.vocalLabel ? <p>{item.vocalLabel}</p> : null}
-                {item.lyricSnippet ? <p>{item.lyricSnippet}</p> : null}
               </div>
               <button
                 type="button"
                 className="primary-button compact"
                 onClick={() => {
-                  // #region debug-point C:account-download-click
                   reportDebugEvent({
                     hypothesisId: 'C',
                     location: 'web/src/App.tsx:accountDownloadClick',
@@ -2481,7 +3004,6 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
                       downloadUrl: item.downloadUrl || '',
                     },
                   })
-                  // #endregion
                   if (item.downloadUrl || item.audioUrl) {
                     window.open(getSongDownloadUrl(item.id), '_blank', 'noopener,noreferrer')
                     return
@@ -2501,15 +3023,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, authSession }
               </button>
             </article>
           ))}
-        </div>
-
-        <aside className="glass-card side-menu">
-          {menuItems.map((item) => (
-            <button key={item} type="button" className="ghost-button menu-item">
-              {item}
-            </button>
-          ))}
-        </aside>
+        </section>
       </section>
     </SiteLayout>
   )
@@ -2550,7 +3064,7 @@ function AdminLoginPage({
         }),
       })
 
-      const result = (await response.json()) as AdminSession | { message?: string }
+      const result = (await readJsonSafe(response)) as AdminSession | { message?: string }
 
       if (!response.ok || !('token' in result)) {
         throw new Error('message' in result && result.message ? result.message : '后台登录失败。')
@@ -2605,7 +3119,7 @@ function AdminDashboardPage({
 }) {
   const navigate = useNavigate()
   const activeSession = session
-  const [tab, setTab] = useState<'overview' | 'songs' | 'orders' | 'config'>('overview')
+  const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [metrics, setMetrics] = useState({
@@ -2616,14 +3130,21 @@ function AdminDashboardPage({
     totalRevenue: 0,
   })
   const [songs, setSongs] = useState<AdminSong[]>([])
+  const [members, setMembers] = useState<AdminMember[]>([])
+  const [selectedMember, setSelectedMember] = useState<AdminMember | null>(null)
   const [orders, setOrders] = useState<AdminOrder[]>([])
   const [selectedSong, setSelectedSong] = useState<AdminSong | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null)
+  const [plans, setPlans] = useState<PlanItem[]>([])
+  const [showcaseTracks, setShowcaseTracks] = useState<ShowcaseTrack[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodAdmin[]>([])
   const [config, setConfig] = useState<AdminConfig>({
     deepseekProvider: '',
     sunoProvider: '',
     publicBaseUrl: '',
     allowSignup: true,
+    heartBeansPerGeneration: 1,
+    paypalCheckoutUrl: '',
     notes: '',
   })
   const [savingConfig, setSavingConfig] = useState(false)
@@ -2645,31 +3166,56 @@ function AdminDashboardPage({
           'x-admin-token': activeSession!.token,
         }
 
-        const [overviewRes, songsRes, ordersRes, configRes] = await Promise.all([
+        const [overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes] = await Promise.all([
           fetch(apiUrl('/api/admin/overview'), { headers }),
+          fetch(apiUrl('/api/admin/members'), { headers }),
           fetch(apiUrl('/api/admin/songs'), { headers }),
+          fetch(apiUrl('/api/admin/showcase-tracks'), { headers }),
+          fetch(apiUrl('/api/admin/plans'), { headers }),
+          fetch(apiUrl('/api/admin/payment-methods'), { headers }),
           fetch(apiUrl('/api/admin/orders'), { headers }),
           fetch(apiUrl('/api/admin/config'), { headers }),
         ])
 
-        const [overviewData, songsData, ordersData, configData] = await Promise.all([
-          overviewRes.json(),
-          songsRes.json(),
-          ordersRes.json(),
-          configRes.json(),
+        const [overviewData, membersData, songsData, showcaseData, plansData, paymentsData, ordersData, configData] = await Promise.all([
+          readJsonSafe(overviewRes),
+          readJsonSafe(membersRes),
+          readJsonSafe(songsRes),
+          readJsonSafe(showcaseRes),
+          readJsonSafe(plansRes),
+          readJsonSafe(paymentsRes),
+          readJsonSafe(ordersRes),
+          readJsonSafe(configRes),
         ])
 
-        if ([overviewRes, songsRes, ordersRes, configRes].some((item) => !item.ok)) {
-          const message = overviewData.message || songsData.message || ordersData.message || configData.message || '后台数据加载失败。'
+        if ([overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes].some((item) => !item.ok)) {
+          const message = overviewData.message
+            || membersData.message
+            || songsData.message
+            || showcaseData.message
+            || plansData.message
+            || paymentsData.message
+            || ordersData.message
+            || configData.message
+            || '后台数据加载失败。'
           throw new Error(message)
         }
 
         if (!disposed) {
           setMetrics(overviewData.metrics)
+          const nextMembers = Array.isArray(membersData.items) ? membersData.items : []
           const nextSongs = Array.isArray(songsData.items) ? songsData.items : []
+          const nextShowcase = Array.isArray(showcaseData.items) ? showcaseData.items : []
+          const nextPlans = Array.isArray(plansData.items) ? plansData.items : []
+          const nextPayments = Array.isArray(paymentsData.items) ? paymentsData.items : []
           const nextOrders = Array.isArray(ordersData.items) ? ordersData.items : []
+          setMembers(nextMembers)
           setSongs(nextSongs)
+          setShowcaseTracks(nextShowcase)
+          setPlans(nextPlans)
+          setPaymentMethods(nextPayments)
           setOrders(nextOrders)
+          setSelectedMember(nextMembers[0] ?? null)
           setSelectedSong(nextSongs[0] ?? null)
           setSelectedOrder(nextOrders[0] ?? null)
           setConfig(configData as AdminConfig)
@@ -2715,7 +3261,7 @@ function AdminDashboardPage({
         body: JSON.stringify(config),
       })
 
-      const result = (await response.json()) as AdminConfig | { message?: string }
+      const result = (await readJsonSafe(response)) as AdminConfig | { message?: string }
       if (!response.ok) {
         throw new Error('message' in result && result.message ? result.message : '配置保存失败。')
       }
@@ -2735,7 +3281,7 @@ function AdminDashboardPage({
           'x-admin-token': activeSession!.token,
         },
       })
-      const result = (await response.json()) as AdminSong | { message?: string }
+      const result = (await readJsonSafe(response)) as AdminSong | { message?: string }
       if (!response.ok) {
         throw new Error('message' in result && result.message ? result.message : '歌曲详情加载失败。')
       }
@@ -2752,7 +3298,7 @@ function AdminDashboardPage({
           'x-admin-token': activeSession!.token,
         },
       })
-      const result = (await response.json()) as AdminOrder | { message?: string }
+      const result = (await readJsonSafe(response)) as AdminOrder | { message?: string }
       if (!response.ok) {
         throw new Error('message' in result && result.message ? result.message : '订单详情加载失败。')
       }
@@ -2776,7 +3322,7 @@ function AdminDashboardPage({
         },
         body: JSON.stringify(selectedOrder),
       })
-      const result = (await response.json()) as AdminOrder | { message?: string }
+      const result = (await readJsonSafe(response)) as AdminOrder | { message?: string }
       if (!response.ok) {
         throw new Error('message' in result && result.message ? result.message : '订单保存失败。')
       }
@@ -2789,9 +3335,146 @@ function AdminDashboardPage({
     }
   }
 
+  async function handleSaveMember() {
+    if (!selectedMember) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/members/${encodeURIComponent(selectedMember.email)}`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify(selectedMember),
+      })
+      const result = (await readJsonSafe(response)) as AdminMember | { message?: string }
+      if (!response.ok) {
+        throw new Error('message' in result && result.message ? result.message : '会员信息保存失败。')
+      }
+
+      const saved = result as AdminMember
+      setSelectedMember(saved)
+      setMembers((current) => current.map((item) => (item.email === saved.email ? { ...item, ...saved } : item)))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '会员信息保存失败。')
+    }
+  }
+
+  async function handleSavePlans() {
+    try {
+      const response = await fetch(apiUrl('/api/admin/plans'), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify({ items: plans }),
+      })
+      const result = (await readJsonSafe(response)) as { items?: PlanItem[]; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '套餐保存失败。')
+      }
+      setPlans(Array.isArray(result.items) ? result.items : plans)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '套餐保存失败。')
+    }
+  }
+
+  async function handleSaveShowcaseTracks() {
+    try {
+      const response = await fetch(apiUrl('/api/admin/showcase-tracks'), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify({ items: showcaseTracks }),
+      })
+      const result = (await readJsonSafe(response)) as { items?: ShowcaseTrack[]; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '样片保存失败。')
+      }
+      setShowcaseTracks(Array.isArray(result.items) ? result.items : showcaseTracks)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '样片保存失败。')
+    }
+  }
+
+  async function handleSavePaymentMethods() {
+    try {
+      const response = await fetch(apiUrl('/api/admin/payment-methods'), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify({ items: paymentMethods }),
+      })
+      const result = (await readJsonSafe(response)) as { items?: PaymentMethodAdmin[]; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '支付方式保存失败。')
+      }
+      setPaymentMethods(Array.isArray(result.items) ? result.items : paymentMethods)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '支付方式保存失败。')
+    }
+  }
+
+  async function handleSaveSong() {
+    if (!selectedSong) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/songs/${selectedSong.id}`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify(selectedSong),
+      })
+      const result = (await readJsonSafe(response)) as AdminSong | { message?: string }
+      if (!response.ok) {
+        throw new Error('message' in result && result.message ? result.message : '歌曲更新失败。')
+      }
+      const saved = result as AdminSong
+      setSelectedSong(saved)
+      setSongs((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '歌曲更新失败。')
+    }
+  }
+
+  async function handleDeleteSong(songId: string) {
+    try {
+      const response = await fetch(apiUrl(`/api/admin/songs/${songId}`), {
+        method: 'DELETE',
+        headers: {
+          'x-admin-token': activeSession!.token,
+        },
+      })
+      const result = (await readJsonSafe(response)) as { ok?: boolean; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '歌曲删除失败。')
+      }
+
+      setSongs((current) => current.filter((item) => item.id !== songId))
+      setSelectedSong((current) => (current?.id === songId ? null : current))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '歌曲删除失败。')
+    }
+  }
+
   const tabs = [
     { key: 'overview', label: '总览' },
+    { key: 'members', label: '会员管理' },
     { key: 'songs', label: '歌曲记录' },
+    { key: 'showcase', label: '样片管理' },
+    { key: 'plans', label: '套餐管理' },
+    { key: 'payments', label: '支付方式' },
     { key: 'orders', label: '订单' },
     { key: 'config', label: '配置' },
   ] as const
@@ -2853,6 +3536,85 @@ function AdminDashboardPage({
             </section>
           ) : null}
 
+          {!loading && tab === 'members' ? (
+            <section className="admin-detail-layout">
+              <section className="admin-table glass-card">
+                <div className="admin-table-head">
+                  <strong>会员管理</strong>
+                  <span>{members.length} 条</span>
+                </div>
+                <div className="admin-table-list">
+                  {members.map((item) => (
+                    <button
+                      key={item.email}
+                      type="button"
+                      className="admin-table-row admin-select-row"
+                      onClick={() => setSelectedMember(item)}
+                    >
+                      <div>
+                        <h3>{item.email}</h3>
+                        <p>{item.plan || '-'} · {item.heartBeansBalance ?? 0} 爱心豆豆</p>
+                      </div>
+                      <div>{typeof item.songs === 'number' ? item.songs : '-'}</div>
+                      <div>{item.disabled ? 'disabled' : 'active'}</div>
+                      <div>{item.lastSeenAt ? new Date(item.lastSeenAt).toLocaleDateString('zh-CN') : '-'}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <aside className="glass-card admin-detail-card">
+                <div className="admin-table-head">
+                  <strong>会员详情</strong>
+                  <span>{selectedMember?.email ?? '未选择'}</span>
+                </div>
+                {selectedMember ? (
+                  <div className="admin-detail-stack">
+                    <label className="field">
+                      <span>Email</span>
+                      <input value={selectedMember.email} readOnly />
+                    </label>
+                    <label className="field">
+                      <span>套餐</span>
+                      <select
+                        value={selectedMember.plan || ''}
+                        onChange={(event) => setSelectedMember((current) => current ? { ...current, plan: event.target.value } : current)}
+                      >
+                        <option value="">未设置</option>
+                        {plans.map((plan) => (
+                          <option key={plan.id} value={plan.name}>
+                            {plan.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>爱心豆豆余额</span>
+                      <input
+                        type="number"
+                        value={selectedMember.heartBeansBalance ?? 0}
+                        onChange={(event) => setSelectedMember((current) => current ? { ...current, heartBeansBalance: Number(event.target.value) } : current)}
+                      />
+                    </label>
+                    <label className="admin-switch">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedMember.disabled)}
+                        onChange={(event) => setSelectedMember((current) => current ? { ...current, disabled: event.target.checked } : current)}
+                      />
+                      <span>禁用会员</span>
+                    </label>
+                    <button type="button" className="primary-button" onClick={() => void handleSaveMember()}>
+                      保存会员修改
+                    </button>
+                  </div>
+                ) : (
+                  <p className="empty-state">请选择一位会员查看详情。</p>
+                )}
+              </aside>
+            </section>
+          ) : null}
+
           {!loading && tab === 'songs' ? (
             <section className="admin-detail-layout">
               <section className="admin-table glass-card">
@@ -2883,11 +3645,38 @@ function AdminDashboardPage({
                 </div>
                 {selectedSong ? (
                   <div className="admin-detail-stack">
-                    <p><strong>标题：</strong>{selectedSong.title}</p>
+                    <label className="field">
+                      <span>标题</span>
+                      <input
+                        value={selectedSong.title}
+                        onChange={(event) => setSelectedSong((current) => current ? { ...current, title: event.target.value } : current)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>归属邮箱</span>
+                      <input
+                        value={selectedSong.email ?? ''}
+                        onChange={(event) => setSelectedSong((current) => current ? { ...current, email: event.target.value } : current)}
+                      />
+                    </label>
                     <p><strong>新人：</strong>{selectedSong.couple}</p>
                     <p><strong>语言：</strong>{selectedSong.languageLabel}</p>
                     <p><strong>曲风：</strong>{selectedSong.styleLabel}</p>
                     <p><strong>声音：</strong>{selectedSong.vocalLabel}</p>
+                    <label className="field">
+                      <span>状态</span>
+                      <select
+                        value={selectedSong.status}
+                        onChange={(event) => setSelectedSong((current) => current ? { ...current, status: event.target.value } : current)}
+                      >
+                        <option value="queued">queued</option>
+                        <option value="generating_lyrics">generating_lyrics</option>
+                        <option value="lyrics_ready">lyrics_ready</option>
+                        <option value="generating_song">generating_song</option>
+                        <option value="ready">ready</option>
+                        <option value="error">error</option>
+                      </select>
+                    </label>
                     <p><strong>错误信息：</strong>{selectedSong.error || '无'}</p>
                     <p><strong>播放链接：</strong>{selectedSong.audioUrl || '无'}</p>
                     <p><strong>下载链接：</strong>{selectedSong.downloadUrl || '无'}</p>
@@ -2909,11 +3698,349 @@ function AdminDashboardPage({
                         下载音频
                       </button>
                     ) : null}
+                    <button type="button" className="primary-button" onClick={() => void handleSaveSong()}>
+                      保存歌曲修改
+                    </button>
+                    <button type="button" className="ghost-button" onClick={() => void handleDeleteSong(selectedSong.id)}>
+                      删除歌曲记录
+                    </button>
                   </div>
                 ) : (
                   <p className="empty-state">请选择一条歌曲记录查看详情。</p>
                 )}
               </aside>
+            </section>
+          ) : null}
+
+          {!loading && tab === 'showcase' ? (
+            <section className="glass-card admin-config-card">
+              <div className="admin-table-head">
+                <strong>产品展示样片</strong>
+                <span>{showcaseTracks.length} 条</span>
+              </div>
+              <div className="form-grid">
+                {showcaseTracks.map((track, index) => (
+                  <article key={track.id} className="glass-card">
+                    <div className="form-grid single">
+                      <label className="field">
+                        <span>样片 ID</span>
+                        <input value={track.id} readOnly />
+                      </label>
+                      <label className="field">
+                        <span>标题(中文)</span>
+                        <input
+                          value={track.title.zh}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, title: { ...item.title, zh: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>标题(英文)</span>
+                        <input
+                          value={track.title.en}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, title: { ...item.title, en: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>标签(中文)</span>
+                        <input
+                          value={track.meta.zh}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, meta: { ...item.meta, zh: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>标签(英文)</span>
+                        <input
+                          value={track.meta.en}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, meta: { ...item.meta, en: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>简介(中文)</span>
+                        <textarea
+                          value={track.blurb.zh}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, blurb: { ...item.blurb, zh: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                          rows={3}
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>简介(英文)</span>
+                        <textarea
+                          value={track.blurb.en}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, blurb: { ...item.blurb, en: event.target.value } } : item,
+                              ),
+                            )
+                          }
+                          rows={3}
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>音频地址</span>
+                        <input
+                          value={track.audioUrl}
+                          onChange={(event) =>
+                            setShowcaseTracks((current) =>
+                              current.map((item, i) => (i === index ? { ...item, audioUrl: event.target.value } : item)),
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  setShowcaseTracks((current) => [
+                    ...current,
+                    {
+                      id: `showcase-${crypto.randomUUID()}`,
+                      title: { zh: '新样片', en: 'New Demo' },
+                      meta: { zh: '婚礼样片', en: 'Wedding Demo' },
+                      blurb: { zh: '', en: '' },
+                      audioUrl: '',
+                    },
+                  ])
+                }
+              >
+                新增样片
+              </button>
+              <button type="button" className="primary-button" onClick={() => void handleSaveShowcaseTracks()}>
+                保存样片配置
+              </button>
+            </section>
+          ) : null}
+
+          {!loading && tab === 'plans' ? (
+            <section className="glass-card admin-config-card">
+              <div className="admin-table-head">
+                <strong>订阅套餐</strong>
+                <span>{plans.length} 条</span>
+              </div>
+              <div className="form-grid">
+                {plans.map((plan, index) => (
+                  <article key={plan.id} className="glass-card">
+                    <div className="form-grid single">
+                      <label className="field">
+                        <span>套餐 ID</span>
+                        <input value={plan.id} readOnly />
+                      </label>
+                      <label className="field">
+                        <span>名称</span>
+                        <input
+                          value={plan.name}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, name: event.target.value } : item)))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>价格</span>
+                        <input
+                          type="number"
+                          value={plan.price}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, price: Number(event.target.value) } : item)))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>爱心豆豆数量</span>
+                        <input
+                          type="number"
+                          value={plan.heartBeans ?? 0}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, heartBeans: Number(event.target.value) } : item)))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>角标</span>
+                        <input
+                          value={plan.badge || ''}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, badge: event.target.value } : item)))
+                          }
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>权益(每行一条)</span>
+                        <textarea
+                          value={(plan.features || []).join('\n')}
+                          onChange={(event) =>
+                            setPlans((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, features: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean) } : item,
+                              ),
+                            )
+                          }
+                          rows={4}
+                        />
+                      </label>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  setPlans((current) => [
+                    ...current,
+                    {
+                      id: `plan-${crypto.randomUUID()}`,
+                      name: 'New Plan',
+                      price: 0,
+                      heartBeans: 0,
+                      currency: 'CNY',
+                      badge: '',
+                      features: [],
+                    },
+                  ])
+                }
+              >
+                新增套餐
+              </button>
+              <button type="button" className="primary-button" onClick={() => void handleSavePlans()}>
+                保存套餐配置
+              </button>
+            </section>
+          ) : null}
+
+          {!loading && tab === 'payments' ? (
+            <section className="glass-card admin-config-card">
+              <div className="admin-table-head">
+                <strong>支付方式</strong>
+                <span>{paymentMethods.length} 条</span>
+              </div>
+              <div className="form-grid">
+                {paymentMethods.map((method, index) => (
+                  <article key={method.id} className="glass-card">
+                    <div className="form-grid single">
+                      <label className="field">
+                        <span>方式 ID</span>
+                        <input
+                          value={method.id}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, id: event.target.value } : item)),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>名称</span>
+                        <input
+                          value={method.name}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, name: event.target.value } : item)),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>环境变量名</span>
+                        <input
+                          value={method.envKey}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, envKey: event.target.value } : item)),
+                            )
+                          }
+                          placeholder="PAYPAL_CHECKOUT_URL"
+                        />
+                      </label>
+                      <label className="admin-switch">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(method.enabled)}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, enabled: event.target.checked } : item)),
+                            )
+                          }
+                        />
+                        <span>启用</span>
+                      </label>
+                      <label className="field form-span-2">
+                        <span>说明</span>
+                        <textarea
+                          value={method.description || ''}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)),
+                            )
+                          }
+                          rows={3}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="ghost-button compact"
+                        onClick={() => setPaymentMethods((current) => current.filter((_item, i) => i !== index))}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() =>
+                  setPaymentMethods((current) => [
+                    ...current,
+                    {
+                      id: `method-${crypto.randomUUID()}`,
+                      name: 'New Method',
+                      enabled: false,
+                      envKey: '',
+                      description: '',
+                    },
+                  ])
+                }
+              >
+                新增支付方式
+              </button>
+              <button type="button" className="primary-button" onClick={() => void handleSavePaymentMethods()}>
+                保存支付方式
+              </button>
             </section>
           ) : null}
 
@@ -2929,7 +4056,7 @@ function AdminDashboardPage({
                     <button key={item.id} type="button" className="admin-table-row admin-select-row" onClick={() => void handleSelectOrder(item.id)}>
                       <div>
                         <h3>{item.id}</h3>
-                        <p>{item.couple}</p>
+                        <p>{item.couple} · {item.heartBeans ?? 0} 爱心豆豆</p>
                       </div>
                       <div>{item.plan}</div>
                       <div>¥{item.amount}</div>
@@ -2982,6 +4109,14 @@ function AdminDashboardPage({
                         onChange={(event) => setSelectedOrder((current) => current ? { ...current, amount: Number(event.target.value) } : current)}
                       />
                     </label>
+                    <label className="field">
+                      <span>爱心豆豆数量</span>
+                      <input
+                        type="number"
+                        value={selectedOrder.heartBeans ?? 0}
+                        onChange={(event) => setSelectedOrder((current) => current ? { ...current, heartBeans: Number(event.target.value) } : current)}
+                      />
+                    </label>
                     <label className="field form-span-2">
                       <span>备注</span>
                       <textarea
@@ -3026,6 +4161,14 @@ function AdminDashboardPage({
                     placeholder="https://your-domain.com"
                   />
                 </label>
+                <label className="field">
+                  <span>每次生成扣除爱心豆豆</span>
+                  <input
+                    type="number"
+                    value={config.heartBeansPerGeneration}
+                    onChange={(event) => setConfig((current) => ({ ...current, heartBeansPerGeneration: Number(event.target.value) }))}
+                  />
+                </label>
                 <label className="field form-span-2">
                   <span>后台备注</span>
                   <textarea
@@ -3054,7 +4197,7 @@ function AdminDashboardPage({
   )
 }
 
-function CompletePage({ locale, draft, onOpenModal }: CompletePageProps) {
+function CompletePage({ locale, draft, onOpenModal, authSession, onLogout }: CompletePageProps) {
   return (
     <SiteLayout
       locale={locale}
@@ -3066,6 +4209,8 @@ function CompletePage({ locale, draft, onOpenModal }: CompletePageProps) {
       eyebrow="MelodyVow"
       active="pricing"
       onOpenModal={onOpenModal}
+      onLogout={onLogout}
+      authSession={authSession}
     >
       <section className="complete-layout">
         <article className="glass-panel complete-card">
