@@ -2741,6 +2741,13 @@
   gap: 8px;
 }
 
+.account-song-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .account-song-title {
   margin: 0;
   font-size: 1.25rem;
@@ -4157,6 +4164,24 @@
   line-height: 1.45;
 }
 
+.admin-inline-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.admin-inline-links a {
+  color: #7b2f72;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-inline-links a:hover {
+  text-decoration: underline;
+}
+
 .admin-inline-meta {
   display: grid;
   justify-items: end;
@@ -4171,6 +4196,12 @@
   padding: 0;
   font-size: 0.82rem;
   text-align: left;
+}
+
+.admin-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 

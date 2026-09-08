@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import { getDatabaseConnectionString, PostgresPersistence } from './postgres-persistence.mjs'
 
 const app = express()
 
@@ -30,6 +31,8 @@ const sunoTaskToJob = new Map()
 const activePolls = new Set()
 const adminSessions = new Map()
 const memberSessions = new Map()
+const lyricRequests = new Map()
+const sunoTasks = new Map()
 
 const productShowcaseTracks = [
   {
@@ -217,71 +220,241 @@ function createDefaultAdminData() {
   }
 }
 
-function loadAdminData() {
+function normalizeLoadedAdminData(parsed) {
+  const defaults = createDefaultAdminData()
+
+  return {
+    ...defaults,
+    ...parsed,
+    members: Array.isArray(parsed?.members)
+      ? parsed.members.map((member) => ({
+          ...member,
+          email: String(member?.email || '').trim().toLowerCase(),
+          heartBeansBalance: normalizePositiveNumber(member?.heartBeansBalance, 0),
+        }))
+      : [],
+    plans: Array.isArray(parsed?.plans) && parsed.plans.length
+      ? parsed.plans.map((plan) => ({
+          ...plan,
+          id: String(plan?.id || ''),
+          name: String(plan?.name || ''),
+          price: normalizePositiveNumber(plan?.price, 0),
+          heartBeans: normalizePositiveNumber(plan?.heartBeans, getDefaultHeartBeansForPlan(plan)),
+          currency: String(plan?.currency || 'CNY'),
+          badge: String(plan?.badge || ''),
+          features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
+        }))
+      : defaults.plans,
+    showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
+    paymentMethods: Array.isArray(parsed?.paymentMethods) && parsed.paymentMethods.length ? parsed.paymentMethods : defaults.paymentMethods,
+    orders: Array.isArray(parsed?.orders)
+      ? parsed.orders.map((order) => ({
+          ...order,
+          heartBeans: normalizePositiveNumber(order?.heartBeans, getDefaultHeartBeansForPlan({ name: order?.plan })),
+          heartBeansGrantedAt: String(order?.heartBeansGrantedAt || '').trim(),
+        }))
+      : createDefaultAdminData().orders,
+    songs: Array.isArray(parsed?.songs) ? parsed.songs : [],
+    config: {
+      ...defaults.config,
+      ...(parsed?.config ?? {}),
+      allowSignup: normalizeBoolean(parsed?.config?.allowSignup, defaults.config.allowSignup),
+      enableChineseSite: normalizeBoolean(parsed?.config?.enableChineseSite, defaults.config.enableChineseSite),
+      heartBeansPerGeneration: normalizePositiveNumber(parsed?.config?.heartBeansPerGeneration, defaults.config.heartBeansPerGeneration),
+    },
+  }
+}
+
+function loadAdminDataFromFile() {
   ensureDataDir()
   const defaults = createDefaultAdminData()
 
   if (!fs.existsSync(ADMIN_DATA_FILE)) {
-    const initialData = defaults
-    fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(initialData, null, 2), 'utf8')
-    return initialData
+    fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(defaults, null, 2), 'utf8')
+    return defaults
   }
 
   try {
     const raw = fs.readFileSync(ADMIN_DATA_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    return {
-      ...defaults,
-      ...parsed,
-      members: Array.isArray(parsed?.members)
-        ? parsed.members.map((member) => ({
-            ...member,
-            email: String(member?.email || '').trim().toLowerCase(),
-            heartBeansBalance: normalizePositiveNumber(member?.heartBeansBalance, 0),
-          }))
-        : [],
-      plans: Array.isArray(parsed?.plans) && parsed.plans.length
-        ? parsed.plans.map((plan) => ({
-            ...plan,
-            id: String(plan?.id || ''),
-            name: String(plan?.name || ''),
-            price: normalizePositiveNumber(plan?.price, 0),
-            heartBeans: normalizePositiveNumber(plan?.heartBeans, getDefaultHeartBeansForPlan(plan)),
-            currency: String(plan?.currency || 'CNY'),
-            badge: String(plan?.badge || ''),
-            features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
-          }))
-        : defaults.plans,
-      showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
-      paymentMethods: Array.isArray(parsed?.paymentMethods) && parsed.paymentMethods.length ? parsed.paymentMethods : defaults.paymentMethods,
-      orders: Array.isArray(parsed?.orders)
-        ? parsed.orders.map((order) => ({
-            ...order,
-            heartBeans: normalizePositiveNumber(order?.heartBeans, getDefaultHeartBeansForPlan({ name: order?.plan })),
-            heartBeansGrantedAt: String(order?.heartBeansGrantedAt || '').trim(),
-          }))
-        : createDefaultAdminData().orders,
-      songs: Array.isArray(parsed?.songs) ? parsed.songs : [],
-      config: {
-        ...defaults.config,
-        ...(parsed?.config ?? {}),
-        allowSignup: normalizeBoolean(parsed?.config?.allowSignup, defaults.config.allowSignup),
-        enableChineseSite: normalizeBoolean(parsed?.config?.enableChineseSite, defaults.config.enableChineseSite),
-        heartBeansPerGeneration: normalizePositiveNumber(parsed?.config?.heartBeansPerGeneration, defaults.config.heartBeansPerGeneration),
-      },
-    }
+    return normalizeLoadedAdminData(JSON.parse(raw))
   } catch {
-    const fallback = defaults
-    fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(fallback, null, 2), 'utf8')
-    return fallback
+    fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(defaults, null, 2), 'utf8')
+    return defaults
   }
 }
 
-let adminData = loadAdminData()
+const databaseUrl = getDatabaseConnectionString()
+const persistence = databaseUrl ? new PostgresPersistence(databaseUrl) : null
+let persistenceSyncChain = Promise.resolve()
+let adminData = loadAdminDataFromFile()
 
 function saveAdminData() {
   ensureDataDir()
   fs.writeFileSync(ADMIN_DATA_FILE, JSON.stringify(adminData, null, 2), 'utf8')
+  queuePersistenceSync('admin data changed')
+}
+
+function buildPersistenceSnapshot() {
+  const timestamp = nowIso()
+
+  return {
+    settings: [
+      { key: 'config', value: adminData.config, updatedAt: timestamp },
+      { key: 'plans', value: adminData.plans, updatedAt: timestamp },
+      { key: 'paymentMethods', value: adminData.paymentMethods, updatedAt: timestamp },
+      { key: 'showcaseTracks', value: adminData.showcaseTracks, updatedAt: timestamp },
+    ],
+    members: adminData.members,
+    orders: adminData.orders,
+    songs: adminData.songs,
+    memberSessions: Array.from(memberSessions.values()),
+    jobs: Array.from(jobs.values()),
+    lyricRequests: Array.from(lyricRequests.values()),
+    sunoTasks: Array.from(sunoTasks.values()),
+  }
+}
+
+function queuePersistenceSync(reason = 'state changed') {
+  if (!persistence?.enabled) {
+    return
+  }
+
+  const snapshot = buildPersistenceSnapshot()
+  persistenceSyncChain = persistenceSyncChain
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await persistence.persistSnapshot(snapshot)
+      } catch (error) {
+        console.error(`[persistence] Failed to sync ${reason}:`, error)
+      }
+    })
+}
+
+function hasRemoteSnapshot(snapshot) {
+  if (!snapshot) {
+    return false
+  }
+
+  return snapshot.settings.length > 0
+    || snapshot.members.length > 0
+    || snapshot.orders.length > 0
+    || snapshot.songs.length > 0
+    || snapshot.memberSessions.length > 0
+    || snapshot.jobs.length > 0
+    || snapshot.lyricRequests.length > 0
+    || snapshot.sunoTasks.length > 0
+}
+
+function restoreStateFromSnapshot(snapshot) {
+  const settingsMap = new Map(snapshot.settings.map((item) => [item.key, item.value]))
+  adminData = normalizeLoadedAdminData({
+    members: snapshot.members,
+    orders: snapshot.orders,
+    songs: snapshot.songs,
+    config: settingsMap.get('config'),
+    plans: settingsMap.get('plans'),
+    paymentMethods: settingsMap.get('paymentMethods'),
+    showcaseTracks: settingsMap.get('showcaseTracks'),
+  })
+
+  jobs.clear()
+  lyricRequests.clear()
+  sunoTasks.clear()
+  memberSessions.clear()
+  sunoTaskToJob.clear()
+
+  snapshot.jobs.forEach((job) => {
+    if (!job?.id) {
+      return
+    }
+
+    jobs.set(job.id, job)
+    if (job.sunoTaskId) {
+      sunoTaskToJob.set(String(job.sunoTaskId), job.id)
+    }
+  })
+
+  snapshot.lyricRequests.forEach((item) => {
+    if (item?.jobId) {
+      lyricRequests.set(item.jobId, item)
+    }
+  })
+
+  snapshot.sunoTasks.forEach((item) => {
+    if (!item?.jobId) {
+      return
+    }
+
+    sunoTasks.set(item.jobId, item)
+    if (item.taskId) {
+      sunoTaskToJob.set(String(item.taskId), item.jobId)
+    }
+  })
+
+  snapshot.memberSessions.forEach((session) => {
+    if (session?.token) {
+      memberSessions.set(session.token, session)
+    }
+  })
+}
+
+function recordLyricRequest(jobId, patch = {}) {
+  const current = lyricRequests.get(jobId) || {
+    jobId,
+    status: 'pending',
+    requestPayload: null,
+    responsePayload: null,
+    parsedPayload: null,
+    error: '',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  }
+
+  const next = {
+    ...current,
+    ...patch,
+    jobId,
+    updatedAt: nowIso(),
+  }
+
+  lyricRequests.set(jobId, next)
+  queuePersistenceSync('lyric request changed')
+  return next
+}
+
+function recordSunoTask(jobId, patch = {}) {
+  const current = sunoTasks.get(jobId) || {
+    jobId,
+    taskId: '',
+    status: 'pending',
+    requestPayload: null,
+    createResponsePayload: null,
+    callbackPayload: null,
+    latestFeedPayload: null,
+    error: '',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  }
+
+  const next = {
+    ...current,
+    ...patch,
+    jobId,
+    updatedAt: nowIso(),
+  }
+
+  if (current.taskId && current.taskId !== next.taskId) {
+    sunoTaskToJob.delete(current.taskId)
+  }
+
+  if (next.taskId) {
+    sunoTaskToJob.set(String(next.taskId), jobId)
+  }
+
+  sunoTasks.set(jobId, next)
+  queuePersistenceSync('suno task changed')
+  return next
 }
 
 function getPaymentCheckoutUrl(method) {
@@ -536,9 +709,11 @@ function createMemberSession(member) {
     token,
     email: normalizeEmail(member.email),
     createdAt: nowIso(),
+    updatedAt: nowIso(),
   }
 
   memberSessions.set(token, session)
+  queuePersistenceSync('member session created')
 
   return {
     token,
@@ -565,12 +740,14 @@ function requireMemberAuth(req, res, next) {
   const member = findMemberByEmail(session.email)
   if (!member) {
     memberSessions.delete(token)
+    queuePersistenceSync('member session removed')
     res.status(401).json({ message: '会员账号不存在，请重新登录。' })
     return
   }
 
   if (member.disabled) {
     memberSessions.delete(token)
+    queuePersistenceSync('member session removed')
     res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
     return
   }
@@ -589,11 +766,13 @@ function getValidMemberFromToken(token) {
   const member = findMemberByEmail(session.email)
   if (!member) {
     memberSessions.delete(token)
+    queuePersistenceSync('member session removed')
     return { session: null, member: null, error: '会员账号不存在，请重新登录。', status: 401 }
   }
 
   if (member.disabled) {
     memberSessions.delete(token)
+    queuePersistenceSync('member session removed')
     return { session: null, member: null, error: '该会员账号已被禁用，请联系管理员。', status: 403 }
   }
 
@@ -674,6 +853,11 @@ function handleSunoCallback(req, res) {
     return
   }
 
+  recordSunoTask(jobId, {
+    taskId,
+    status: 'callback_received',
+    callbackPayload: payload,
+  })
   applySunoStatus(jobId, payload)
   res.json({ ok: true })
 }
@@ -847,7 +1031,7 @@ function buildStyleTags(stylePrompt) {
     .join(' ')
 }
 
-async function generateLyrics({ groom, bride, occasion, style, styleLabel, languageLabel, vocalLabel, loveStory, meetingStory, vowKeywords }) {
+async function generateLyrics(jobId, { groom, bride, occasion, style, styleLabel, languageLabel, vocalLabel, loveStory, meetingStory, vowKeywords }) {
   const isProposal = occasion === 'proposal'
   const sceneLabel = isProposal ? '求婚' : '婚礼'
   const prompt = [
@@ -878,38 +1062,60 @@ async function generateLyrics({ groom, bride, occasion, style, styleLabel, langu
     `stylePrompt：给 SUNO 的英文风格标签，简短、可直接塞进 tags，需包含 ${isProposal ? 'proposal' : 'wedding'}、love、romantic、声线提示以及曲风关键词。`,
   ].join('\n')
 
-  const data = await requestJson(
-    `${DEEPSEEK_API_BASE}/chat/completions`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${getDeepSeekKey()}`,
-        'Content-Type': 'application/json',
+  const requestPayload = {
+    model: DEEPSEEK_MODEL,
+    response_format: { type: 'json_object' },
+    temperature: 1,
+    stream: false,
+    messages: [
+      {
+        role: 'system',
+        content: isProposal
+          ? 'You write proposal song lyrics and always respond with valid JSON only.'
+          : 'You write wedding song lyrics and always respond with valid JSON only.',
       },
-      body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
-        response_format: { type: 'json_object' },
-        temperature: 1,
-        stream: false,
-        messages: [
-          {
-            role: 'system',
-            content: isProposal
-              ? 'You write proposal song lyrics and always respond with valid JSON only.'
-              : 'You write wedding song lyrics and always respond with valid JSON only.',
-          },
-          {
-            role: 'user',
-            content: `${prompt}\n\n重要：不要输出解释，只输出 JSON 对象。`,
-          },
-        ],
-      }),
-    },
-    'DeepSeek',
-  )
+      {
+        role: 'user',
+        content: `${prompt}\n\n重要：不要输出解释，只输出 JSON 对象。`,
+      },
+    ],
+  }
+
+  recordLyricRequest(jobId, {
+    status: 'requested',
+    requestPayload,
+    error: '',
+  })
+
+  let data
+  try {
+    data = await requestJson(
+      `${DEEPSEEK_API_BASE}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${getDeepSeekKey()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestPayload),
+      },
+      'DeepSeek',
+    )
+  } catch (error) {
+    recordLyricRequest(jobId, {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'DeepSeek 请求失败。',
+    })
+    throw error
+  }
 
   const content = data?.choices?.[0]?.message?.content
   if (!content) {
+    recordLyricRequest(jobId, {
+      status: 'error',
+      responsePayload: data,
+      error: 'DeepSeek 没有返回歌词内容。',
+    })
     throw new Error('DeepSeek 没有返回歌词内容。')
   }
 
@@ -924,14 +1130,29 @@ async function generateLyrics({ groom, bride, occasion, style, styleLabel, langu
   }
 
   if (!parsed?.title || !parsed?.lyrics || !parsed?.stylePrompt) {
+    recordLyricRequest(jobId, {
+      status: 'error',
+      responsePayload: data,
+      parsedPayload: parsed,
+      error: 'DeepSeek 返回的歌词格式不完整。',
+    })
     throw new Error('DeepSeek 返回的歌词格式不完整。')
   }
 
-  return {
+  const result = {
     title: sanitizeTitle(parsed.title, groom, bride),
     lyrics: String(parsed.lyrics).trim(),
     stylePrompt: String(parsed.stylePrompt).trim(),
   }
+
+  recordLyricRequest(jobId, {
+    status: 'completed',
+    responsePayload: data,
+    parsedPayload: result,
+    error: '',
+  })
+
+  return result
 }
 
 async function createSunoTask(job, { title, lyrics, stylePrompt }) {
@@ -948,18 +1169,34 @@ async function createSunoTask(job, { title, lyrics, stylePrompt }) {
     payload.callback_url = `${PUBLIC_BASE_URL}/api/suno/callback`
   }
 
-  const data = await requestJson(
-    SUNO_GENERATE_URL,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: getSunoAuthHeader(),
-        'Content-Type': 'application/json',
+  recordSunoTask(job.id, {
+    status: 'requested',
+    requestPayload: payload,
+    error: '',
+  })
+
+  let data
+  try {
+    data = await requestJson(
+      SUNO_GENERATE_URL,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: getSunoAuthHeader(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-    },
-    'Suno',
-  )
+      'Suno',
+    )
+  } catch (error) {
+    recordSunoTask(job.id, {
+      status: 'error',
+      requestPayload: payload,
+      error: error instanceof Error ? error.message : 'Suno 创建任务失败。',
+    })
+    throw error
+  }
 
   const taskId = pickFirstDefined(
     data?.data?.[0]?.task_id,
@@ -984,10 +1221,22 @@ async function createSunoTask(job, { title, lyrics, stylePrompt }) {
   // #endregion
 
   if (!taskId) {
+    recordSunoTask(job.id, {
+      status: 'error',
+      requestPayload: payload,
+      createResponsePayload: data,
+      error: 'Suno 没有返回 taskId。',
+    })
     throw new Error('Suno 没有返回 taskId。')
   }
 
-  sunoTaskToJob.set(String(taskId), job.id)
+  recordSunoTask(job.id, {
+    taskId: String(taskId),
+    status: 'submitted',
+    requestPayload: payload,
+    createResponsePayload: data,
+    error: '',
+  })
   return String(taskId)
 }
 
@@ -1140,6 +1389,15 @@ async function fetchSunoTask(taskId) {
   })
   // #endregion
 
+  const jobId = sunoTaskToJob.get(String(taskId))
+  if (jobId) {
+    recordSunoTask(jobId, {
+      taskId: String(taskId),
+      status: 'polled',
+      latestFeedPayload: data,
+    })
+  }
+
   return data?.data ?? data
 }
 
@@ -1168,6 +1426,11 @@ async function pollSunoTask(jobId, taskId) {
       await sleep(POLL_INTERVAL_MS)
     }
   } catch (error) {
+    recordSunoTask(jobId, {
+      taskId,
+      status: 'error',
+      error: error instanceof Error ? error.message : '轮询 Suno 结果失败。',
+    })
     updateJob(jobId, {
       status: 'error',
       error: error instanceof Error ? error.message : '轮询 Suno 结果失败。',
@@ -1188,6 +1451,8 @@ function cleanupJobs() {
       }
     }
   }
+
+  queuePersistenceSync('cleanup expired jobs')
 }
 
 setInterval(cleanupJobs, 1000 * 60 * 30).unref()
@@ -1195,6 +1460,7 @@ setInterval(cleanupJobs, 1000 * 60 * 30).unref()
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
+    databaseEnabled: Boolean(persistence?.enabled),
     callbackEnabled: Boolean(PUBLIC_BASE_URL),
     deepseekConfigured: Boolean(getDeepSeekKey()),
     sunoConfigured: Boolean(getSunoAuthToken()),
@@ -1346,6 +1612,7 @@ app.get('/api/member/session', requireMemberAuth, (req, res) => {
 
 app.post('/api/member/logout', requireMemberAuth, (req, res) => {
   memberSessions.delete(readMemberToken(req))
+  queuePersistenceSync('member session removed')
   res.json({ ok: true })
 })
 
@@ -1901,7 +2168,7 @@ app.post('/api/generate-song', async (req, res) => {
 
   try {
     updateJob(job.id, { status: 'generating_lyrics' })
-    const lyrics = await generateLyrics(input)
+    const lyrics = await generateLyrics(job.id, input)
     updateJob(job.id, {
       status: 'lyrics_ready',
       title: lyrics.title,
@@ -1978,8 +2245,7 @@ app.get('/api/member/songs', requireMemberAuth, (req, res) => {
   res.json({ items })
 })
 
-app.get('/api/songs/:songId/download', async (req, res) => {
-  const songId = String(req.params.songId || '').trim()
+function resolveSongSource(songId) {
   const storedSong = adminData.songs.find((item) => item.id === songId)
   const relatedJobId = String(storedSong?.jobId || songId).trim()
   const job = jobs.get(relatedJobId)
@@ -1987,24 +2253,89 @@ app.get('/api/songs/:songId/download', async (req, res) => {
     ? job?.tracks?.[storedSong.trackIndex]
     : job?.tracks?.[0]
   const sourceUrl = pickPreferredAudioUrl(
-    storedSong?.downloadUrl,
-    storedSong?.audioUrl,
     relatedTrack?.downloadUrl,
     relatedTrack?.audioUrl,
+    storedSong?.downloadUrl,
+    storedSong?.audioUrl,
   )
+
+  return {
+    storedSong,
+    sourceUrl,
+  }
+}
+
+function buildSongFileName(song) {
+  const title = String(song?.title || 'MelodyVow Song')
+    .replace(/[<>:"/\\|?*]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return `${title || 'MelodyVow Song'}.mp3`
+}
+
+async function proxySongAudio(req, res, disposition = 'inline') {
+  const songId = String(req.params.songId || '').trim()
+  const { storedSong, sourceUrl } = resolveSongSource(songId)
 
   if (!sourceUrl) {
     res.status(404).json({ message: '当前歌曲还没有可下载的音频链接。' })
     return
   }
 
-  res.setHeader('Cache-Control', 'no-store')
-  res.redirect(302, sourceUrl)
+  try {
+    const upstream = await fetch(sourceUrl)
+    if (!upstream.ok) {
+      throw new Error(`upstream_${upstream.status}`)
+    }
+
+    const audioBuffer = Buffer.from(await upstream.arrayBuffer())
+    const fileName = buildSongFileName(storedSong)
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg')
+    res.setHeader('Content-Length', String(audioBuffer.length))
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`)
+    res.status(200).end(audioBuffer)
+  } catch {
+    res.status(502).json({ message: disposition === 'attachment' ? '下载歌曲失败，请稍后再试。' : '歌曲播放链接暂时不可用。' })
+  }
+}
+
+app.get('/api/songs/:songId/stream', async (req, res) => {
+  await proxySongAudio(req, res, 'inline')
+})
+
+app.get('/api/songs/:songId/download', async (req, res) => {
+  await proxySongAudio(req, res, 'attachment')
 })
 
 app.get('/api/suno/callback', handleSunoCallback)
 app.post('/api/suno/callback', handleSunoCallback)
 
-app.listen(PORT, () => {
-  console.log(`MelodyVow API server listening on http://127.0.0.1:${PORT}`)
-})
+async function bootstrap() {
+  if (persistence?.enabled) {
+    try {
+      await persistence.testConnection()
+      const remoteSnapshot = await persistence.hydrateSnapshot()
+      if (hasRemoteSnapshot(remoteSnapshot)) {
+        restoreStateFromSnapshot(remoteSnapshot)
+        saveAdminData()
+        console.log('[persistence] Restored state from Supabase Postgres.')
+      }
+      else {
+        await persistence.persistSnapshot(buildPersistenceSnapshot())
+        console.log('[persistence] Imported local JSON state into Supabase Postgres.')
+      }
+    } catch (error) {
+      console.error('[persistence] Database bootstrap failed, fallback to local JSON only:', error)
+    }
+  }
+  else {
+    console.log('[persistence] DATABASE_URL 未配置，当前继续使用本地 JSON 持久化。')
+  }
+
+  app.listen(PORT, () => {
+    console.log(`MelodyVow API server listening on http://127.0.0.1:${PORT}`)
+  })
+}
+
+void bootstrap()

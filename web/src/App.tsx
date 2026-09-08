@@ -426,6 +426,10 @@ function getSongDownloadUrl(songId: string) {
   return apiUrl(`/api/songs/${encodeURIComponent(songId)}/download`)
 }
 
+function getSongStreamUrl(songId: string) {
+  return apiUrl(`/api/songs/${encodeURIComponent(songId)}/stream`)
+}
+
 function buildTrackHistoryId(jobId: string, index: number) {
   return `${jobId}__track_${index + 1}`
 }
@@ -3300,9 +3304,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
 }
 
 function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession }: AccountPageProps) {
-  if (!authSession?.email) {
-    return <Navigate to={withLocale(locale, '/auth')} replace />
-  }
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [playingSongId, setPlayingSongId] = useState('')
 
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
@@ -3328,6 +3331,114 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         minute: '2-digit',
       })
     : null
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) {
+      return
+    }
+
+    const handleEnded = () => {
+      setPlayingSongId('')
+    }
+
+    audio.addEventListener('ended', handleEnded)
+    return () => {
+      audio.removeEventListener('ended', handleEnded)
+    }
+  }, [])
+
+  function buildSongFileName(item: HistoryItem) {
+    const raw = `${item.title}${item.variantLabel ? ` ${item.variantLabel}` : ''}`
+      .replace(/[<>:"/\\|?*]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return `${raw || 'MelodyVow Song'}.mp3`
+  }
+
+  async function handleDownloadSong(item: HistoryItem) {
+    if (!item.downloadUrl && !item.audioUrl) {
+      onOpenModal(copy(locale, {
+        zh: '当前歌曲还没有可下载的音频链接。',
+        en: 'This song does not have a downloadable audio link yet.',
+      }))
+      return
+    }
+
+    try {
+      const response = await fetch(getSongDownloadUrl(item.id))
+      if (!response.ok) {
+        const result = (await readJsonSafe(response)) as { message?: string }
+        throw new Error(result.message || '下载歌曲失败。')
+      }
+
+      const blob = await response.blob()
+      const blobUrl = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = blobUrl
+      anchor.download = buildSongFileName(item)
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      onOpenModal(error instanceof Error ? error.message : copy(locale, {
+        zh: '下载歌曲失败，请稍后重试。',
+        en: 'Song download failed. Please try again later.',
+      }))
+    }
+  }
+
+  async function handleShareSong(item: HistoryItem) {
+    const shareUrl = getSongStreamUrl(item.id)
+
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      onOpenModal(copy(locale, {
+        zh: '分享链接已复制。',
+        en: 'Share link copied.',
+      }))
+    } catch {
+      onOpenModal(`${copy(locale, {
+        zh: '分享链接如下：',
+        en: 'Share link:',
+      })}\n${shareUrl}`)
+    }
+  }
+
+  async function handleTogglePlay(item: HistoryItem) {
+    const audio = audioRef.current
+    if (!audio) {
+      return
+    }
+
+    const streamUrl = getSongStreamUrl(item.id)
+
+    try {
+      if (playingSongId === item.id && !audio.paused) {
+        audio.pause()
+        setPlayingSongId('')
+        return
+      }
+
+      if (audio.src !== streamUrl) {
+        audio.src = streamUrl
+        audio.load()
+      }
+
+      await audio.play()
+      setPlayingSongId(item.id)
+    } catch {
+      onOpenModal(copy(locale, {
+        zh: '当前歌曲暂时无法播放，请稍后再试。',
+        en: 'This song cannot be played right now. Please try again later.',
+      }))
+    }
+  }
+
+  if (!authSession?.email) {
+    return <Navigate to={withLocale(locale, '/auth')} replace />
+  }
 
   return (
     <SiteLayout
@@ -3384,45 +3495,53 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                 <p className="account-song-subtitle">{item.subtitle}</p>
                 <div className="account-song-meta">
                   <span>{item.status}</span>
+                  {playingSongId === item.id ? <span>{copy(locale, { zh: '播放中', en: 'Playing' })}</span> : null}
                   {item.variantLabel ? <span>{item.variantLabel}</span> : null}
                   {item.languageLabel ? <span>{item.languageLabel}</span> : null}
                   {item.styleLabel ? <span>{item.styleLabel}</span> : null}
                 </div>
               </div>
-              <button
-                type="button"
-                className="primary-button compact"
-                onClick={() => {
-                  reportDebugEvent({
-                    hypothesisId: 'C',
-                    location: 'web/src/App.tsx:accountDownloadClick',
-                    msg: '[DEBUG] User clicked account history download button',
-                    data: {
-                      itemId: item.id,
-                      chosenUrl: getSongDownloadUrl(item.id),
-                      audioUrl: item.audioUrl || '',
-                      downloadUrl: item.downloadUrl || '',
-                    },
-                  })
-                  if (item.downloadUrl || item.audioUrl) {
-                    window.open(getSongDownloadUrl(item.id), '_blank', 'noopener,noreferrer')
-                    return
-                  }
-
-                  onOpenModal(
-                    copy(locale, {
-                      zh: `${item.action}功能已保留接口，可接入真实音频文件和订单记录。`,
-                      en: `${item.action} is prepared for real file delivery and order records.`,
-                    }),
-                  )
-                }}
-              >
-                {item.downloadUrl || item.audioUrl
-                  ? copy(locale, { zh: '下载音频', en: 'Download Audio' })
-                  : item.action}
-              </button>
+              <div className="account-song-actions">
+                <button
+                  type="button"
+                  className="ghost-button compact"
+                  onClick={() => void handleTogglePlay(item)}
+                >
+                  {playingSongId === item.id
+                    ? copy(locale, { zh: '暂停播放', en: 'Pause' })
+                    : copy(locale, { zh: '播放歌曲', en: 'Play' })}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button compact"
+                  onClick={() => void handleShareSong(item)}
+                >
+                  {copy(locale, { zh: '分享链接', en: 'Share Link' })}
+                </button>
+                <button
+                  type="button"
+                  className="primary-button compact"
+                  onClick={() => {
+                    reportDebugEvent({
+                      hypothesisId: 'C',
+                      location: 'web/src/App.tsx:accountDownloadClick',
+                      msg: '[DEBUG] User clicked account history download button',
+                      data: {
+                        itemId: item.id,
+                        chosenUrl: getSongDownloadUrl(item.id),
+                        audioUrl: item.audioUrl || '',
+                        downloadUrl: item.downloadUrl || '',
+                      },
+                    })
+                    void handleDownloadSong(item)
+                  }}
+                >
+                  {copy(locale, { zh: '下载歌曲', en: 'Download Song' })}
+                </button>
+              </div>
             </article>
           ))}
+          <audio ref={audioRef} preload="none" />
         </section>
       </section>
     </SiteLayout>
@@ -3924,6 +4043,8 @@ function AdminDashboardPage({
     : []
   const successfulSongCount = selectedMemberSongs.filter((item) => item.status === 'ready').length
   const failedSongCount = selectedMemberSongs.filter((item) => item.status === 'error').length
+  const selectedSongStreamUrl = selectedSong ? getSongStreamUrl(selectedSong.id) : ''
+  const selectedSongDownloadUrl = selectedSong ? getSongDownloadUrl(selectedSong.id) : ''
 
   return (
     <div className="admin-shell">
@@ -4158,7 +4279,11 @@ function AdminDashboardPage({
                             <div key={item.id} className="admin-inline-row">
                               <div>
                                 <strong>{item.title || item.couple || '未命名歌曲'}</strong>
-                                <p>{item.couple || item.email || '-'}</p>
+                                <p>{item.variantLabel ? `${item.couple || item.email || '-'} · ${item.variantLabel}` : (item.couple || item.email || '-')}</p>
+                                <div className="admin-inline-links">
+                                  <a href={getSongStreamUrl(item.id)} target="_blank" rel="noreferrer">播放链接</a>
+                                  <a href={getSongDownloadUrl(item.id)} target="_blank" rel="noreferrer">MP3 链接</a>
+                                </div>
                               </div>
                               <div className="admin-inline-meta">
                                 <span className={`soft-pill ${item.status === 'ready' ? 'accent' : ''}`}>{item.status === 'ready' ? '成功' : item.status === 'error' ? '失败' : item.status}</span>
@@ -4245,6 +4370,9 @@ function AdminDashboardPage({
                       </select>
                     </label>
                     <p><strong>错误信息：</strong>{selectedSong.error || '无'}</p>
+                    <p><strong>版本：</strong>{selectedSong.variantLabel || '单首歌曲'}</p>
+                    <p><strong>系统播放链接：</strong>{selectedSongStreamUrl || '无'}</p>
+                    <p><strong>系统 MP3 链接：</strong>{selectedSongDownloadUrl || '无'}</p>
                     <p><strong>播放链接：</strong>{selectedSong.audioUrl || '无'}</p>
                     <p><strong>下载链接：</strong>{selectedSong.downloadUrl || '无'}</p>
                     <p><strong>原始 audio_url：</strong>{selectedSong.sourceAudioUrl || '无'}</p>
@@ -4256,15 +4384,22 @@ function AdminDashboardPage({
                       <strong>歌词</strong>
                       <p>{selectedSong.lyrics || selectedSong.lyricSnippet || '暂无歌词内容。'}</p>
                     </div>
-                    {selectedSong.downloadUrl || selectedSong.audioUrl ? (
+                    <div className="admin-link-actions">
+                      <button
+                        type="button"
+                        className="ghost-button compact"
+                        onClick={() => window.open(getSongStreamUrl(selectedSong.id), '_blank', 'noopener,noreferrer')}
+                      >
+                        打开播放链接
+                      </button>
                       <button
                         type="button"
                         className="primary-button compact"
                         onClick={() => window.open(getSongDownloadUrl(selectedSong.id), '_blank', 'noopener,noreferrer')}
                       >
-                        下载音频
+                        打开 MP3 链接
                       </button>
-                    ) : null}
+                    </div>
                     <button type="button" className="primary-button" onClick={() => void handleSaveSong()}>
                       保存歌曲修改
                     </button>
