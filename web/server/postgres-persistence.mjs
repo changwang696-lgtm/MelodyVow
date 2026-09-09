@@ -14,7 +14,22 @@ async function replaceRows(client, table, keyColumn, rows, buildParams) {
     )
   }
 
-  const keys = rows.map((row) => String(row[keyColumn] || '').trim()).filter(Boolean)
+  const keyAliases = [
+    keyColumn,
+    keyColumn.replace(/_([a-z])/g, (_, char) => char.toUpperCase()),
+    keyColumn.replace(/_id$/i, 'Id'),
+  ]
+  const keys = rows
+    .map((row) => {
+      for (const key of keyAliases) {
+        const value = row?.[key]
+        if (value !== undefined && value !== null && String(value).trim()) {
+          return String(value).trim()
+        }
+      }
+      return ''
+    })
+    .filter(Boolean)
   if (keys.length) {
     await client.query(`DELETE FROM ${table} WHERE NOT (${keyColumn} = ANY($1::text[]))`, [keys])
   }

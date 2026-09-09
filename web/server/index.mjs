@@ -811,6 +811,14 @@ function pickPreferredAudioUrl(...values) {
   return candidates.find((value) => !isExpiredSunoStreamUrl(value)) || ''
 }
 
+function pickUsableAudioUrl(...values) {
+  const candidates = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+
+  return pickPreferredAudioUrl(...candidates) || candidates[0] || ''
+}
+
 function getObjectValue(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
@@ -1249,10 +1257,22 @@ function normalizeTracksFromRaw(trackOrTracks) {
 
   return array
     .map((track) => {
-      const sourceAudioUrl = pickPreferredAudioUrl(track?.audio_url, track?.audioUrl)
-      const sourceDownloadUrl = pickPreferredAudioUrl(track?.download_url, track?.downloadUrl)
-      const playbackUrl = pickPreferredAudioUrl(sourceAudioUrl, sourceDownloadUrl)
-      const downloadUrl = pickPreferredAudioUrl(sourceDownloadUrl, sourceAudioUrl)
+      const sourceAudioUrl = pickUsableAudioUrl(
+        track?.audio_url,
+        track?.audioUrl,
+        track?.stream_audio_url,
+        track?.streamAudioUrl,
+      )
+      const sourceDownloadUrl = pickUsableAudioUrl(
+        track?.download_url,
+        track?.downloadUrl,
+        track?.audio_url,
+        track?.audioUrl,
+        track?.stream_audio_url,
+        track?.streamAudioUrl,
+      )
+      const playbackUrl = pickUsableAudioUrl(sourceAudioUrl, sourceDownloadUrl)
+      const downloadUrl = pickUsableAudioUrl(sourceDownloadUrl, sourceAudioUrl)
 
       return {
         id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
@@ -1274,15 +1294,19 @@ function normalizeTracksFromRaw(trackOrTracks) {
 function getNormalizedTaskState(payload) {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload
   const rawStatus = pickFirstDefined(data?.status, payload?.status)
-  const audioUrl = pickPreferredAudioUrl(
+  const audioUrl = pickUsableAudioUrl(
     data?.download_url,
     data?.downloadUrl,
     data?.audio_url,
     data?.audioUrl,
+    data?.stream_audio_url,
+    data?.streamAudioUrl,
     payload?.download_url,
     payload?.downloadUrl,
     payload?.audio_url,
     payload?.audioUrl,
+    payload?.stream_audio_url,
+    payload?.streamAudioUrl,
   )
   const state = String(pickFirstDefined(data?.state, payload?.state) || '').trim().toLowerCase()
 
@@ -2252,11 +2276,15 @@ function resolveSongSource(songId) {
   const relatedTrack = Number.isInteger(storedSong?.trackIndex)
     ? job?.tracks?.[storedSong.trackIndex]
     : job?.tracks?.[0]
-  const sourceUrl = pickPreferredAudioUrl(
+  const sourceUrl = pickUsableAudioUrl(
     relatedTrack?.downloadUrl,
     relatedTrack?.audioUrl,
+    relatedTrack?.sourceDownloadUrl,
+    relatedTrack?.sourceAudioUrl,
     storedSong?.downloadUrl,
     storedSong?.audioUrl,
+    storedSong?.sourceDownloadUrl,
+    storedSong?.sourceAudioUrl,
   )
 
   return {
@@ -2311,6 +2339,18 @@ app.get('/api/songs/:songId/download', async (req, res) => {
 app.get('/api/suno/callback', handleSunoCallback)
 app.post('/api/suno/callback', handleSunoCallback)
 
+function resumePendingSunoJobs() {
+  for (const job of jobs.values()) {
+    if (!job?.id || !job?.sunoTaskId) {
+      continue
+    }
+
+    if (job.status === 'generating_song' || job.status === 'lyrics_ready') {
+      void pollSunoTask(job.id, job.sunoTaskId)
+    }
+  }
+}
+
 async function bootstrap() {
   if (persistence?.enabled) {
     try {
@@ -2319,6 +2359,7 @@ async function bootstrap() {
       if (hasRemoteSnapshot(remoteSnapshot)) {
         restoreStateFromSnapshot(remoteSnapshot)
         saveAdminData()
+        resumePendingSunoJobs()
         console.log('[persistence] Restored state from Supabase Postgres.')
       }
       else {
