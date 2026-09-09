@@ -289,7 +289,6 @@ type StylesPageProps = {
 type PreviewPageProps = {
   locale: Locale
   draft: SongDraft
-  onSaveHistory: (item: HistoryItem) => void
   authSession: AuthSession | null
   onLogout: () => void
   onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
@@ -1159,12 +1158,12 @@ function App() {
     window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(adminSession))
   }, [adminSession])
 
-  function saveHistory(item: HistoryItem) {
+  const saveHistory = useCallback((item: HistoryItem) => {
     setSongHistory((current) => {
       const next = [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 12)
       return next
     })
-  }
+  }, [])
 
   function handleAuthSuccess(session: AuthSession) {
     setSongHistory([])
@@ -1222,6 +1221,84 @@ function App() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!floatingPlayer?.isGenerating || !floatingPlayer.key || floatingPlayer.key.startsWith('pending-generate-')) {
+      return
+    }
+
+    let disposed = false
+
+    const syncFloatingJob = async (allowAutoplay = false) => {
+      try {
+        const response = await fetch(apiUrl(`/api/jobs/${floatingPlayer.key}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+
+        if (!response.ok) {
+          throw new Error('message' in result && result.message ? result.message : '任务查询失败。')
+        }
+
+        const job = result as SongJob
+        if (disposed) {
+          return
+        }
+
+        if (job.status === 'ready') {
+          job.tracks?.forEach((track, index) => {
+            const variantLabel = copy(floatingPlayer.locale, {
+              zh: `歌曲 ${index + 1}`,
+              en: `Version ${index + 1}`,
+            })
+            saveHistory({
+              id: buildTrackHistoryId(job.id, index),
+              title: track.title || job.title || floatingPlayer.title || 'MelodyVow',
+              subtitle: `${summarizeStoryText(
+                draft.loveStory || draft.meetingStory,
+                copy(floatingPlayer.locale, {
+                  zh: `${draft.groom} & ${draft.bride} 的婚礼歌`,
+                  en: `${draft.groom} & ${draft.bride}'s wedding song`,
+                }),
+              )} · ${variantLabel}`,
+              status: copy(floatingPlayer.locale, { zh: '已生成', en: 'Ready' }),
+              action: copy(floatingPlayer.locale, { zh: '播放', en: 'Play' }),
+              variantLabel,
+              audioUrl: track.audioUrl || track.downloadUrl || '',
+              downloadUrl: track.downloadUrl || track.audioUrl || '',
+              createdAt: job.updatedAt,
+              languageLabel: draft.languageLabel,
+              styleLabel: draft.style ? getStyleLabel(floatingPlayer.locale, draft.style) : '',
+              vocalLabel: draft.vocal ? getVocalLabel(floatingPlayer.locale, draft.vocal) : '',
+              lyricSnippet: summarizeStoryText(job.lyrics ?? '', ''),
+            })
+          })
+        }
+
+        upsertFloatingPlayer(buildFloatingPlayerPayloadFromJob(job, floatingPlayer.locale, draft, '', allowAutoplay && job.status === 'ready'))
+      } catch (error) {
+        if (!disposed) {
+          upsertFloatingPlayer({
+            key: floatingPlayer.key,
+            locale: floatingPlayer.locale,
+            canClose: true,
+            isGenerating: false,
+            generationProgress: 0,
+            error: error instanceof Error ? error.message : '任务查询失败。',
+            statusText: error instanceof Error ? error.message : '任务查询失败。',
+          })
+        }
+      }
+    }
+
+    void syncFloatingJob(true)
+    const timer = window.setInterval(() => {
+      void syncFloatingJob()
+    }, 5000)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [draft, floatingPlayer, saveHistory, upsertFloatingPlayer])
+
   function renderChineseRoute(fallbackPath: string, element: ReactNode) {
     return siteConfig.enableChineseSite ? element : <Navigate to={fallbackPath} replace />
   }
@@ -1262,7 +1339,7 @@ function App() {
         />
         <Route
           path="/zh/preview"
-          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/pricing"
@@ -1369,7 +1446,7 @@ function App() {
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<PreviewPage locale="en" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/pricing"
@@ -1491,10 +1568,6 @@ function FloatingPhonePlayer({
   const [activeTrackIndex, setActiveTrackIndex] = useState(player.activeTrackIndex ?? 0)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [autoplayNotice, setAutoplayNotice] = useState('')
-  const [isCollapsed, setIsCollapsed] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const dragStateRef = useRef<{
@@ -1508,11 +1581,7 @@ function FloatingPhonePlayer({
   useEffect(() => {
     setActiveTrackIndex(player.activeTrackIndex ?? 0)
     setProgress(0)
-    setCurrentTime(0)
-    setDuration(0)
     setPlaying(false)
-    setAutoplayNotice('')
-    setIsCollapsed(false)
   }, [player.key, player.activeTrackIndex])
 
   useEffect(() => {
@@ -1548,7 +1617,7 @@ function FloatingPhonePlayer({
 
   useLayoutEffect(() => {
     setDragOffset((current) => clampDragOffset(current))
-  }, [clampDragOffset, isCollapsed, player.isGenerating, player.key, tracks.length])
+  }, [clampDragOffset, player.isGenerating, player.key, tracks.length])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1575,12 +1644,7 @@ function FloatingPhonePlayer({
       return
     }
 
-    const handleLoadedMetadata = () => {
-      setDuration(audio.duration || activeTrack?.duration || 0)
-    }
-
     const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime)
       if (audio.duration) {
         setProgress((audio.currentTime / audio.duration) * 100)
       }
@@ -1599,20 +1663,18 @@ function FloatingPhonePlayer({
       setProgress(100)
     }
 
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata)
     audio.addEventListener('timeupdate', handleTimeUpdate)
     audio.addEventListener('play', handlePlay)
     audio.addEventListener('pause', handlePause)
     audio.addEventListener('ended', handleEnded)
 
     return () => {
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
       audio.removeEventListener('timeupdate', handleTimeUpdate)
       audio.removeEventListener('play', handlePlay)
       audio.removeEventListener('pause', handlePause)
       audio.removeEventListener('ended', handleEnded)
     }
-  }, [activeTrack?.duration])
+  }, [])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -1637,16 +1699,7 @@ function FloatingPhonePlayer({
     const tryAutoplay = async () => {
       try {
         await audio.play()
-        setAutoplayNotice(copy(player.locale, {
-          zh: '歌曲已准备完成，已在浮动播放器中开始播放。',
-          en: 'The song is ready and is now playing in the floating player.',
-        }))
-      } catch {
-        setAutoplayNotice(copy(player.locale, {
-          zh: '歌曲已准备完成，请点击播放器中央按钮开始播放。',
-          en: 'The song is ready. Please press the center button to play.',
-        }))
-      }
+      } catch {}
     }
 
     void tryAutoplay()
@@ -1664,25 +1717,6 @@ function FloatingPhonePlayer({
     }
 
     audio.pause()
-  }
-
-  function updateProgress(nextProgress: number) {
-    const audio = audioRef.current
-    setProgress(nextProgress)
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = (nextProgress / 100) * audio.duration
-  }
-
-  function seekBy(deltaSeconds: number) {
-    const audio = audioRef.current
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
   }
 
   function handleDragStart(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1728,9 +1762,13 @@ function FloatingPhonePlayer({
     }
   }
 
-  const compactStatus = player.isGenerating
-    ? copy(player.locale, { zh: `${Math.round(player.generationProgress)}%`, en: `${Math.round(player.generationProgress)}%` })
-    : copy(player.locale, { zh: '播放中', en: 'Playing' })
+  const miniStatus = player.isGenerating
+    ? copy(player.locale, {
+        zh: `生成中 ${Math.round(player.generationProgress)}%`,
+        en: `Generating ${Math.round(player.generationProgress)}%`,
+      })
+    : activeTrack?.subtitle || player.subtitle || copy(player.locale, { zh: '正在播放', en: 'Now Playing' })
+  const miniProgress = player.isGenerating ? player.generationProgress : progress
 
   return (
     <div className="floating-phone-backdrop" role="presentation">
@@ -1743,186 +1781,36 @@ function FloatingPhonePlayer({
         style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
       >
         <div
-          className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''} ${isCollapsed ? 'is-collapsed' : ''}`}
+          className={`home-phone-shell floating-phone-shell floating-phone-shell-mini ${player.isGenerating ? 'is-generating' : ''}`}
           onPointerDown={handleDragStart}
           onPointerMove={handleDragMove}
           onPointerUp={handleDragEnd}
           onPointerCancel={handleDragEnd}
         >
-          <div
-            className="floating-phone-drag-area"
-          >
-            <div className="phone-status-row">
-              <span>{player.eyebrow || 'MelodyVow'}</span>
-              <span>{player.isGenerating ? copy(player.locale, { zh: '生成中', en: 'Creating' }) : copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</span>
-            </div>
-            <div className="phone-notch-row">
-              <div className="phone-pill">{copy(player.locale, { zh: '悬浮播放器', en: 'Floating Player' })}</div>
-              <div className="floating-phone-actions">
-                <button type="button" className="floating-phone-toggle" onClick={() => setIsCollapsed((current) => !current)}>
-                  {isCollapsed
-                    ? copy(player.locale, { zh: '展开', en: 'Expand' })
-                    : copy(player.locale, { zh: '折叠', en: 'Collapse' })}
+          <audio ref={audioRef} preload="metadata" />
+          <div className="floating-phone-compact">
+            <div className="floating-phone-drag-area floating-phone-mini-main">
+              <div className="floating-phone-compact-copy">
+                <strong>{activeTrack?.title || player.title}</strong>
+                <span>{miniStatus}</span>
+              </div>
+              <div className="floating-phone-compact-actions">
+                <button type="button" className="floating-phone-mini-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
+                  {playing ? '❚❚' : '▶'}
                 </button>
                 {player.canClose ? (
-                  <button type="button" className="floating-phone-close" onClick={onClose}>
-                    {copy(player.locale, { zh: '关闭', en: 'Close' })}
+                  <button type="button" className="floating-phone-mini-button is-close" onClick={onClose}>
+                    {copy(player.locale, { zh: '关', en: 'X' })}
                   </button>
                 ) : (
                   <div className="phone-dots">{copy(player.locale, { zh: '处理中', en: 'Busy' })}</div>
                 )}
               </div>
             </div>
-          </div>
-
-          <audio ref={audioRef} preload="metadata" />
-
-          {isCollapsed ? (
-            <div className="floating-phone-compact">
-              <div className={`floating-phone-compact-disc ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
-                <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
-              </div>
-              <div className="floating-phone-compact-copy">
-                <strong>{activeTrack?.title || player.title}</strong>
-                <span>{player.isGenerating ? player.generationLabel || compactStatus : activeTrack?.subtitle || compactStatus}</span>
-              </div>
-              <div className="floating-phone-compact-actions">
-                {!player.isGenerating ? (
-                  <button type="button" className="floating-phone-mini-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
-                    {playing ? '❚❚' : '▶'}
-                  </button>
-                ) : null}
-                <button type="button" className="floating-phone-mini-button" onClick={() => setIsCollapsed(false)}>
-                  {copy(player.locale, { zh: '展开', en: 'Open' })}
-                </button>
-              </div>
+            <div className="floating-phone-mini-progress" aria-hidden="true">
+              <span className="floating-phone-mini-progress-bar" style={{ width: `${Math.max(0, Math.min(100, miniProgress))}%` }} />
             </div>
-          ) : (
-            <>
-              <div className="phone-brand-block floating-phone-brand">
-                <h2>{player.title || 'MelodyVow'}</h2>
-                <p>{player.subtitle}</p>
-              </div>
-
-              <div className="phone-record-visual floating-phone-visual">
-                <div className={`floating-phone-disc-shell ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
-                  <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
-                </div>
-                <img className="phone-record-couple" src={coupleImage} alt="" />
-                <img className="phone-record-heart" src={pinkHeartImage} alt="" />
-              </div>
-
-              {player.statusText ? (
-                <div className={`status-banner ${player.isGenerating ? 'is-generating_song' : 'is-ready'}`}>
-                  {player.statusText}
-                </div>
-              ) : null}
-
-              {player.isGenerating ? (
-                <div className="generation-progress-card floating-generation-card" aria-live="polite">
-                  <p className="generation-progress-copy">{player.generationLabel}</p>
-                  <div className="generation-progress-track" aria-hidden="true">
-                    <div className="generation-progress-dots">
-                      {Array.from({ length: 12 }, (_, index) => (
-                        <span
-                          key={index}
-                          className={`generation-progress-dot ${index / 11 <= player.generationProgress / 100 ? 'active' : ''}`}
-                        />
-                      ))}
-                    </div>
-                    <img
-                      className="generation-progress-heart"
-                      src={pinkHeartImage}
-                      alt=""
-                      style={{ left: `calc(${player.generationProgress}% - 12px)` }}
-                    />
-                  </div>
-                  <div className="generation-progress-meta">
-                    <span>{copy(player.locale, { zh: '歌曲生成中', en: 'Song in progress' })}</span>
-                    <span>{`${Math.round(player.generationProgress)}%`}</span>
-                  </div>
-                </div>
-              ) : null}
-
-              {tracks.length > 1 ? (
-                <div className="floating-phone-track-tabs">
-                  {tracks.map((track, index) => (
-                    <button
-                      key={track.id || `${player.key}-${index}`}
-                      type="button"
-                      className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
-                      onClick={() => setActiveTrackIndex(index)}
-                    >
-                      {track.title || copy(player.locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` })}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {!player.isGenerating ? (
-                <>
-                  <div className="player-now-playing floating-player-meta">
-                    <div>
-                      <p className="mini-eyebrow">{copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</p>
-                      <h3>{activeTrack?.title || player.title}</h3>
-                      <p>{activeTrack?.subtitle || player.subtitle}</p>
-                    </div>
-                    <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                  </div>
-
-                  <div className="player-progress">
-                    <span>{formatDuration(currentTime)}</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={progress}
-                      onChange={(event) => updateProgress(Number(event.target.value))}
-                      disabled={!activeTrackUrl}
-                    />
-                    <span>{formatDuration(duration)}</span>
-                  </div>
-
-                  <div className="player-controls floating-player-controls">
-                    <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackUrl}>
-                      ↺
-                    </button>
-                    <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackUrl}>
-                      ⏮
-                    </button>
-                    <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
-                      {playing ? '❚❚' : '▶'}
-                    </button>
-                    <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackUrl}>
-                      ⏭
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      onClick={() => window.open(activeTrack?.downloadUrl || activeTrackUrl, '_blank', 'noopener,noreferrer')}
-                      disabled={!activeTrackUrl}
-                    >
-                      ↓
-                    </button>
-                  </div>
-                </>
-              ) : null}
-
-              {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
-              {player.error ? <p className="form-error">{player.error}</p> : null}
-              {player.lyrics ? (
-                <div className="lyrics-box floating-player-lyrics">
-                  <h3>{copy(player.locale, { zh: '歌词预览', en: 'Lyrics Preview' })}</h3>
-                  <p>{player.lyrics}</p>
-                </div>
-              ) : null}
-            </>
-          )}
+          </div>
         </div>
       </div>
     </div>
@@ -2005,7 +1893,11 @@ function SiteLayout({
   ]
 
   return (
-    <div className="site-shell" data-locale={locale} data-background-theme={siteConfig.backgroundTheme}>
+    <div
+      className={`site-shell ${active === 'home' ? 'site-shell-home' : ''}`.trim()}
+      data-locale={locale}
+      data-background-theme={siteConfig.backgroundTheme}
+    >
       <div className="site-gradient" />
       <div className="site-noise" />
       {!plainPage ? (
@@ -2017,7 +1909,7 @@ function SiteLayout({
         </>
       ) : null}
 
-      <header className="site-header">
+      <header className={`site-header ${active === 'home' ? 'site-header-home' : ''}`.trim()}>
         <button
           type="button"
           className="brand-mark brand-button"
@@ -2038,7 +1930,7 @@ function SiteLayout({
           <span />
         </button>
 
-        <nav className={`site-nav ${menuOpen ? 'is-open' : ''}`}>
+        <nav className={`site-nav ${active === 'home' ? 'site-nav-home' : ''} ${menuOpen ? 'is-open' : ''}`.trim()}>
           {navItems.map((item) => (
             <NavLink
               key={item.key}
@@ -2343,7 +2235,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         error: '',
         autoPlay: false,
       })
-      navigate(`${withLocale(locale, '/preview')}?job=${result.jobId}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成请求失败，请稍后再试。'
       setSubmitError(message)
@@ -2560,17 +2451,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   )
 }
 
-function formatDuration(seconds: number) {
-  if (!seconds || Number.isNaN(seconds)) {
-    return '00:00'
-  }
-
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-
-  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
-}
-
 function getJobStatusLabel(locale: Locale, status: GenerationStatus, callbackEnabled: boolean) {
   switch (status) {
     case 'queued':
@@ -2590,6 +2470,54 @@ function getJobStatusLabel(locale: Locale, status: GenerationStatus, callbackEna
       return copy(locale, { zh: '生成失败，请检查配置或稍后重试。', en: 'Generation failed. Check the configuration and try again.' })
     default:
       return ''
+  }
+}
+
+function computeGenerationProgress(job: SongJob | null, now = Date.now()) {
+  if (!job) {
+    return 0
+  }
+
+  if (job.status === 'ready') {
+    return 100
+  }
+
+  if (job.status === 'error') {
+    return 0
+  }
+
+  const generationStartedAt = new Date(job.createdAt || job.updatedAt || now).getTime()
+  const safeStartedAt = Number.isNaN(generationStartedAt) ? now : generationStartedAt
+  return Math.min(96, (Math.max(0, now - safeStartedAt) / 120000) * 100)
+}
+
+function buildFloatingPlayerPayloadFromJob(job: SongJob, locale: Locale, draft: SongDraft, error = '', autoPlay = false): FloatingPhonePlayerPayload {
+  const isGenerating = job.status !== 'ready' && job.status !== 'error'
+  const subtitleParts = [
+    draft.groom.trim() && draft.bride.trim() ? `${draft.groom.trim()} & ${draft.bride.trim()}` : '',
+    draft.style ? getStyleLabel(locale, draft.style) : '',
+    draft.vocal ? getVocalLabel(locale, draft.vocal) : '',
+  ].filter(Boolean)
+
+  return {
+    key: job.id,
+    locale,
+    title: job.title || subtitleParts[0] || 'MelodyVow',
+    subtitle: subtitleParts.join(' · '),
+    eyebrow: copy(locale, { zh: '婚礼歌播放器', en: 'Wedding Song Player' }),
+    tracks: job.status === 'ready' ? buildFloatingTracksFromJob(job, locale) : [],
+    activeTrackIndex: 0,
+    canClose: !isGenerating,
+    isGenerating,
+    generationProgress: computeGenerationProgress(job),
+    generationLabel: copy(locale, {
+      zh: '幸福正在慢慢向着您靠近！',
+      en: 'Happiness is slowly making its way to you!',
+    }),
+    statusText: error || job.error || getJobStatusLabel(locale, job.status, job.callbackEnabled),
+    lyrics: job.lyrics || '',
+    error: error || job.error || '',
+    autoPlay,
   }
 }
 
@@ -2791,380 +2719,77 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
   )
 }
 
-function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout, onUpsertFloatingPlayer }: PreviewPageProps) {
+function PreviewPage({ locale, draft, authSession, onLogout, onUpsertFloatingPlayer }: PreviewPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [job, setJob] = useState<SongJob | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const [generationHeartbeat, setGenerationHeartbeat] = useState(() => Date.now())
   const params = new URLSearchParams(location.search)
   const jobId = params.get('job')
-  const activeJob = jobId ? job : null
-  const availableTracks = activeJob?.tracks ?? []
-  const hasReadyTracks = availableTracks.length > 0
-  const duration = availableTracks[0]?.duration ?? 0
-  const generationDurationMs = 120000
-  const displayedTitle = activeJob?.title || `${draft.groom} & ${draft.bride}` || 'MelodyVow'
-  const displayedLyrics = activeJob?.lyrics
-    ?? (locale === 'zh'
-      ? 'DeepSeek 生成的歌词会显示在这里。\nSuno 回调完成后，歌曲会自动尝试播放。'
-      : 'Lyrics from DeepSeek will appear here.\nOnce Suno finishes the callback, the song will try to autoplay.')
-  const isGenerating = Boolean(activeJob && activeJob.status !== 'ready' && activeJob.status !== 'error')
-  const generationDots = Array.from({ length: 12 }, (_, index) => index)
-  const generationStartedAt = new Date(activeJob?.createdAt || activeJob?.updatedAt || generationHeartbeat).getTime()
-  const safeGenerationStartedAt = Number.isNaN(generationStartedAt) ? generationHeartbeat : generationStartedAt
-  const generationProgress = !activeJob
-    ? 0
-    : activeJob.status === 'ready'
-      ? 100
-      : activeJob.status === 'error'
-        ? 0
-        : Math.min(96, (Math.max(0, generationHeartbeat - safeGenerationStartedAt) / generationDurationMs) * 100)
-
-  useEffect(() => {
-    const tracks = activeJob?.tracks ?? []
-    if (!activeJob || activeJob.status !== 'ready' || !tracks.length) {
-      return
-    }
-
-    tracks.forEach((track, index) => {
-      const variantLabel = copy(locale, {
-        zh: `歌曲 ${index + 1}`,
-        en: `Version ${index + 1}`,
-      })
-      onSaveHistory({
-        id: buildTrackHistoryId(activeJob.id, index),
-        title: track.title || activeJob.title || displayedTitle,
-        subtitle: `${summarizeStoryText(
-          draft.loveStory || draft.meetingStory,
-          copy(locale, {
-            zh: `${draft.groom} & ${draft.bride} 的婚礼歌`,
-            en: `${draft.groom} & ${draft.bride}'s wedding song`,
-          }),
-        )} · ${variantLabel}`,
-        status: copy(locale, { zh: '已生成', en: 'Ready' }),
-        action: copy(locale, { zh: '播放', en: 'Play' }),
-        variantLabel,
-        audioUrl: track.audioUrl || track.downloadUrl || '',
-        downloadUrl: track.downloadUrl || track.audioUrl || '',
-        createdAt: activeJob.updatedAt,
-        languageLabel: draft.languageLabel,
-        styleLabel: getStyleLabel(locale, draft.style),
-        vocalLabel: getVocalLabel(locale, draft.vocal),
-        lyricSnippet: summarizeStoryText(activeJob.lyrics ?? '', ''),
-      })
-    })
-  }, [activeJob, displayedTitle, draft, locale, onSaveHistory])
-
-  async function loadJob(currentJobId: string) {
-    const response = await fetch(apiUrl(`/api/jobs/${currentJobId}`))
-    const data = (await response.json()) as SongJob | { message?: string }
-
-    if (!response.ok) {
-      throw new Error('message' in data && data.message ? data.message : '任务查询失败。')
-    }
-
-    // #region debug-point C:frontend-job-response
-    reportDebugEvent({
-      hypothesisId: 'C',
-      location: 'web/src/App.tsx:loadJob',
-      msg: '[DEBUG] Frontend loaded job payload',
-      data: {
-        jobId: currentJobId,
-        status: 'status' in data ? data.status : '',
-        trackCount: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks.length : 0,
-        firstTrackAudioUrl: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks[0]?.audioUrl || '' : '',
-        firstTrackDownloadUrl: 'tracks' in data && Array.isArray(data.tracks) ? data.tracks[0]?.downloadUrl || '' : '',
-      },
-    })
-    // #endregion
-
-    setJob(data as SongJob)
-    return data as SongJob
-  }
 
   useEffect(() => {
     if (!jobId) {
+      navigate(withLocale(locale), { replace: true })
       return
     }
 
     let disposed = false
 
-    const startLoading = async () => {
-      setIsLoading(true)
-      setError('')
-
+    const bootstrapPreviewPlayer = async () => {
       try {
-        await loadJob(jobId)
+        const response = await fetch(apiUrl(`/api/jobs/${jobId}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+        if (!response.ok) {
+          throw new Error('message' in result && result.message ? result.message : '任务查询失败。')
+        }
+
+        if (disposed) {
+          return
+        }
+
+        onUpsertFloatingPlayer(buildFloatingPlayerPayloadFromJob(result as SongJob, locale, draft, '', true))
+        navigate(withLocale(locale), { replace: true })
       } catch (loadError) {
         if (!disposed) {
           setError(loadError instanceof Error ? loadError.message : '任务查询失败。')
         }
-      } finally {
-        if (!disposed) {
-          setIsLoading(false)
-        }
       }
     }
 
-    void startLoading()
+    void bootstrapPreviewPlayer()
 
     return () => {
       disposed = true
     }
-  }, [jobId])
-
-  useEffect(() => {
-    if (!jobId || !activeJob || activeJob.status === 'ready' || activeJob.status === 'error') {
-      return
-    }
-
-    const timer = window.setInterval(() => {
-      void loadJob(jobId).catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : '任务查询失败。')
-      })
-    }, 5000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [activeJob, jobId])
-
-  useEffect(() => {
-    if (!isGenerating) {
-      return
-    }
-
-    const timer = window.setInterval(() => {
-      setGenerationHeartbeat(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
-  }, [isGenerating])
-
-  function openPreviewFloatingPlayer(autoPlay: boolean) {
-    if (!activeJob) {
-      return
-    }
-
-    onUpsertFloatingPlayer({
-      key: activeJob.id,
-      locale,
-      title: activeJob.title || `${draft.groom} & ${draft.bride}` || 'MelodyVow',
-      subtitle: copy(locale, {
-        zh: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
-        en: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
-      }),
-      eyebrow: copy(locale, { zh: '婚礼歌播放器', en: 'Wedding Song Player' }),
-      tracks: activeJob.status === 'ready' ? buildFloatingTracksFromJob(activeJob, locale) : [],
-      activeTrackIndex: 0,
-      canClose: !isGenerating,
-      isGenerating,
-      generationProgress,
-      generationLabel: copy(locale, {
-        zh: '幸福正在慢慢向着您靠近！',
-        en: 'Happiness is slowly making its way to you!',
-      }),
-      statusText: activeJob.error
-        || getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled),
-      lyrics: activeJob.lyrics || '',
-      error: error || activeJob.error || '',
-      autoPlay,
-    })
-  }
-
-  useEffect(() => {
-    if (!activeJob) {
-      return
-    }
-
-    openPreviewFloatingPlayer(activeJob.status === 'ready' && availableTracks.length > 0)
-  }, [
-    activeJob,
-    availableTracks.length,
-    error,
-    generationProgress,
-    isGenerating,
-    locale,
-  ])
+  }, [draft, jobId, locale, navigate, onUpsertFloatingPlayer])
 
   return (
     <SiteLayout
       locale={locale}
-      title={copy(locale, { zh: '你的婚礼歌已生成', en: 'Your Wedding Song Preview Is Ready' })}
+      title={copy(locale, { zh: '正在返回首页', en: 'Returning to Home' })}
       subtitle={copy(locale, {
-        zh: '先试听只属于你们名字的纪念歌曲',
-        en: 'Listen to the preview made from your names and wedding story.',
+        zh: '旧预览页已移除，歌曲会在迷你播放器里继续同步。',
+        en: 'The old preview page has been removed. Your song will continue in the mini player.',
       })}
       eyebrow="MelodyVow"
-      active="styles"
+      active="home"
       onOpenModal={() => undefined}
       onLogout={onLogout}
       authSession={authSession}
     >
       <section className="preview-layout">
-        <article className="glass-panel floating-player-teaser preview-shell-card">
-          <div className="phone-brand-block">
-            <h2>{copy(locale, { zh: '悬浮 iPhone 播放器', en: 'Floating iPhone Player' })}</h2>
-            <p>{copy(locale, {
-              zh: '生成进度、两首歌曲和后续播放入口都已经统一进这个右下角悬浮播放器。',
-              en: 'Progress, both generated tracks, and all playback now live inside this docked floating player.',
-            })}</p>
-          </div>
-
-          <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
-            <div className={`floating-phone-disc-shell ${isGenerating || availableTracks.length ? 'is-spinning' : ''}`}>
-              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
-            </div>
-            <img className="phone-record-couple" src={coupleImage} alt="" />
-            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
-          </div>
-
-          {activeJob ? (
-            <div className={`status-banner is-${activeJob.status}`}>
-              {getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled)}
-            </div>
-          ) : null}
-
-          {activeJob && isGenerating ? (
-            <div className="generation-progress-card floating-generation-card" aria-live="polite">
-              <p className="generation-progress-copy">
-                {copy(locale, {
-                  zh: '幸福正在慢慢向着您靠近！',
-                  en: 'Happiness is slowly making its way to you!',
-                })}
-              </p>
-              <div className="generation-progress-track" aria-hidden="true">
-                <div className="generation-progress-dots">
-                  {generationDots.map((dot) => (
-                    <span
-                      key={dot}
-                      className={`generation-progress-dot ${dot / (generationDots.length - 1) <= generationProgress / 100 ? 'active' : ''}`}
-                    />
-                  ))}
-                </div>
-                <img
-                  className="generation-progress-heart"
-                  src={pinkHeartImage}
-                  alt=""
-                  style={{ left: `calc(${generationProgress}% - 12px)` }}
-                />
-              </div>
-              <div className="generation-progress-meta">
-                <span>{copy(locale, { zh: '歌曲生成中', en: 'Generating song' })}</span>
-                <span>{`${Math.round(generationProgress)}%`}</span>
-              </div>
-            </div>
-          ) : null}
-
-          {error ? <p className="form-error">{error}</p> : null}
-          {!jobId ? (
-            <p className="empty-state">
-              {copy(locale, {
-                zh: '请先回到首页填写名字、语言、曲风和声音，再开始真实生成。',
-                en: 'Go back to the homepage, fill in the names, language, style and voice, then start a real generation.',
-              })}
-            </p>
-          ) : null}
-
-          <div className="player-now-playing floating-player-meta">
-            <div>
-              <p className="mini-eyebrow">{copy(locale, { zh: '悬浮状态', en: 'Player Status' })}</p>
-              <h3>{displayedTitle}</h3>
-              <p>
-                {copy(locale, {
-                  zh: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
-                  en: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
-                })}
-              </p>
-            </div>
-            <div className={`equalizer ${isGenerating || availableTracks.length ? 'is-active' : ''}`} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-          </div>
-
-          <div className="preview-shell-actions">
-            <button
-              type="button"
-              className="primary-button wide"
-              onClick={() => openPreviewFloatingPlayer(activeJob?.status === 'ready')}
-              disabled={!activeJob}
-            >
-              {copy(locale, {
-                zh: isGenerating ? '查看悬浮播放器进度' : '打开悬浮播放器试听',
-                en: isGenerating ? 'Open Floating Player Progress' : 'Open Floating Player',
-              })}
-            </button>
-            <p className="hint-text">
-              {copy(locale, {
-                zh: availableTracks.length
-                  ? `已生成 ${availableTracks.length} 首歌曲，点击上方按钮即可在悬浮播放器中切换播放。`
-                  : '生成期间悬浮播放器会一直保持存在，完成后会自动切换为可播放状态。',
-                en: availableTracks.length
-                  ? `${availableTracks.length} tracks are ready. Open the floating player to switch between them.`
-                  : 'The floating player stays visible during generation and switches to playback when ready.',
-              })}
-            </p>
-          </div>
-
-          <div className="lyrics-box">
-            <h3>{copy(locale, { zh: '歌词预览', en: 'Lyrics Preview' })}</h3>
-            <p>{displayedLyrics}</p>
-          </div>
-
-          <div className="story-summary-card">
-            <h3>{copy(locale, { zh: '创作描述', en: 'Creative Brief' })}</h3>
-            <p>{summarizeStoryText(draft.loveStory, copy(locale, { zh: '暂未填写爱情故事。', en: 'No love story provided yet.' }))}</p>
-            <p>{summarizeStoryText(draft.meetingStory, copy(locale, { zh: '暂未填写相识经历。', en: 'No meeting story provided yet.' }))}</p>
-            <p>{summarizeStoryText(draft.vowKeywords, copy(locale, { zh: '暂未填写誓言关键词。', en: 'No vow keywords provided yet.' }))}</p>
-          </div>
-        </article>
-
-        <aside className="glass-card song-meta">
-          <div className="step-badge">1</div>
-          <ul>
-            <li>{copy(locale, { zh: `新郎：${draft.groom}`, en: `Groom: ${draft.groom}` })}</li>
-            <li>{copy(locale, { zh: `新娘：${draft.bride}`, en: `Bride: ${draft.bride}` })}</li>
-            <li>{copy(locale, { zh: `语言：${draft.languageLabel}`, en: `Language: ${draft.languageLabel}` })}</li>
-            <li>{copy(locale, { zh: `曲风：${getStyleLabel(locale, draft.style)}`, en: `Style: ${getStyleLabel(locale, draft.style)}` })}</li>
-            <li>{copy(locale, { zh: `声音：${getVocalLabel(locale, draft.vocal)}`, en: `Voice: ${getVocalLabel(locale, draft.vocal)}` })}</li>
-            {availableTracks.length ? (
-              <li>{copy(locale, { zh: `已生成歌曲：${availableTracks.length} 首`, en: `Tracks ready: ${availableTracks.length}` })}</li>
-            ) : null}
-            <li>
-              {activeJob
-                ? copy(locale, { zh: `状态：${getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled)}`, en: `Status: ${getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled)}` })
-                : copy(locale, { zh: '状态：等待生成', en: 'Status: Waiting to generate' })}
-            </li>
-            <li>{copy(locale, { zh: `时长：${formatDuration(duration)}`, en: `Duration: ${formatDuration(duration)}` })}</li>
-          </ul>
-          <button
-            type="button"
-            className="primary-button wide"
-            onClick={() => navigate(hasReadyTracks ? withLocale(locale, '/complete') : withLocale(locale))}
-          >
-            {hasReadyTracks
-              ? copy(locale, { zh: '查看下载页', en: 'Open Download Page' })
-              : copy(locale, { zh: '返回继续填写', en: 'Back to Homepage' })}
-          </button>
-          <p className="hint-text">
-            {isLoading
-              ? copy(locale, {
-                  zh: '正在载入最新任务状态...',
-                  en: 'Loading the latest job status...',
-                })
-              : copy(locale, {
-                  zh: '如果配置了公网回调地址，Suno 完成后会直接回调到本系统；本地开发会自动轮询结果。',
-                  en: 'If a public callback URL is configured, Suno will push the result back here; local development falls back to polling.',
-                })}
+        <article className="glass-panel preview-shell-card">
+          <h2>{copy(locale, { zh: '正在同步迷你播放器', en: 'Syncing Mini Player' })}</h2>
+          <p>
+            {copy(locale, {
+              zh: '旧的预览播放器页面已经移除，生成进度和播放都会保留在右下角迷你播放器里。',
+              en: 'The old preview player page has been removed. Progress and playback now stay in the mini player.',
+            })}
           </p>
-        </aside>
+          {error ? <p className="form-error">{error}</p> : null}
+          <button type="button" className="primary-button wide" onClick={() => navigate(withLocale(locale), { replace: true })}>
+            {copy(locale, { zh: '返回首页', en: 'Back to Home' })}
+          </button>
+        </article>
       </section>
     </SiteLayout>
   )
