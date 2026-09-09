@@ -1519,6 +1519,8 @@ function FloatingPhonePlayer({
     dragOffsetRef.current = dragOffset
   }, [dragOffset])
 
+  const tracks = player.tracks ?? []
+
   const clampDragOffset = useCallback((nextOffset: { x: number, y: number }) => {
     if (typeof window === 'undefined') {
       return nextOffset
@@ -1563,7 +1565,6 @@ function FloatingPhonePlayer({
     }
   }, [clampDragOffset])
 
-  const tracks = player.tracks ?? []
   const safeActiveTrackIndex = tracks.length ? Math.min(activeTrackIndex, tracks.length - 1) : 0
   const activeTrack = tracks[safeActiveTrackIndex] ?? null
   const activeTrackUrl = activeTrack?.audioUrl || activeTrack?.downloadUrl || ''
@@ -3265,10 +3266,6 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
         title={copy(locale, {
           zh: '订阅购买前请先阅读服务政策',
           en: 'Review service policies before purchase',
-        })}
-        subtitle={copy(locale, {
-          zh: '交付、退款、取消与订单查询',
-          en: 'Fulfillment, refunds, cancellations, and order lookup',
         })}
       />
     </SiteLayout>
