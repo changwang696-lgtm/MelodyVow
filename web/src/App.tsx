@@ -1894,7 +1894,7 @@ function SiteLayout({
 
   return (
     <div
-      className={`site-shell ${active === 'home' ? 'site-shell-home' : ''}`.trim()}
+      className={`site-shell ${active === 'home' ? 'site-shell-home' : ''} ${active === 'account' ? 'site-shell-account' : ''}`.trim()}
       data-locale={locale}
       data-background-theme={siteConfig.backgroundTheme}
     >
@@ -2108,6 +2108,37 @@ function ServiceHubSection({ locale, title }: { locale: Locale, title: string })
             </Fragment>
           ))}
         </nav>
+      </div>
+    </section>
+  )
+}
+
+function HomeSocialLinksSection({ locale }: { locale: Locale }) {
+  const items = [
+    { key: 'tiktok', label: 'TikTok', icon: 'T', href: 'https://www.tiktok.com/' },
+    { key: 'facebook', label: 'Facebook', icon: 'f', href: 'https://www.facebook.com/' },
+    { key: 'instagram', label: 'Instagram', icon: 'IG', href: 'https://www.instagram.com/' },
+    { key: 'youtube', label: 'YouTube', icon: 'YT', href: 'https://www.youtube.com/' },
+  ]
+
+  return (
+    <section className="home-social-section" aria-label={copy(locale, { zh: '社交媒体链接', en: 'Social media links' })}>
+      <div className="glass-card home-social-card">
+        <p className="home-social-title">{copy(locale, { zh: '关注我们', en: 'Follow Us' })}</p>
+        <div className="home-social-links">
+          {items.map((item) => (
+            <a
+              key={item.key}
+              className="home-social-link"
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="home-social-link-icon" aria-hidden="true">{item.icon}</span>
+              <span>{item.label}</span>
+            </a>
+          ))}
+        </div>
       </div>
     </section>
   )
@@ -2447,6 +2478,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           en: 'Support & Orders',
         })}
       />
+      <HomeSocialLinksSection locale={locale} />
     </SiteLayout>
   )
 }

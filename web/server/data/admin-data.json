@@ -1,4 +1,126 @@
 {
+  "members": [
+    {
+      "email": "changwang696@gmail.com",
+      "partnerName": "88",
+      "passwordHash": "61d25eaee974a26bee8f854c14e653c0:46157fec33396b2fd5991cb09b868ef6f3a245bc2c8050d167002f4d2619389f2e5ac7cf2fdc847786f0710d284749c851a19ab906db4438eb35ade11b89063c",
+      "heartBeansBalance": 0,
+      "createdAt": "2026-09-09T09:05:32.112Z",
+      "updatedAt": "2026-09-09T09:05:32.112Z",
+      "lastAuthAt": "2026-09-09T09:05:32.112Z",
+      "disabled": false
+    }
+  ],
+  "plans": [
+    {
+      "id": "starter",
+      "name": "Starter",
+      "price": 89,
+      "heartBeans": 5,
+      "currency": "CNY",
+      "badge": "",
+      "features": [
+        "5 点订阅服务额度",
+        "AI 歌词生成",
+        "名字入歌",
+        "MP3 下载"
+      ]
+    },
+    {
+      "id": "pro",
+      "name": "Pro",
+      "price": 199,
+      "heartBeans": 15,
+      "currency": "CNY",
+      "badge": "推荐",
+      "features": [
+        "15 点订阅服务额度",
+        "完整歌词",
+        "婚礼版本",
+        "高清音频"
+      ]
+    },
+    {
+      "id": "premium",
+      "name": "Premium",
+      "price": 499,
+      "heartBeans": 40,
+      "currency": "CNY",
+      "badge": "",
+      "features": [
+        "40 点订阅服务额度",
+        "真人演唱",
+        "高级编曲",
+        "双版本混音"
+      ]
+    }
+  ],
+  "showcaseTracks": [
+    {
+      "id": "showcase-soft-pop",
+      "title": {
+        "zh": "爱的誓言",
+        "en": "Our Vow in Melody"
+      },
+      "meta": {
+        "zh": "婚礼样片 · 温柔流行 · 女声",
+        "en": "Wedding Demo · Soft Pop · Female Vocal"
+      },
+      "blurb": {
+        "zh": "适合婚礼开场与仪式入场，旋律温柔、情绪稳定。",
+        "en": "Ideal for ceremony entrances with a soft and uplifting mood."
+      },
+      "audioUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+    },
+    {
+      "id": "showcase-cinematic",
+      "title": {
+        "zh": "星光告白",
+        "en": "Starlight Promise"
+      },
+      "meta": {
+        "zh": "求婚样片 · 电影配乐感 · 男女对唱",
+        "en": "Proposal Demo · Cinematic · Duet"
+      },
+      "blurb": {
+        "zh": "更适合求婚视频和情绪递进场景，层次感更强。",
+        "en": "Built for proposal videos with a more cinematic emotional arc."
+      },
+      "audioUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
+    },
+    {
+      "id": "showcase-folk",
+      "title": {
+        "zh": "把名字写成歌",
+        "en": "Your Names as a Song"
+      },
+      "meta": {
+        "zh": "婚礼样片 · 清新民谣 · 男声",
+        "en": "Wedding Demo · Folk Pop · Male Vocal"
+      },
+      "blurb": {
+        "zh": "适合婚礼暖场、成长回顾和轻松互动环节播放。",
+        "en": "A lighter folk-pop demo for warm-up moments and story recaps."
+      },
+      "audioUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+    }
+  ],
+  "paymentMethods": [
+    {
+      "id": "paypal",
+      "name": "PayPal",
+      "enabled": true,
+      "envKey": "PAYPAL_CHECKOUT_URL",
+      "description": "PayPal Checkout"
+    },
+    {
+      "id": "alipay",
+      "name": "支付宝",
+      "enabled": false,
+      "envKey": "ALIPAY_CHECKOUT_URL",
+      "description": "Alipay payment link"
+    }
+  ],
   "orders": [
     {
       "id": "ord-demo-001",
@@ -8,7 +130,9 @@
       "status": "paid",
       "email": "hao@example.com",
       "note": "婚礼开场曲，需提前交付伴奏版。",
-      "createdAt": "2026-08-29T11:55:56.002Z"
+      "createdAt": "2026-08-29T11:55:56.002Z",
+      "heartBeans": 15,
+      "heartBeansGrantedAt": ""
     },
     {
       "id": "ord-demo-002",
@@ -18,7 +142,9 @@
       "status": "processing",
       "email": "luna@example.com",
       "note": "需要双语版本和 first dance mix。",
-      "createdAt": "2026-08-29T11:55:56.002Z"
+      "createdAt": "2026-08-29T11:55:56.002Z",
+      "heartBeans": 40,
+      "heartBeansGrantedAt": ""
     }
   ],
   "songs": [],
@@ -28,7 +154,9 @@
     "publicBaseUrl": "",
     "allowSignup": true,
     "enableChineseSite": false,
+    "backgroundTheme": "vivid_rainbow",
     "heartBeansPerGeneration": 1,
+    "paypalCheckoutUrl": "",
     "notes": "后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。"
   }
 }
