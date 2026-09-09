@@ -34,19 +34,19 @@
 }
 
 .site-shell[data-background-theme='soft_pink_gold'] {
-  --site-grad-spot-1: rgba(198, 142, 255, 0.22);
-  --site-grad-spot-2: rgba(255, 221, 173, 0.28);
-  --site-grad-spot-3: rgba(255, 208, 226, 0.24);
-  --site-grad-spot-4: rgba(255, 143, 191, 0.24);
-  --site-grad-base: linear-gradient(135deg, #fff8fc 0%, #ffe9f4 38%, #f7efff 72%, #fff4e5 100%);
+  --site-grad-spot-1: rgba(82, 66, 255, 0.2);
+  --site-grad-spot-2: rgba(47, 96, 255, 0.16);
+  --site-grad-spot-3: rgba(165, 91, 255, 0.16);
+  --site-grad-spot-4: rgba(23, 167, 255, 0.12);
+  --site-grad-base: linear-gradient(135deg, #040409 0%, #090b16 22%, #12152a 46%, #171438 68%, #0d1021 100%);
 }
 
 .site-shell[data-background-theme='ocean_dream'] {
-  --site-grad-spot-1: rgba(72, 151, 255, 0.22);
-  --site-grad-spot-2: rgba(175, 247, 255, 0.24);
-  --site-grad-spot-3: rgba(133, 224, 214, 0.22);
-  --site-grad-spot-4: rgba(118, 104, 255, 0.2);
-  --site-grad-base: linear-gradient(135deg, #f7fbff 0%, #ecf7ff 36%, #ecfffb 70%, #f2efff 100%);
+  --site-grad-spot-1: rgba(255, 224, 136, 0.28);
+  --site-grad-spot-2: rgba(209, 151, 48, 0.24);
+  --site-grad-spot-3: rgba(255, 201, 82, 0.2);
+  --site-grad-spot-4: rgba(255, 238, 184, 0.18);
+  --site-grad-base: linear-gradient(135deg, #120b04 0%, #261607 24%, #4c2d0a 48%, #7a4a12 72%, #c8942f 100%);
 }
 
 .site-shell[data-locale='zh'] {

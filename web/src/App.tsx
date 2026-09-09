@@ -432,13 +432,13 @@ const backgroundThemeOptions: Array<{
   },
   {
     id: 'soft_pink_gold',
-    label: '柔和粉紫金',
-    description: '柔和浪漫，适合婚礼、纪念日和女性向审美。',
+    label: '深夜紫蓝',
+    description: '更深黑、更神秘，带深紫蓝氛围，适合欧美审美和高级夜色风格。',
   },
   {
     id: 'ocean_dream',
-    label: '海盐蓝雾',
-    description: '更清爽、轻奢，适合英文站和国际化展示。',
+    label: '中东鎏金',
+    description: '偏中东国家喜欢的金碧辉煌质感，整体更华丽、更贵气。',
   },
 ]
 
