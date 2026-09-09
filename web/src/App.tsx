@@ -1,4 +1,4 @@
-import { Fragment, createContext, useContext, useEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import {
   NavLink,
@@ -265,6 +265,7 @@ type HomePageProps = {
   draft: SongDraft
   setDraft: Dispatch<SetStateAction<SongDraft>>
   onOpenModal: (message: string) => void
+  onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
   onLogout: () => void
   authSession: AuthSession | null
 }
@@ -283,6 +284,7 @@ type PreviewPageProps = {
   onSaveHistory: (item: HistoryItem) => void
   authSession: AuthSession | null
   onLogout: () => void
+  onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
 }
 
 type PricingPageProps = {
@@ -318,6 +320,7 @@ type AccountPageProps = {
   history: HistoryItem[]
   onLogout: () => void
   authSession: AuthSession | null
+  onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
 }
 
 type CompletePageProps = {
@@ -332,6 +335,7 @@ type ShowcasePageProps = {
   locale: Locale
   authSession: AuthSession | null
   onLogout: () => void
+  onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
 }
 
 type LegalPageKey =
@@ -365,6 +369,37 @@ type ShowcaseTrack = {
   meta: Copy
   blurb: Copy
   audioUrl: string
+}
+
+type FloatingPhoneTrack = {
+  id: string
+  title: string
+  audioUrl: string
+  downloadUrl?: string
+  duration?: number
+  subtitle?: string
+}
+
+type FloatingPhonePlayerState = {
+  key: string
+  locale: Locale
+  title: string
+  subtitle: string
+  eyebrow: string
+  tracks: FloatingPhoneTrack[]
+  activeTrackIndex?: number
+  canClose: boolean
+  isGenerating: boolean
+  generationProgress: number
+  generationLabel: string
+  statusText?: string
+  lyrics?: string
+  error?: string
+  autoPlay?: boolean
+}
+
+type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
+  key: string
 }
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
@@ -444,6 +479,33 @@ function sanitizeHistoryItem(item: HistoryItem) {
     sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
     sourceDownloadUrl: item.sourceDownloadUrl || item.downloadUrl || '',
   }
+}
+
+function buildFloatingTrackFromHistory(item: HistoryItem): FloatingPhoneTrack {
+  return {
+    id: item.id,
+    title: item.title,
+    subtitle: item.variantLabel || item.subtitle,
+    audioUrl: getSongStreamUrl(item.id),
+    downloadUrl: getSongDownloadUrl(item.id),
+  }
+}
+
+function buildFloatingTracksFromJob(job: SongJob, locale: Locale): FloatingPhoneTrack[] {
+  return (job.tracks ?? []).map((track, index) => ({
+    id: buildTrackHistoryId(job.id, index),
+    title: track.title || job.title || copy(locale, {
+      zh: `歌曲 ${index + 1}`,
+      en: `Track ${index + 1}`,
+    }),
+    subtitle: copy(locale, {
+      zh: `生成版本 ${index + 1}`,
+      en: `Generated version ${index + 1}`,
+    }),
+    audioUrl: getSongStreamUrl(buildTrackHistoryId(job.id, index)),
+    downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
+    duration: track.duration,
+  }))
 }
 
 function launchHomepageFireworks() {
@@ -859,6 +921,7 @@ function App() {
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => loadAdminSession())
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(() => loadPublicSiteConfig())
   const [siteConfigReady, setSiteConfigReady] = useState(false)
+  const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
   const activeMemberToken = authSession?.authToken?.trim() || ''
   const activeMemberEmail = authSession?.email?.trim() || ''
@@ -1081,6 +1144,36 @@ function App() {
     setAdminSession(null)
   }
 
+  const upsertFloatingPlayer = useCallback((payload: FloatingPhonePlayerPayload) => {
+    setFloatingPlayer((current) => ({
+      key: payload.key,
+      locale: payload.locale ?? current?.locale ?? 'en',
+      title: payload.title ?? current?.title ?? 'MelodyVow',
+      subtitle: payload.subtitle ?? current?.subtitle ?? '',
+      eyebrow: payload.eyebrow ?? current?.eyebrow ?? 'MelodyVow',
+      tracks: payload.tracks ?? current?.tracks ?? [],
+      activeTrackIndex: payload.activeTrackIndex ?? current?.activeTrackIndex ?? 0,
+      canClose: payload.canClose ?? current?.canClose ?? true,
+      isGenerating: payload.isGenerating ?? current?.isGenerating ?? false,
+      generationProgress: payload.generationProgress ?? current?.generationProgress ?? 0,
+      generationLabel: payload.generationLabel ?? current?.generationLabel ?? '',
+      statusText: payload.statusText ?? current?.statusText ?? '',
+      lyrics: payload.lyrics ?? current?.lyrics ?? '',
+      error: payload.error ?? current?.error ?? '',
+      autoPlay: payload.autoPlay ?? current?.autoPlay ?? false,
+    }))
+  }, [])
+
+  const closeFloatingPlayer = useCallback(() => {
+    setFloatingPlayer((current) => {
+      if (!current || !current.canClose) {
+        return current
+      }
+
+      return null
+    })
+  }, [])
+
   function renderChineseRoute(fallbackPath: string, element: ReactNode) {
     return siteConfig.enableChineseSite ? element : <Navigate to={fallbackPath} replace />
   }
@@ -1103,6 +1196,7 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
               authSession={authSession}
             />
@@ -1110,7 +1204,7 @@ function App() {
         />
         <Route
           path="/zh/how-it-works"
-          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} />)}
+          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/styles"
@@ -1120,7 +1214,7 @@ function App() {
         />
         <Route
           path="/zh/preview"
-          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />)}
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/pricing"
@@ -1176,6 +1270,7 @@ function App() {
               history={songHistory}
               onLogout={handleLogout}
               authSession={authSession}
+              onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           ))}
         />
@@ -1208,6 +1303,7 @@ function App() {
               draft={draft}
               setDraft={setDraft}
               onOpenModal={setModalMessage}
+              onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
               authSession={authSession}
             />
@@ -1215,7 +1311,7 @@ function App() {
         />
         <Route
           path="/en/how-it-works"
-          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} />}
+          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/styles"
@@ -1225,7 +1321,7 @@ function App() {
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} />}
+          element={<PreviewPage locale="en" draft={draft} onSaveHistory={saveHistory} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/pricing"
@@ -1281,6 +1377,7 @@ function App() {
               history={songHistory}
               onLogout={handleLogout}
               authSession={authSession}
+              onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           }
         />
@@ -1323,7 +1420,320 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      {floatingPlayer ? (
+        <FloatingPhonePlayer
+          player={floatingPlayer}
+          onClose={closeFloatingPlayer}
+        />
+      ) : null}
     </SiteConfigContext.Provider>
+  )
+}
+
+function FloatingPhonePlayer({
+  player,
+  onClose,
+}: {
+  player: FloatingPhonePlayerState
+  onClose: () => void
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [activeTrackIndex, setActiveTrackIndex] = useState(player.activeTrackIndex ?? 0)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [autoplayNotice, setAutoplayNotice] = useState('')
+
+  useEffect(() => {
+    setActiveTrackIndex(player.activeTrackIndex ?? 0)
+    setProgress(0)
+    setCurrentTime(0)
+    setDuration(0)
+    setPlaying(false)
+    setAutoplayNotice('')
+  }, [player.key, player.activeTrackIndex])
+
+  const tracks = player.tracks ?? []
+  const safeActiveTrackIndex = tracks.length ? Math.min(activeTrackIndex, tracks.length - 1) : 0
+  const activeTrack = tracks[safeActiveTrackIndex] ?? null
+  const activeTrackUrl = activeTrack?.audioUrl || activeTrack?.downloadUrl || ''
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) {
+      return
+    }
+
+    const handleLoadedMetadata = () => {
+      setDuration(audio.duration || activeTrack?.duration || 0)
+    }
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime)
+      if (audio.duration) {
+        setProgress((audio.currentTime / audio.duration) * 100)
+      }
+    }
+
+    const handlePlay = () => {
+      setPlaying(true)
+    }
+
+    const handlePause = () => {
+      setPlaying(false)
+    }
+
+    const handleEnded = () => {
+      setPlaying(false)
+      setProgress(100)
+    }
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata)
+    audio.addEventListener('timeupdate', handleTimeUpdate)
+    audio.addEventListener('play', handlePlay)
+    audio.addEventListener('pause', handlePause)
+    audio.addEventListener('ended', handleEnded)
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      audio.removeEventListener('timeupdate', handleTimeUpdate)
+      audio.removeEventListener('play', handlePlay)
+      audio.removeEventListener('pause', handlePause)
+      audio.removeEventListener('ended', handleEnded)
+    }
+  }, [activeTrack?.duration])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) {
+      return
+    }
+
+    if (!activeTrackUrl) {
+      audio.pause()
+      audio.removeAttribute('src')
+      audio.load()
+      return
+    }
+
+    audio.src = activeTrackUrl
+    audio.load()
+
+    if (!player.autoPlay) {
+      return
+    }
+
+    const tryAutoplay = async () => {
+      try {
+        await audio.play()
+        setAutoplayNotice(copy(player.locale, {
+          zh: '歌曲已准备完成，已在浮动播放器中开始播放。',
+          en: 'The song is ready and is now playing in the floating player.',
+        }))
+      } catch {
+        setAutoplayNotice(copy(player.locale, {
+          zh: '歌曲已准备完成，请点击播放器中央按钮开始播放。',
+          en: 'The song is ready. Please press the center button to play.',
+        }))
+      }
+    }
+
+    void tryAutoplay()
+  }, [activeTrackUrl, player.autoPlay, player.key, player.locale])
+
+  function togglePlayback() {
+    const audio = audioRef.current
+    if (!audio || !activeTrackUrl) {
+      return
+    }
+
+    if (audio.paused) {
+      void audio.play()
+      return
+    }
+
+    audio.pause()
+  }
+
+  function updateProgress(nextProgress: number) {
+    const audio = audioRef.current
+    setProgress(nextProgress)
+    if (!audio || !audio.duration) {
+      return
+    }
+
+    audio.currentTime = (nextProgress / 100) * audio.duration
+  }
+
+  function seekBy(deltaSeconds: number) {
+    const audio = audioRef.current
+    if (!audio || !audio.duration) {
+      return
+    }
+
+    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
+  }
+
+  function handleBackdropClose() {
+    if (player.canClose) {
+      onClose()
+    }
+  }
+
+  return (
+    <div className="floating-phone-backdrop" role="presentation" onClick={handleBackdropClose}>
+      <div
+        className="floating-phone-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Floating song player"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''}`}>
+          <div className="phone-status-row">
+            <span>{player.eyebrow || 'MelodyVow'}</span>
+            <span>{player.isGenerating ? copy(player.locale, { zh: '生成中', en: 'Creating' }) : copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</span>
+          </div>
+          <div className="phone-notch-row">
+            <div className="phone-pill">{copy(player.locale, { zh: '浮动播放器', en: 'Floating Player' })}</div>
+            {player.canClose ? (
+              <button type="button" className="floating-phone-close" onClick={onClose}>
+                {copy(player.locale, { zh: '关闭', en: 'Close' })}
+              </button>
+            ) : (
+              <div className="phone-dots">{copy(player.locale, { zh: '处理中', en: 'Busy' })}</div>
+            )}
+          </div>
+
+          <div className="phone-brand-block floating-phone-brand">
+            <h2>{player.title || 'MelodyVow'}</h2>
+            <p>{player.subtitle}</p>
+          </div>
+
+          <div className="phone-record-visual floating-phone-visual">
+            <div className={`floating-phone-disc-shell ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
+              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+            </div>
+            <img className="phone-record-couple" src={coupleImage} alt="" />
+            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+          </div>
+
+          <audio ref={audioRef} preload="metadata" />
+
+          {player.statusText ? (
+            <div className={`status-banner ${player.isGenerating ? 'is-generating_song' : 'is-ready'}`}>
+              {player.statusText}
+            </div>
+          ) : null}
+
+          {player.isGenerating ? (
+            <div className="generation-progress-card floating-generation-card" aria-live="polite">
+              <p className="generation-progress-copy">{player.generationLabel}</p>
+              <div className="generation-progress-track" aria-hidden="true">
+                <div className="generation-progress-dots">
+                  {Array.from({ length: 12 }, (_, index) => (
+                    <span
+                      key={index}
+                      className={`generation-progress-dot ${index / 11 <= player.generationProgress / 100 ? 'active' : ''}`}
+                    />
+                  ))}
+                </div>
+                <img
+                  className="generation-progress-heart"
+                  src={pinkHeartImage}
+                  alt=""
+                  style={{ left: `calc(${player.generationProgress}% - 12px)` }}
+                />
+              </div>
+              <div className="generation-progress-meta">
+                <span>{copy(player.locale, { zh: '歌曲生成中', en: 'Song in progress' })}</span>
+                <span>{`${Math.round(player.generationProgress)}%`}</span>
+              </div>
+            </div>
+          ) : null}
+
+          {tracks.length > 1 ? (
+            <div className="floating-phone-track-tabs">
+              {tracks.map((track, index) => (
+                <button
+                  key={track.id || `${player.key}-${index}`}
+                  type="button"
+                  className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
+                  onClick={() => setActiveTrackIndex(index)}
+                >
+                  {track.title || copy(player.locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` })}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {!player.isGenerating ? (
+            <>
+              <div className="player-now-playing floating-player-meta">
+                <div>
+                  <p className="mini-eyebrow">{copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</p>
+                  <h3>{activeTrack?.title || player.title}</h3>
+                  <p>{activeTrack?.subtitle || player.subtitle}</p>
+                </div>
+                <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+
+              <div className="player-progress">
+                <span>{formatDuration(currentTime)}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={progress}
+                  onChange={(event) => updateProgress(Number(event.target.value))}
+                  disabled={!activeTrackUrl}
+                />
+                <span>{formatDuration(duration)}</span>
+              </div>
+
+              <div className="player-controls floating-player-controls">
+                <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackUrl}>
+                  ↺
+                </button>
+                <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackUrl}>
+                  ⏮
+                </button>
+                <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
+                  {playing ? '❚❚' : '▶'}
+                </button>
+                <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackUrl}>
+                  ⏭
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => window.open(activeTrack?.downloadUrl || activeTrackUrl, '_blank', 'noopener,noreferrer')}
+                  disabled={!activeTrackUrl}
+                >
+                  ↓
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
+          {player.error ? <p className="form-error">{player.error}</p> : null}
+          {player.lyrics ? (
+            <div className="lyrics-box floating-player-lyrics">
+              <h3>{copy(player.locale, { zh: '歌词预览', en: 'Lyrics Preview' })}</h3>
+              <p>{player.lyrics}</p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1622,7 +2032,7 @@ function ServiceHubSection({ locale, title, subtitle }: { locale: Locale, title:
   )
 }
 
-function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession }: HomePageProps) {
+function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession }: HomePageProps) {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -1664,6 +2074,30 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
     setSubmitError('')
     setIsSubmitting(true)
 
+    const pendingPlayerKey = `pending-generate-${locale}`
+    onUpsertFloatingPlayer({
+      key: pendingPlayerKey,
+      locale,
+      title: `${draft.groom} & ${draft.bride}`,
+      subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+      eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+      tracks: [],
+      canClose: false,
+      isGenerating: true,
+      generationProgress: 6,
+      generationLabel: copy(locale, {
+        zh: '正在提交婚礼歌曲生成请求，请稍候...',
+        en: 'Submitting your wedding song request...',
+      }),
+      statusText: copy(locale, {
+        zh: '浮动手机播放器已经打开，后续生成进度会持续显示在这里。',
+        en: 'The floating phone player is open and will keep showing progress here.',
+      }),
+      lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+      error: '',
+      autoPlay: false,
+    })
+
     try {
       const response = await fetch(apiUrl('/api/generate-song'), {
         method: 'POST',
@@ -1692,16 +2126,57 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onLogout, authSession 
 
       if (!response.ok || !result.jobId) {
         if (response.status === 401 || response.status === 403) {
-            onLogout()
-            navigate(withLocale(locale, '/auth'))
+          onLogout()
+          navigate(withLocale(locale, '/auth'))
         }
         throw new Error(result.message ?? '生成请求失败，请稍后再试。')
       }
 
+      onUpsertFloatingPlayer({
+        key: result.jobId,
+        locale,
+        title: `${draft.groom} & ${draft.bride}`,
+        subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+        tracks: [],
+        canClose: false,
+        isGenerating: true,
+        generationProgress: 12,
+        generationLabel: copy(locale, {
+          zh: '歌词与旋律已经进入生成队列，请保持弹窗开启。',
+          en: 'Lyrics and melody are now in the queue. Please keep the player open.',
+        }),
+        statusText: copy(locale, {
+          zh: '歌曲生成中，完成后两首版本会直接出现在这个浮动手机播放器里。',
+          en: 'Your song is generating. Both versions will appear in this floating phone player.',
+        }),
+        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+        error: '',
+        autoPlay: false,
+      })
       navigate(`${withLocale(locale, '/preview')}?job=${result.jobId}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成请求失败，请稍后再试。'
       setSubmitError(message)
+      onUpsertFloatingPlayer({
+        key: pendingPlayerKey,
+        locale,
+        title: `${draft.groom} & ${draft.bride}`,
+        subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+        tracks: [],
+        canClose: true,
+        isGenerating: false,
+        generationProgress: 0,
+        generationLabel: '',
+        statusText: copy(locale, {
+          zh: '请求没有成功发送，请检查提示信息后再试一次。',
+          en: 'The request could not be sent. Please review the message and try again.',
+        }),
+        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+        error: message,
+        autoPlay: false,
+      })
       onOpenModal(message)
     } finally {
       setIsSubmitting(false)
@@ -1934,17 +2409,11 @@ function getJobStatusLabel(locale: Locale, status: GenerationStatus, callbackEna
   }
 }
 
-function ShowcasePage({ locale, authSession, onLogout }: ShowcasePageProps) {
+function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }: ShowcasePageProps) {
   const navigate = useNavigate()
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [tracks, setTracks] = useState<ShowcaseTrack[]>(productShowcaseTracks)
   const [activeTrackId, setActiveTrackId] = useState(productShowcaseTracks[0]?.id ?? '')
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
   const [error, setError] = useState('')
-  const [shouldAutoplay, setShouldAutoplay] = useState(false)
   const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? tracks[0]
 
   useEffect(() => {
@@ -1976,156 +2445,35 @@ function ShowcasePage({ locale, authSession, onLogout }: ShowcasePageProps) {
     }
   }, [])
 
-  useEffect(() => {
-    const audio = audioRef.current
-
-    if (!audio) {
-      return
-    }
-
-    const handleLoadedMetadata = () => {
-      setDuration(audio.duration || 0)
-    }
-
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime)
-
-      if (audio.duration) {
-        setProgress((audio.currentTime / audio.duration) * 100)
-      }
-    }
-
-    const handlePlay = () => {
-      setPlaying(true)
-    }
-
-    const handlePause = () => {
-      setPlaying(false)
-    }
-
-    const handleEnded = () => {
-      setPlaying(false)
-      setProgress(100)
-    }
-
-    const handleError = () => {
-      setError(
-        copy(locale, {
-          zh: '样片音频暂时无法播放，请稍后再试或更换样片地址。',
-          en: 'The sample audio is unavailable right now. Please try again later.',
-        }),
-      )
-    }
-
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata)
-    audio.addEventListener('timeupdate', handleTimeUpdate)
-    audio.addEventListener('play', handlePlay)
-    audio.addEventListener('pause', handlePause)
-    audio.addEventListener('ended', handleEnded)
-    audio.addEventListener('error', handleError)
-
-    return () => {
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
-      audio.removeEventListener('timeupdate', handleTimeUpdate)
-      audio.removeEventListener('play', handlePlay)
-      audio.removeEventListener('pause', handlePause)
-      audio.removeEventListener('ended', handleEnded)
-      audio.removeEventListener('error', handleError)
-    }
-  }, [locale])
-
-  useEffect(() => {
-    const audio = audioRef.current
-
-    if (!audio || !activeTrack) {
-      return
-    }
-
-    setError('')
-    setPlaying(false)
-    setProgress(0)
-    setCurrentTime(0)
-    setDuration(0)
-    audio.src = activeTrack.audioUrl
-    audio.load()
-
-    if (!shouldAutoplay) {
-      return
-    }
-
-    const playSelectedTrack = async () => {
-      try {
-        await audio.play()
-      } catch {
-        setError(
-          copy(locale, {
-            zh: '浏览器拦截了自动播放，请再点击一次播放按钮。',
-            en: 'Autoplay was blocked by the browser. Please press play again.',
-          }),
-        )
-      } finally {
-        setShouldAutoplay(false)
-      }
-    }
-
-    void playSelectedTrack()
-  }, [activeTrack, locale, shouldAutoplay])
-
   function handleSelectTrack(trackId: string) {
-    if (trackId === activeTrackId) {
-      void togglePlayback()
-      return
-    }
-
+    const trackIndex = tracks.findIndex((track) => track.id === trackId)
+    const nextTrack = tracks[trackIndex] ?? tracks[0]
     setActiveTrackId(trackId)
-    setShouldAutoplay(true)
-  }
-
-  async function togglePlayback() {
-    const audio = audioRef.current
-
-    if (!audio || !activeTrack?.audioUrl) {
-      return
-    }
-
-    if (audio.paused) {
-      try {
-        setError('')
-        await audio.play()
-      } catch {
-        setError(
-          copy(locale, {
-            zh: '当前样片无法播放，请稍后再试。',
-            en: 'This sample cannot be played right now. Please try again later.',
-          }),
-        )
-      }
-      return
-    }
-
-    audio.pause()
-  }
-
-  function seekBy(deltaSeconds: number) {
-    const audio = audioRef.current
-
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
-  }
-
-  function updateProgress(nextProgress: number) {
-    const audio = audioRef.current
-
-    setProgress(nextProgress)
-
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = (nextProgress / 100) * audio.duration
+    setError('')
+    onUpsertFloatingPlayer({
+      key: `showcase-${trackId}`,
+      locale,
+      title: copy(locale, nextTrack?.title ?? { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' }),
+      subtitle: copy(locale, nextTrack?.meta ?? { zh: '婚礼样片', en: 'Wedding sample' }),
+      eyebrow: copy(locale, { zh: '样片播放器', en: 'Showcase Player' }),
+      tracks: tracks.map((track) => ({
+        id: track.id,
+        title: copy(locale, track.title),
+        subtitle: copy(locale, track.meta),
+        audioUrl: track.audioUrl,
+        downloadUrl: track.audioUrl,
+      })),
+      activeTrackIndex: Math.max(trackIndex, 0),
+      canClose: true,
+      isGenerating: false,
+      generationProgress: 100,
+      generationLabel: '',
+      statusText: copy(locale, {
+        zh: '所有样片播放都会统一进入浮动手机播放器。',
+        en: 'All sample playback now opens in the floating phone player.',
+      }),
+      autoPlay: true,
+    })
   }
 
   return (
@@ -2144,71 +2492,34 @@ function ShowcasePage({ locale, authSession, onLogout }: ShowcasePageProps) {
       hideHero
     >
       <section className="showcase-layout">
-        <article className="glass-panel player-panel showcase-player-panel">
-          <div className="vinyl-stage">
-            <img className="vinyl-record" src={recordImage} alt="" />
-            <img className="vinyl-record vinyl-record-secondary" src={recordImage} alt="" />
-            <img className="vinyl-stage-couple" src={coupleImage} alt="" />
-            <img className="vinyl-stage-heart" src={pinkHeartImage} alt="" />
-            <img className="vinyl-stage-note" src={noteImage} alt="" />
-            <div className={`record-center ${playing ? 'is-playing' : ''}`}>
-              <span>{activeTrack ? copy(locale, activeTrack.title) : 'MelodyVow'}</span>
-            </div>
+        <article className="glass-panel floating-player-teaser">
+          <div className="phone-brand-block">
+            <h2>{copy(locale, { zh: '浮动手机播放器', en: 'Floating Phone Player' })}</h2>
+            <p>{copy(locale, { zh: '所有样片和生成歌曲都会从这里统一播放。', en: 'All sample and generated songs now open here.' })}</p>
           </div>
-
-          <audio ref={audioRef} preload="metadata" />
-
+          <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
+            <div className="floating-phone-disc-shell is-spinning">
+              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+            </div>
+            <img className="phone-record-couple" src={coupleImage} alt="" />
+            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+          </div>
+          <div className="status-banner is-ready">
+            {copy(locale, {
+              zh: '点击右侧任意样片，都会弹出 3D 浮动手机播放器，不再使用旧播放器。',
+              en: 'Tap any sample on the right to launch the new 3D floating phone player.',
+            })}
+          </div>
+          {activeTrack ? (
+            <div className="player-now-playing floating-player-meta">
+              <div>
+                <p className="mini-eyebrow">{copy(locale, { zh: '当前主推样片', en: 'Featured Sample' })}</p>
+                <h3>{copy(locale, activeTrack.title)}</h3>
+                <p>{copy(locale, activeTrack.meta)}</p>
+              </div>
+            </div>
+          ) : null}
           {error ? <p className="form-error">{error}</p> : null}
-
-          <div className="player-now-playing">
-            <div>
-              <p className="mini-eyebrow">{copy(locale, { zh: '产品展示', en: 'Showcase' })}</p>
-              <h3>{activeTrack ? copy(locale, activeTrack.title) : 'MelodyVow'}</h3>
-              <p>{activeTrack ? copy(locale, activeTrack.meta) : ''}</p>
-            </div>
-            <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-          </div>
-
-          <div className="player-progress">
-            <span>{formatDuration(currentTime)}</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={progress}
-              onChange={(event) => updateProgress(Number(event.target.value))}
-              disabled={!activeTrack?.audioUrl}
-            />
-            <span>{formatDuration(duration)}</span>
-          </div>
-
-          <div className="player-controls">
-            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrack?.audioUrl}>
-              ↺
-            </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrack?.audioUrl}>
-              ⏮
-            </button>
-            <button type="button" className="play-button" onClick={() => void togglePlayback()} disabled={!activeTrack?.audioUrl}>
-              {playing ? '❚❚' : '▶'}
-            </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrack?.audioUrl}>
-              ⏭
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => window.open(activeTrack?.audioUrl || '', '_blank', 'noopener,noreferrer')}
-              disabled={!activeTrack?.audioUrl}
-            >
-              ♡
-            </button>
-          </div>
         </article>
 
         <aside className="showcase-sidebar">
@@ -2241,8 +2552,8 @@ function ShowcasePage({ locale, authSession, onLogout }: ShowcasePageProps) {
                     <strong>{copy(locale, track.title)}</strong>
                     <span>{copy(locale, track.meta)}</span>
                   </div>
-                  <div className={`showcase-track-icon ${isActive && playing ? 'is-playing' : ''}`}>
-                    {isActive && playing ? '❚❚' : '▶'}
+                  <div className={`showcase-track-icon ${isActive ? 'is-playing' : ''}`}>
+                    ▶
                   </div>
                 </button>
               )
@@ -2296,29 +2607,21 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
   )
 }
 
-function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: PreviewPageProps) {
+function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout, onUpsertFloatingPlayer }: PreviewPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [job, setJob] = useState<SongJob | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [autoplayNotice, setAutoplayNotice] = useState('')
   const [generationHeartbeat, setGenerationHeartbeat] = useState(() => Date.now())
-  const [activeTrackIndex, setActiveTrackIndex] = useState(0)
   const params = new URLSearchParams(location.search)
   const jobId = params.get('job')
   const activeJob = jobId ? job : null
   const availableTracks = activeJob?.tracks ?? []
-  const safeActiveTrackIndex = availableTracks.length ? Math.min(activeTrackIndex, availableTracks.length - 1) : 0
-  const activeTrack = availableTracks[safeActiveTrackIndex] ?? availableTracks[0] ?? null
-  const activeTrackPlaybackUrl = activeTrack?.audioUrl || activeTrack?.downloadUrl || ''
-  const duration = activeTrack?.duration ?? 0
+  const hasReadyTracks = availableTracks.length > 0
+  const duration = availableTracks[0]?.duration ?? 0
   const generationDurationMs = 120000
-  const displayedTitle = activeTrack?.title ?? activeJob?.title ?? 'MelodyVow'
+  const displayedTitle = activeJob?.title || `${draft.groom} & ${draft.bride}` || 'MelodyVow'
   const displayedLyrics = activeJob?.lyrics
     ?? (locale === 'zh'
       ? 'DeepSeek 生成的歌词会显示在这里。\nSuno 回调完成后，歌曲会自动尝试播放。'
@@ -2458,106 +2761,51 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
     }
   }, [isGenerating])
 
-  useEffect(() => {
-    const audio = audioRef.current
-
-    if (!audio || !activeTrackPlaybackUrl) {
+  function openPreviewFloatingPlayer(autoPlay: boolean) {
+    if (!activeJob) {
       return
     }
 
-    audio.src = activeTrackPlaybackUrl
-    audio.load()
-
-    const tryAutoplay = async () => {
-      try {
-        await audio.play()
-        setPlaying(true)
-        setAutoplayNotice(
-          copy(locale, {
-            zh: '歌曲已生成，已开始自动播放。',
-            en: 'The song is ready and autoplay has started.',
-          }),
-        )
-      } catch {
-        setAutoplayNotice(
-          copy(locale, {
-            zh: '歌曲已生成，但浏览器拦截了自动播放，请点击播放按钮。',
-            en: 'The song is ready, but autoplay was blocked by the browser. Please press play.',
-          }),
-        )
-      }
-    }
-
-    void tryAutoplay()
-  }, [activeTrackPlaybackUrl, locale])
+    onUpsertFloatingPlayer({
+      key: activeJob.id,
+      locale,
+      title: activeJob.title || `${draft.groom} & ${draft.bride}` || 'MelodyVow',
+      subtitle: copy(locale, {
+        zh: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+        en: `${draft.groom} & ${draft.bride} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+      }),
+      eyebrow: copy(locale, { zh: '婚礼歌播放器', en: 'Wedding Song Player' }),
+      tracks: activeJob.status === 'ready' ? buildFloatingTracksFromJob(activeJob, locale) : [],
+      activeTrackIndex: 0,
+      canClose: !isGenerating,
+      isGenerating,
+      generationProgress,
+      generationLabel: copy(locale, {
+        zh: '幸福正在慢慢向着您靠近！',
+        en: 'Happiness is slowly making its way to you!',
+      }),
+      statusText: activeJob.error
+        || getJobStatusLabel(locale, activeJob.status, activeJob.callbackEnabled),
+      lyrics: activeJob.lyrics || '',
+      error: error || activeJob.error || '',
+      autoPlay,
+    })
+  }
 
   useEffect(() => {
-    const audio = audioRef.current
-
-    if (!audio) {
+    if (!activeJob) {
       return
     }
 
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime)
-
-      if (audio.duration) {
-        setProgress((audio.currentTime / audio.duration) * 100)
-      }
-    }
-
-    const handleEnded = () => {
-      setPlaying(false)
-      setProgress(100)
-    }
-
-    audio.addEventListener('timeupdate', handleTimeUpdate)
-    audio.addEventListener('ended', handleEnded)
-
-    return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate)
-      audio.removeEventListener('ended', handleEnded)
-    }
-  }, [])
-
-  function togglePlayback() {
-    const audio = audioRef.current
-
-    if (!audio || !activeTrackPlaybackUrl) {
-      return
-    }
-
-    if (audio.paused) {
-      void audio.play()
-      setPlaying(true)
-      return
-    }
-
-    audio.pause()
-    setPlaying(false)
-  }
-
-  function seekBy(deltaSeconds: number) {
-    const audio = audioRef.current
-
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
-  }
-
-  function updateProgress(nextProgress: number) {
-    const audio = audioRef.current
-
-    setProgress(nextProgress)
-
-    if (!audio || !audio.duration) {
-      return
-    }
-
-    audio.currentTime = (nextProgress / 100) * audio.duration
-  }
+    openPreviewFloatingPlayer(activeJob.status === 'ready' && availableTracks.length > 0)
+  }, [
+    activeJob,
+    availableTracks.length,
+    error,
+    generationProgress,
+    isGenerating,
+    locale,
+  ])
 
   return (
     <SiteLayout
@@ -2574,19 +2822,22 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
       authSession={authSession}
     >
       <section className="preview-layout">
-        <article className="glass-panel player-panel">
-          <div className="vinyl-stage">
-            <img className="vinyl-record" src={recordImage} alt="" />
-            <img className="vinyl-record vinyl-record-secondary" src={recordImage} alt="" />
-            <img className="vinyl-stage-couple" src={coupleImage} alt="" />
-            <img className="vinyl-stage-heart" src={pinkHeartImage} alt="" />
-            <img className="vinyl-stage-note" src={noteImage} alt="" />
-            <div className={`record-center ${playing ? 'is-playing' : ''}`}>
-              <span>{displayedTitle}</span>
-            </div>
+        <article className="glass-panel floating-player-teaser preview-shell-card">
+          <div className="phone-brand-block">
+            <h2>{copy(locale, { zh: '浮动 iPhone 播放器', en: 'Floating iPhone Player' })}</h2>
+            <p>{copy(locale, {
+              zh: '生成进度、两首歌曲和后续播放入口都已经统一进这个弹窗播放器。',
+              en: 'Progress, both generated tracks, and all playback now live inside this floating player.',
+            })}</p>
           </div>
 
-          <audio ref={audioRef} preload="auto" />
+          <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
+            <div className={`floating-phone-disc-shell ${isGenerating || availableTracks.length ? 'is-spinning' : ''}`}>
+              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+            </div>
+            <img className="phone-record-couple" src={coupleImage} alt="" />
+            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+          </div>
 
           {activeJob ? (
             <div className={`status-banner is-${activeJob.status}`}>
@@ -2595,7 +2846,7 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
           ) : null}
 
           {activeJob && isGenerating ? (
-            <div className="generation-progress-card" aria-live="polite">
+            <div className="generation-progress-card floating-generation-card" aria-live="polite">
               <p className="generation-progress-copy">
                 {copy(locale, {
                   zh: '幸福正在慢慢向着您靠近！',
@@ -2625,7 +2876,6 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             </div>
           ) : null}
 
-          {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           {!jobId ? (
             <p className="empty-state">
@@ -2636,9 +2886,9 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             </p>
           ) : null}
 
-          <div className="player-now-playing">
+          <div className="player-now-playing floating-player-meta">
             <div>
-              <p className="mini-eyebrow">{copy(locale, { zh: '正在播放', en: 'Now Playing' })}</p>
+              <p className="mini-eyebrow">{copy(locale, { zh: '弹窗状态', en: 'Player Status' })}</p>
               <h3>{displayedTitle}</h3>
               <p>
                 {copy(locale, {
@@ -2647,7 +2897,7 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
                 })}
               </p>
             </div>
-            <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
+            <div className={`equalizer ${isGenerating || availableTracks.length ? 'is-active' : ''}`} aria-hidden="true">
               <span />
               <span />
               <span />
@@ -2655,75 +2905,28 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             </div>
           </div>
 
-          {availableTracks.length > 1 ? (
-            <div className="preview-track-switcher">
-              {availableTracks.map((track, index) => (
-                <button
-                  key={track.id || buildTrackHistoryId(activeJob?.id || 'job', index)}
-                  type="button"
-                  className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
-                  onClick={() => setActiveTrackIndex(index)}
-                >
-                  {copy(locale, {
-                    zh: `歌曲 ${index + 1}`,
-                    en: `Version ${index + 1}`,
-                  })}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="player-progress">
-            <span>{formatDuration(currentTime)}</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={progress}
-              onChange={(event) => updateProgress(Number(event.target.value))}
-              disabled={!activeTrackPlaybackUrl}
-            />
-            <span>{formatDuration(duration)}</span>
-          </div>
-
-          <div className="player-controls">
-            <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackPlaybackUrl}>
-              ↺
-            </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackPlaybackUrl}>
-              ⏮
-            </button>
-            <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackPlaybackUrl}>
-              {playing ? '❚❚' : '▶'}
-            </button>
-            <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackPlaybackUrl}>
-              ⏭
-            </button>
+          <div className="preview-shell-actions">
             <button
               type="button"
-              className="icon-button"
-              onClick={() => {
-                // #region debug-point C:preview-download-click
-                reportDebugEvent({
-                  hypothesisId: 'C',
-                  location: 'web/src/App.tsx:previewDownloadClick',
-                  msg: '[DEBUG] User clicked preview download button',
-                  data: {
-                    jobId: activeJob?.id || '',
-                    chosenUrl: activeTrack ? getSongDownloadUrl(buildTrackHistoryId(activeJob?.id || '', activeTrackIndex)) : '',
-                    audioUrl: activeTrack?.audioUrl || '',
-                    downloadUrl: activeTrack?.downloadUrl || '',
-                  },
-                })
-                // #endregion
-                if (activeJob?.id && activeTrack) {
-                  window.open(getSongDownloadUrl(buildTrackHistoryId(activeJob.id, activeTrackIndex)), '_blank', 'noopener,noreferrer')
-                }
-              }}
-              disabled={!activeTrackPlaybackUrl || !activeJob?.id}
+              className="primary-button wide"
+              onClick={() => openPreviewFloatingPlayer(activeJob?.status === 'ready')}
+              disabled={!activeJob}
             >
-              ♡
+              {copy(locale, {
+                zh: isGenerating ? '查看浮动播放器进度' : '打开浮动播放器试听',
+                en: isGenerating ? 'Open Floating Player Progress' : 'Open Floating Player',
+              })}
             </button>
+            <p className="hint-text">
+              {copy(locale, {
+                zh: availableTracks.length
+                  ? `已生成 ${availableTracks.length} 首歌曲，点击上方按钮即可在浮动手机中切换播放。`
+                  : '生成期间弹窗会一直保持存在，完成后会自动切换为可播放状态。',
+                en: availableTracks.length
+                  ? `${availableTracks.length} tracks are ready. Open the floating player to switch between them.`
+                  : 'The floating player stays visible during generation and switches to playback when ready.',
+              })}
+            </p>
           </div>
 
           <div className="lyrics-box">
@@ -2747,8 +2950,8 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
             <li>{copy(locale, { zh: `语言：${draft.languageLabel}`, en: `Language: ${draft.languageLabel}` })}</li>
             <li>{copy(locale, { zh: `曲风：${getStyleLabel(locale, draft.style)}`, en: `Style: ${getStyleLabel(locale, draft.style)}` })}</li>
             <li>{copy(locale, { zh: `声音：${getVocalLabel(locale, draft.vocal)}`, en: `Voice: ${getVocalLabel(locale, draft.vocal)}` })}</li>
-            {availableTracks.length > 1 ? (
-              <li>{copy(locale, { zh: `当前歌曲：第 ${safeActiveTrackIndex + 1} 首 / 共 ${availableTracks.length} 首`, en: `Current track: ${safeActiveTrackIndex + 1} / ${availableTracks.length}` })}</li>
+            {availableTracks.length ? (
+              <li>{copy(locale, { zh: `已生成歌曲：${availableTracks.length} 首`, en: `Tracks ready: ${availableTracks.length}` })}</li>
             ) : null}
             <li>
               {activeJob
@@ -2760,9 +2963,9 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout }: Pr
           <button
             type="button"
             className="primary-button wide"
-            onClick={() => navigate(activeTrackPlaybackUrl ? withLocale(locale, '/complete') : withLocale(locale))}
+            onClick={() => navigate(hasReadyTracks ? withLocale(locale, '/complete') : withLocale(locale))}
           >
-            {activeTrackPlaybackUrl
+            {hasReadyTracks
               ? copy(locale, { zh: '查看下载页', en: 'Open Download Page' })
               : copy(locale, { zh: '返回继续填写', en: 'Back to Homepage' })}
           </button>
@@ -3303,10 +3506,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   )
 }
 
-function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession }: AccountPageProps) {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playingSongId, setPlayingSongId] = useState('')
-
+function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer }: AccountPageProps) {
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
@@ -3331,22 +3531,6 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         minute: '2-digit',
       })
     : null
-
-  useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) {
-      return
-    }
-
-    const handleEnded = () => {
-      setPlayingSongId('')
-    }
-
-    audio.addEventListener('ended', handleEnded)
-    return () => {
-      audio.removeEventListener('ended', handleEnded)
-    }
-  }, [])
 
   function buildSongFileName(item: HistoryItem) {
     const raw = `${item.title}${item.variantLabel ? ` ${item.variantLabel}` : ''}`
@@ -3407,27 +3591,27 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
   }
 
   async function handleTogglePlay(item: HistoryItem) {
-    const audio = audioRef.current
-    if (!audio) {
-      return
-    }
-
-    const streamUrl = getSongStreamUrl(item.id)
-
     try {
-      if (playingSongId === item.id && !audio.paused) {
-        audio.pause()
-        setPlayingSongId('')
-        return
-      }
-
-      if (audio.src !== streamUrl) {
-        audio.src = streamUrl
-        audio.load()
-      }
-
-      await audio.play()
-      setPlayingSongId(item.id)
+      onUpsertFloatingPlayer({
+        key: `account-${item.id}`,
+        locale,
+        title: item.title || 'MelodyVow',
+        subtitle: item.subtitle,
+        eyebrow: copy(locale, { zh: '会员中心播放器', en: 'Member Player' }),
+        tracks: [buildFloatingTrackFromHistory(item)],
+        activeTrackIndex: 0,
+        canClose: true,
+        isGenerating: false,
+        generationProgress: 100,
+        generationLabel: '',
+        statusText: copy(locale, {
+          zh: '会员中心的歌曲会统一在这个浮动手机播放器中播放。',
+          en: 'Songs from your member center now play in this floating phone player.',
+        }),
+        lyrics: item.lyricSnippet || '',
+        error: '',
+        autoPlay: true,
+      })
     } catch {
       onOpenModal(copy(locale, {
         zh: '当前歌曲暂时无法播放，请稍后再试。',
@@ -3495,7 +3679,6 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                 <p className="account-song-subtitle">{item.subtitle}</p>
                 <div className="account-song-meta">
                   <span>{item.status}</span>
-                  {playingSongId === item.id ? <span>{copy(locale, { zh: '播放中', en: 'Playing' })}</span> : null}
                   {item.variantLabel ? <span>{item.variantLabel}</span> : null}
                   {item.languageLabel ? <span>{item.languageLabel}</span> : null}
                   {item.styleLabel ? <span>{item.styleLabel}</span> : null}
@@ -3507,9 +3690,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   className="ghost-button compact"
                   onClick={() => void handleTogglePlay(item)}
                 >
-                  {playingSongId === item.id
-                    ? copy(locale, { zh: '暂停播放', en: 'Pause' })
-                    : copy(locale, { zh: '播放歌曲', en: 'Play' })}
+                  {copy(locale, { zh: '浮动播放器', en: 'Open Player' })}
                 </button>
                 <button
                   type="button"
@@ -3541,7 +3722,6 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
               </div>
             </article>
           ))}
-          <audio ref={audioRef} preload="none" />
         </section>
       </section>
     </SiteLayout>
