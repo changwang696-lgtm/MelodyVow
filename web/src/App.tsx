@@ -1,5 +1,5 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   NavLink,
   Navigate,
@@ -1445,6 +1445,15 @@ function FloatingPhonePlayer({
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [autoplayNotice, setAutoplayNotice] = useState('')
+  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const dragStateRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+  } | null>(null)
 
   useEffect(() => {
     setActiveTrackIndex(player.activeTrackIndex ?? 0)
@@ -1453,6 +1462,7 @@ function FloatingPhonePlayer({
     setDuration(0)
     setPlaying(false)
     setAutoplayNotice('')
+    setIsCollapsed(false)
   }, [player.key, player.activeTrackIndex])
 
   const tracks = player.tracks ?? []
@@ -1576,6 +1586,51 @@ function FloatingPhonePlayer({
     audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
   }
 
+  function handleDragStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return
+    }
+
+    const target = event.target
+    if (target instanceof HTMLElement && target.closest('button, input, a, textarea, select, label')) {
+      return
+    }
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: dragOffset.x,
+      originY: dragOffset.y,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handleDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    const nextX = dragState.originX + (event.clientX - dragState.startX)
+    const nextY = dragState.originY + (event.clientY - dragState.startY)
+    setDragOffset({ x: nextX, y: nextY })
+  }
+
+  function handleDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      dragStateRef.current = null
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const compactStatus = player.isGenerating
+    ? copy(player.locale, { zh: `${Math.round(player.generationProgress)}%`, en: `${Math.round(player.generationProgress)}%` })
+    : copy(player.locale, { zh: '播放中', en: 'Playing' })
+
   return (
     <div className="floating-phone-backdrop" role="presentation">
       <div
@@ -1583,147 +1638,193 @@ function FloatingPhonePlayer({
         role="dialog"
         aria-modal="false"
         aria-label="Floating song player"
+        style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
       >
-        <div className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''}`}>
-          <div className="phone-status-row">
-            <span>{player.eyebrow || 'MelodyVow'}</span>
-            <span>{player.isGenerating ? copy(player.locale, { zh: '生成中', en: 'Creating' }) : copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</span>
-          </div>
-          <div className="phone-notch-row">
-            <div className="phone-pill">{copy(player.locale, { zh: '悬浮播放器', en: 'Floating Player' })}</div>
-            {player.canClose ? (
-              <button type="button" className="floating-phone-close" onClick={onClose}>
-                {copy(player.locale, { zh: '关闭', en: 'Close' })}
-              </button>
-            ) : (
-              <div className="phone-dots">{copy(player.locale, { zh: '处理中', en: 'Busy' })}</div>
-            )}
-          </div>
-
-          <div className="phone-brand-block floating-phone-brand">
-            <h2>{player.title || 'MelodyVow'}</h2>
-            <p>{player.subtitle}</p>
-          </div>
-
-          <div className="phone-record-visual floating-phone-visual">
-            <div className={`floating-phone-disc-shell ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
-              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+        <div className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''} ${isCollapsed ? 'is-collapsed' : ''}`}>
+          <div
+            className="floating-phone-drag-area"
+            onPointerDown={handleDragStart}
+            onPointerMove={handleDragMove}
+            onPointerUp={handleDragEnd}
+            onPointerCancel={handleDragEnd}
+          >
+            <div className="phone-status-row">
+              <span>{player.eyebrow || 'MelodyVow'}</span>
+              <span>{player.isGenerating ? copy(player.locale, { zh: '生成中', en: 'Creating' }) : copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</span>
             </div>
-            <img className="phone-record-couple" src={coupleImage} alt="" />
-            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+            <div className="phone-notch-row">
+              <div className="phone-pill">{copy(player.locale, { zh: '悬浮播放器', en: 'Floating Player' })}</div>
+              <div className="floating-phone-actions">
+                <button type="button" className="floating-phone-toggle" onClick={() => setIsCollapsed((current) => !current)}>
+                  {isCollapsed
+                    ? copy(player.locale, { zh: '展开', en: 'Expand' })
+                    : copy(player.locale, { zh: '折叠', en: 'Collapse' })}
+                </button>
+                {player.canClose ? (
+                  <button type="button" className="floating-phone-close" onClick={onClose}>
+                    {copy(player.locale, { zh: '关闭', en: 'Close' })}
+                  </button>
+                ) : (
+                  <div className="phone-dots">{copy(player.locale, { zh: '处理中', en: 'Busy' })}</div>
+                )}
+              </div>
+            </div>
           </div>
 
           <audio ref={audioRef} preload="metadata" />
 
-          {player.statusText ? (
-            <div className={`status-banner ${player.isGenerating ? 'is-generating_song' : 'is-ready'}`}>
-              {player.statusText}
+          {isCollapsed ? (
+            <div
+              className="floating-phone-compact"
+              onPointerDown={handleDragStart}
+              onPointerMove={handleDragMove}
+              onPointerUp={handleDragEnd}
+              onPointerCancel={handleDragEnd}
+            >
+              <div className={`floating-phone-compact-disc ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
+                <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+              </div>
+              <div className="floating-phone-compact-copy">
+                <strong>{activeTrack?.title || player.title}</strong>
+                <span>{player.isGenerating ? player.generationLabel || compactStatus : activeTrack?.subtitle || compactStatus}</span>
+              </div>
+              <div className="floating-phone-compact-actions">
+                {!player.isGenerating ? (
+                  <button type="button" className="floating-phone-mini-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
+                    {playing ? '❚❚' : '▶'}
+                  </button>
+                ) : null}
+                <button type="button" className="floating-phone-mini-button" onClick={() => setIsCollapsed(false)}>
+                  {copy(player.locale, { zh: '展开', en: 'Open' })}
+                </button>
+              </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div className="phone-brand-block floating-phone-brand">
+                <h2>{player.title || 'MelodyVow'}</h2>
+                <p>{player.subtitle}</p>
+              </div>
 
-          {player.isGenerating ? (
-            <div className="generation-progress-card floating-generation-card" aria-live="polite">
-              <p className="generation-progress-copy">{player.generationLabel}</p>
-              <div className="generation-progress-track" aria-hidden="true">
-                <div className="generation-progress-dots">
-                  {Array.from({ length: 12 }, (_, index) => (
-                    <span
-                      key={index}
-                      className={`generation-progress-dot ${index / 11 <= player.generationProgress / 100 ? 'active' : ''}`}
+              <div className="phone-record-visual floating-phone-visual">
+                <div className={`floating-phone-disc-shell ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
+                  <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
+                </div>
+                <img className="phone-record-couple" src={coupleImage} alt="" />
+                <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+              </div>
+
+              {player.statusText ? (
+                <div className={`status-banner ${player.isGenerating ? 'is-generating_song' : 'is-ready'}`}>
+                  {player.statusText}
+                </div>
+              ) : null}
+
+              {player.isGenerating ? (
+                <div className="generation-progress-card floating-generation-card" aria-live="polite">
+                  <p className="generation-progress-copy">{player.generationLabel}</p>
+                  <div className="generation-progress-track" aria-hidden="true">
+                    <div className="generation-progress-dots">
+                      {Array.from({ length: 12 }, (_, index) => (
+                        <span
+                          key={index}
+                          className={`generation-progress-dot ${index / 11 <= player.generationProgress / 100 ? 'active' : ''}`}
+                        />
+                      ))}
+                    </div>
+                    <img
+                      className="generation-progress-heart"
+                      src={pinkHeartImage}
+                      alt=""
+                      style={{ left: `calc(${player.generationProgress}% - 12px)` }}
                     />
+                  </div>
+                  <div className="generation-progress-meta">
+                    <span>{copy(player.locale, { zh: '歌曲生成中', en: 'Song in progress' })}</span>
+                    <span>{`${Math.round(player.generationProgress)}%`}</span>
+                  </div>
+                </div>
+              ) : null}
+
+              {tracks.length > 1 ? (
+                <div className="floating-phone-track-tabs">
+                  {tracks.map((track, index) => (
+                    <button
+                      key={track.id || `${player.key}-${index}`}
+                      type="button"
+                      className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
+                      onClick={() => setActiveTrackIndex(index)}
+                    >
+                      {track.title || copy(player.locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` })}
+                    </button>
                   ))}
                 </div>
-                <img
-                  className="generation-progress-heart"
-                  src={pinkHeartImage}
-                  alt=""
-                  style={{ left: `calc(${player.generationProgress}% - 12px)` }}
-                />
-              </div>
-              <div className="generation-progress-meta">
-                <span>{copy(player.locale, { zh: '歌曲生成中', en: 'Song in progress' })}</span>
-                <span>{`${Math.round(player.generationProgress)}%`}</span>
-              </div>
-            </div>
-          ) : null}
+              ) : null}
 
-          {tracks.length > 1 ? (
-            <div className="floating-phone-track-tabs">
-              {tracks.map((track, index) => (
-                <button
-                  key={track.id || `${player.key}-${index}`}
-                  type="button"
-                  className={`ghost-button compact ${index === safeActiveTrackIndex ? 'active' : ''}`}
-                  onClick={() => setActiveTrackIndex(index)}
-                >
-                  {track.title || copy(player.locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` })}
-                </button>
-              ))}
-            </div>
-          ) : null}
+              {!player.isGenerating ? (
+                <>
+                  <div className="player-now-playing floating-player-meta">
+                    <div>
+                      <p className="mini-eyebrow">{copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</p>
+                      <h3>{activeTrack?.title || player.title}</h3>
+                      <p>{activeTrack?.subtitle || player.subtitle}</p>
+                    </div>
+                    <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  </div>
 
-          {!player.isGenerating ? (
-            <>
-              <div className="player-now-playing floating-player-meta">
-                <div>
-                  <p className="mini-eyebrow">{copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</p>
-                  <h3>{activeTrack?.title || player.title}</h3>
-                  <p>{activeTrack?.subtitle || player.subtitle}</p>
+                  <div className="player-progress">
+                    <span>{formatDuration(currentTime)}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={progress}
+                      onChange={(event) => updateProgress(Number(event.target.value))}
+                      disabled={!activeTrackUrl}
+                    />
+                    <span>{formatDuration(duration)}</span>
+                  </div>
+
+                  <div className="player-controls floating-player-controls">
+                    <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackUrl}>
+                      ↺
+                    </button>
+                    <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackUrl}>
+                      ⏮
+                    </button>
+                    <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
+                      {playing ? '❚❚' : '▶'}
+                    </button>
+                    <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackUrl}>
+                      ⏭
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => window.open(activeTrack?.downloadUrl || activeTrackUrl, '_blank', 'noopener,noreferrer')}
+                      disabled={!activeTrackUrl}
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </>
+              ) : null}
+
+              {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
+              {player.error ? <p className="form-error">{player.error}</p> : null}
+              {player.lyrics ? (
+                <div className="lyrics-box floating-player-lyrics">
+                  <h3>{copy(player.locale, { zh: '歌词预览', en: 'Lyrics Preview' })}</h3>
+                  <p>{player.lyrics}</p>
                 </div>
-                <div className={`equalizer ${playing ? 'is-active' : ''}`} aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-
-              <div className="player-progress">
-                <span>{formatDuration(currentTime)}</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={progress}
-                  onChange={(event) => updateProgress(Number(event.target.value))}
-                  disabled={!activeTrackUrl}
-                />
-                <span>{formatDuration(duration)}</span>
-              </div>
-
-              <div className="player-controls floating-player-controls">
-                <button type="button" className="icon-button" onClick={() => updateProgress(0)} disabled={!activeTrackUrl}>
-                  ↺
-                </button>
-                <button type="button" className="icon-button" onClick={() => seekBy(-10)} disabled={!activeTrackUrl}>
-                  ⏮
-                </button>
-                <button type="button" className="play-button" onClick={togglePlayback} disabled={!activeTrackUrl}>
-                  {playing ? '❚❚' : '▶'}
-                </button>
-                <button type="button" className="icon-button" onClick={() => seekBy(10)} disabled={!activeTrackUrl}>
-                  ⏭
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => window.open(activeTrack?.downloadUrl || activeTrackUrl, '_blank', 'noopener,noreferrer')}
-                  disabled={!activeTrackUrl}
-                >
-                  ↓
-                </button>
-              </div>
+              ) : null}
             </>
-          ) : null}
-
-          {autoplayNotice ? <p className="autoplay-notice">{autoplayNotice}</p> : null}
-          {player.error ? <p className="form-error">{player.error}</p> : null}
-          {player.lyrics ? (
-            <div className="lyrics-box floating-player-lyrics">
-              <h3>{copy(player.locale, { zh: '歌词预览', en: 'Lyrics Preview' })}</h3>
-              <p>{player.lyrics}</p>
-            </div>
-          ) : null}
+          )}
         </div>
       </div>
     </div>
