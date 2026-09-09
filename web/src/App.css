@@ -1392,10 +1392,15 @@
   width: 100%;
   margin: 0;
   padding: 12px 14px 18px;
+  cursor: grab;
   box-shadow:
     0 24px 50px rgba(35, 14, 40, 0.22),
     0 10px 24px rgba(255, 132, 174, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.floating-phone-shell:active {
+  cursor: grabbing;
 }
 
 .floating-phone-shell.is-collapsed {
@@ -1403,13 +1408,7 @@
 }
 
 .floating-phone-drag-area {
-  cursor: grab;
-  touch-action: none;
   user-select: none;
-}
-
-.floating-phone-drag-area:active {
-  cursor: grabbing;
 }
 
 .floating-phone-actions {

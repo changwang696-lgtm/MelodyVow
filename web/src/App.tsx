@@ -1684,13 +1684,15 @@ function FloatingPhonePlayer({
         aria-label="Floating song player"
         style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
       >
-        <div className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''} ${isCollapsed ? 'is-collapsed' : ''}`}>
+        <div
+          className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''} ${isCollapsed ? 'is-collapsed' : ''}`}
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+        >
           <div
             className="floating-phone-drag-area"
-            onPointerDown={handleDragStart}
-            onPointerMove={handleDragMove}
-            onPointerUp={handleDragEnd}
-            onPointerCancel={handleDragEnd}
           >
             <div className="phone-status-row">
               <span>{player.eyebrow || 'MelodyVow'}</span>
@@ -1718,13 +1720,7 @@ function FloatingPhonePlayer({
           <audio ref={audioRef} preload="metadata" />
 
           {isCollapsed ? (
-            <div
-              className="floating-phone-compact"
-              onPointerDown={handleDragStart}
-              onPointerMove={handleDragMove}
-              onPointerUp={handleDragEnd}
-              onPointerCancel={handleDragEnd}
-            >
+            <div className="floating-phone-compact">
               <div className={`floating-phone-compact-disc ${playing || player.isGenerating ? 'is-spinning' : ''}`}>
                 <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
               </div>
