@@ -1,4 +1,4 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   NavLink,
@@ -548,6 +548,10 @@ function buildFloatingTracksFromJob(job: SongJob, locale: Locale): FloatingPhone
     downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
     duration: track.duration,
   }))
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
 }
 
 function launchHomepageFireworks() {
@@ -1483,6 +1487,7 @@ function FloatingPhonePlayer({
   onClose: () => void
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
   const [activeTrackIndex, setActiveTrackIndex] = useState(player.activeTrackIndex ?? 0)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -1491,6 +1496,7 @@ function FloatingPhonePlayer({
   const [autoplayNotice, setAutoplayNotice] = useState('')
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
   const dragStateRef = useRef<{
     pointerId: number
     startX: number
@@ -1508,6 +1514,54 @@ function FloatingPhonePlayer({
     setAutoplayNotice('')
     setIsCollapsed(false)
   }, [player.key, player.activeTrackIndex])
+
+  useEffect(() => {
+    dragOffsetRef.current = dragOffset
+  }, [dragOffset])
+
+  const clampDragOffset = useCallback((nextOffset: { x: number, y: number }) => {
+    if (typeof window === 'undefined') {
+      return nextOffset
+    }
+
+    const dialog = dialogRef.current
+    if (!dialog) {
+      return nextOffset
+    }
+
+    const rect = dialog.getBoundingClientRect()
+    const safeMargin = window.innerWidth <= 768 ? 12 : 18
+    const minVisibleWidth = Math.min(Math.max(rect.width * 0.42, 112), rect.width - safeMargin)
+    const minVisibleHeight = Math.min(Math.max(rect.height * 0.36, 92), rect.height - safeMargin)
+    const minX = -(rect.left + rect.width - minVisibleWidth)
+    const maxX = window.innerWidth - rect.left - minVisibleWidth
+    const minY = -(rect.top + rect.height - minVisibleHeight)
+    const maxY = window.innerHeight - rect.top - minVisibleHeight
+
+    return {
+      x: clamp(nextOffset.x, minX, maxX),
+      y: clamp(nextOffset.y, minY, maxY),
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    setDragOffset((current) => clampDragOffset(current))
+  }, [clampDragOffset, isCollapsed, player.isGenerating, player.key, tracks.length])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleViewportChange = () => {
+      setDragOffset((current) => clampDragOffset(current))
+    }
+
+    window.addEventListener('resize', handleViewportChange)
+    return () => {
+      window.removeEventListener('resize', handleViewportChange)
+    }
+  }, [clampDragOffset])
 
   const tracks = player.tracks ?? []
   const safeActiveTrackIndex = tracks.length ? Math.min(activeTrackIndex, tracks.length - 1) : 0
@@ -1656,9 +1710,11 @@ function FloatingPhonePlayer({
       return
     }
 
-    const nextX = dragState.originX + (event.clientX - dragState.startX)
-    const nextY = dragState.originY + (event.clientY - dragState.startY)
-    setDragOffset({ x: nextX, y: nextY })
+    const nextOffset = clampDragOffset({
+      x: dragState.originX + (event.clientX - dragState.startX),
+      y: dragState.originY + (event.clientY - dragState.startY),
+    })
+    setDragOffset(nextOffset)
   }
 
   function handleDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1679,6 +1735,7 @@ function FloatingPhonePlayer({
     <div className="floating-phone-backdrop" role="presentation">
       <div
         className="floating-phone-dialog"
+        ref={dialogRef}
         role="dialog"
         aria-modal="false"
         aria-label="Floating song player"
