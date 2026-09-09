@@ -2120,7 +2120,6 @@ function SiteLayout({
             <section className="hero-banner hero-banner-home">
               <p className="eyebrow">{eyebrow}</p>
               <div className="headline-stack">
-                <p className="brand-cn">{copy(locale, { zh: '旋律誓言', en: 'Turn love into melody' })}</p>
                 <h1 className="visually-hidden">{title}</h1>
                 <img className="hero-title-art" src={heroTitleImage} alt="" />
               </div>
@@ -2197,16 +2196,14 @@ function SiteLayout({
   )
 }
 
-function ServiceHubSection({ locale, title, subtitle }: { locale: Locale, title: string, subtitle: string }) {
+function ServiceHubSection({ locale, title }: { locale: Locale, title: string }) {
   const items = getServiceHubItems(locale)
 
   return (
     <section className="service-hub-section">
       <div className="glass-card service-hub-ribbon">
         <div className="service-hub-ribbon-copy">
-          <span className="service-hub-kicker">{copy(locale, { zh: '服务支持', en: 'Service Info' })}</span>
-          <span className="service-hub-title">{title}</span>
-          <span className="service-hub-subtitle">{subtitle}</span>
+          <span className="service-hub-kicker">{title}</span>
         </div>
         <nav className="service-hub-inline-links" aria-label={copy(locale, { zh: '订阅服务支持链接', en: 'Subscription support links' })}>
           {items.map((item, index) => (
@@ -2244,8 +2241,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   async function handleGenerateSong() {
     if (!isHomeFormValid) {
       const message = copy(locale, {
-        zh: `请先完整填写并选择：${missingFields.join('、')}。`,
-        en: `Please complete these fields first: ${missingFields.join(', ')}.`,
+        zh: '请先完成必填项。',
+        en: 'Please complete the required fields.',
       })
       setSubmitError(message)
       return
@@ -2394,7 +2391,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         <section className="home-phone-shell">
           <div className="phone-brand-block">
             <h2>MelodyVow</h2>
-            <p>{copy(locale, { zh: '把名字写进婚礼情歌', en: 'Turn names into wedding songs' })}</p>
           </div>
 
           <div className="phone-record-visual" aria-hidden="true">
@@ -2543,8 +2539,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           {!isHomeFormValid ? (
             <p className="form-hint">
               {copy(locale, {
-                zh: `请先完成这 6 项：${missingFields.join('、')}。`,
-                en: `Please complete all 6 required fields: ${missingFields.join(', ')}.`,
+                zh: '请先完成必填项',
+                en: 'Please complete the required fields.',
               })}
             </p>
           ) : null}
@@ -2555,12 +2551,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       <ServiceHubSection
         locale={locale}
         title={copy(locale, {
-          zh: '付款前可查看服务政策与订单支持',
-          en: 'Review policies and order support before checkout',
-        })}
-        subtitle={copy(locale, {
-          zh: '交付、退款、取消与订单查询',
-          en: 'Fulfillment, refunds, cancellations, and order lookup',
+          zh: '服务与订单',
+          en: 'Support & Orders',
         })}
       />
     </SiteLayout>
