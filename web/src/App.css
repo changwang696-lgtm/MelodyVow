@@ -1348,30 +1348,25 @@
   position: fixed;
   inset: 0;
   z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(32, 14, 35, 0.42);
-  backdrop-filter: blur(14px);
+  pointer-events: none;
 }
 
 .floating-phone-dialog {
-  width: min(100%, 460px);
-  perspective: 1400px;
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  width: min(100vw - 28px, 372px);
+  pointer-events: auto;
 }
 
 .floating-phone-shell {
-  width: min(100%, 344px);
-  margin: 0 auto;
+  width: 100%;
+  margin: 0;
   padding: 12px 14px 18px;
-  transform: rotateX(10deg) rotateY(-10deg);
-  transform-style: preserve-3d;
   box-shadow:
-    0 42px 90px rgba(35, 14, 40, 0.34),
-    24px 16px 36px rgba(255, 132, 174, 0.12),
+    0 24px 50px rgba(35, 14, 40, 0.22),
+    0 10px 24px rgba(255, 132, 174, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  animation: float-phone 6.6s ease-in-out infinite;
 }
 
 .floating-phone-close {
@@ -3244,17 +3239,6 @@
   }
 }
 
-@keyframes float-phone {
-  0%,
-  100% {
-    transform: rotateX(10deg) rotateY(-10deg) translateY(0);
-  }
-
-  50% {
-    transform: rotateX(7deg) rotateY(-7deg) translateY(-6px);
-  }
-}
-
 @keyframes equalizer-bounce {
   0%,
   100% {
@@ -3349,13 +3333,13 @@
   }
 
   .floating-phone-backdrop {
-    padding: 16px;
+    inset: auto 0 0 0;
   }
 
-  .floating-phone-shell {
-    width: min(100%, 332px);
-    transform: none;
-    animation: none;
+  .floating-phone-dialog {
+    right: 16px;
+    bottom: 16px;
+    width: min(100vw - 24px, 344px);
   }
 
   .profile-strip,
@@ -3408,6 +3392,12 @@
   .floating-player-teaser,
   .preview-shell-card {
     width: 100%;
+  }
+
+  .floating-phone-dialog {
+    right: 12px;
+    bottom: 12px;
+    width: min(100vw - 20px, 332px);
   }
 
   .floating-phone-visual {

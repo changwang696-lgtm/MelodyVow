@@ -1576,20 +1576,13 @@ function FloatingPhonePlayer({
     audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds))
   }
 
-  function handleBackdropClose() {
-    if (player.canClose) {
-      onClose()
-    }
-  }
-
   return (
-    <div className="floating-phone-backdrop" role="presentation" onClick={handleBackdropClose}>
+    <div className="floating-phone-backdrop" role="presentation">
       <div
         className="floating-phone-dialog"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-label="Floating song player"
-        onClick={(event) => event.stopPropagation()}
       >
         <div className={`home-phone-shell floating-phone-shell ${player.isGenerating ? 'is-generating' : ''}`}>
           <div className="phone-status-row">
@@ -1597,7 +1590,7 @@ function FloatingPhonePlayer({
             <span>{player.isGenerating ? copy(player.locale, { zh: '生成中', en: 'Creating' }) : copy(player.locale, { zh: '正在播放', en: 'Now Playing' })}</span>
           </div>
           <div className="phone-notch-row">
-            <div className="phone-pill">{copy(player.locale, { zh: '浮动播放器', en: 'Floating Player' })}</div>
+            <div className="phone-pill">{copy(player.locale, { zh: '悬浮播放器', en: 'Floating Player' })}</div>
             {player.canClose ? (
               <button type="button" className="floating-phone-close" onClick={onClose}>
                 {copy(player.locale, { zh: '关闭', en: 'Close' })}
@@ -2090,8 +2083,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         en: 'Submitting your wedding song request...',
       }),
       statusText: copy(locale, {
-        zh: '浮动手机播放器已经打开，后续生成进度会持续显示在这里。',
-        en: 'The floating phone player is open and will keep showing progress here.',
+        zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
+        en: 'The floating player is open and will keep showing progress here.',
       }),
       lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
       error: '',
@@ -2147,8 +2140,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           en: 'Lyrics and melody are now in the queue. Please keep the player open.',
         }),
         statusText: copy(locale, {
-          zh: '歌曲生成中，完成后两首版本会直接出现在这个浮动手机播放器里。',
-          en: 'Your song is generating. Both versions will appear in this floating phone player.',
+          zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
+          en: 'Your song is generating. Both versions will appear in this floating player.',
         }),
         lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
         error: '',
@@ -2494,7 +2487,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       <section className="showcase-layout">
         <article className="glass-panel floating-player-teaser">
           <div className="phone-brand-block">
-            <h2>{copy(locale, { zh: '浮动手机播放器', en: 'Floating Phone Player' })}</h2>
+            <h2>{copy(locale, { zh: '悬浮手机播放器', en: 'Floating Phone Player' })}</h2>
             <p>{copy(locale, { zh: '所有样片和生成歌曲都会从这里统一播放。', en: 'All sample and generated songs now open here.' })}</p>
           </div>
           <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
@@ -2506,8 +2499,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           </div>
           <div className="status-banner is-ready">
             {copy(locale, {
-              zh: '点击右侧任意样片，都会弹出 3D 浮动手机播放器，不再使用旧播放器。',
-              en: 'Tap any sample on the right to launch the new 3D floating phone player.',
+              zh: '点击右侧任意样片，都会打开右下角悬浮播放器，不再使用旧播放器。',
+              en: 'Tap any sample on the right to open the docked floating player.',
             })}
           </div>
           {activeTrack ? (
@@ -2824,10 +2817,10 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout, onUp
       <section className="preview-layout">
         <article className="glass-panel floating-player-teaser preview-shell-card">
           <div className="phone-brand-block">
-            <h2>{copy(locale, { zh: '浮动 iPhone 播放器', en: 'Floating iPhone Player' })}</h2>
+            <h2>{copy(locale, { zh: '悬浮 iPhone 播放器', en: 'Floating iPhone Player' })}</h2>
             <p>{copy(locale, {
-              zh: '生成进度、两首歌曲和后续播放入口都已经统一进这个弹窗播放器。',
-              en: 'Progress, both generated tracks, and all playback now live inside this floating player.',
+              zh: '生成进度、两首歌曲和后续播放入口都已经统一进这个右下角悬浮播放器。',
+              en: 'Progress, both generated tracks, and all playback now live inside this docked floating player.',
             })}</p>
           </div>
 
@@ -2888,7 +2881,7 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout, onUp
 
           <div className="player-now-playing floating-player-meta">
             <div>
-              <p className="mini-eyebrow">{copy(locale, { zh: '弹窗状态', en: 'Player Status' })}</p>
+              <p className="mini-eyebrow">{copy(locale, { zh: '悬浮状态', en: 'Player Status' })}</p>
               <h3>{displayedTitle}</h3>
               <p>
                 {copy(locale, {
@@ -2913,15 +2906,15 @@ function PreviewPage({ locale, draft, onSaveHistory, authSession, onLogout, onUp
               disabled={!activeJob}
             >
               {copy(locale, {
-                zh: isGenerating ? '查看浮动播放器进度' : '打开浮动播放器试听',
+                zh: isGenerating ? '查看悬浮播放器进度' : '打开悬浮播放器试听',
                 en: isGenerating ? 'Open Floating Player Progress' : 'Open Floating Player',
               })}
             </button>
             <p className="hint-text">
               {copy(locale, {
                 zh: availableTracks.length
-                  ? `已生成 ${availableTracks.length} 首歌曲，点击上方按钮即可在浮动手机中切换播放。`
-                  : '生成期间弹窗会一直保持存在，完成后会自动切换为可播放状态。',
+                  ? `已生成 ${availableTracks.length} 首歌曲，点击上方按钮即可在悬浮播放器中切换播放。`
+                  : '生成期间悬浮播放器会一直保持存在，完成后会自动切换为可播放状态。',
                 en: availableTracks.length
                   ? `${availableTracks.length} tracks are ready. Open the floating player to switch between them.`
                   : 'The floating player stays visible during generation and switches to playback when ready.',
@@ -3605,8 +3598,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         generationProgress: 100,
         generationLabel: '',
         statusText: copy(locale, {
-          zh: '会员中心的歌曲会统一在这个浮动手机播放器中播放。',
-          en: 'Songs from your member center now play in this floating phone player.',
+          zh: '会员中心的歌曲会统一在这个悬浮播放器中播放。',
+          en: 'Songs from your member center now play in this floating player.',
         }),
         lyrics: item.lyricSnippet || '',
         error: '',
