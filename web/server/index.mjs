@@ -25,6 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
 const ADMIN_DATA_FILE = path.join(DATA_DIR, 'admin-data.json')
 const DEBUG_ENV_FILE = path.join(process.cwd(), '.dbg', 'suno-expired-url.env')
+const BACKGROUND_THEME_IDS = new Set(['vivid_rainbow', 'elegant_dark', 'soft_pink_gold', 'ocean_dream'])
 
 const jobs = new Map()
 const sunoTaskToJob = new Map()
@@ -113,6 +114,11 @@ function normalizePositiveNumber(value, fallback = 0) {
 
 function normalizeBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
+}
+
+function normalizeBackgroundTheme(value, fallback = 'vivid_rainbow') {
+  const normalized = String(value || '').trim()
+  return BACKGROUND_THEME_IDS.has(normalized) ? normalized : fallback
 }
 
 function getDefaultHeartBeansForPlan(input) {
@@ -213,6 +219,7 @@ function createDefaultAdminData() {
       publicBaseUrl: PUBLIC_BASE_URL || '',
       allowSignup: true,
       enableChineseSite: false,
+      backgroundTheme: 'vivid_rainbow',
       heartBeansPerGeneration: 1,
       paypalCheckoutUrl: '',
       notes: '后台 MVP 阶段使用本地 JSON 持久化，后续可直接迁移到数据库。',
@@ -260,6 +267,7 @@ function normalizeLoadedAdminData(parsed) {
       ...(parsed?.config ?? {}),
       allowSignup: normalizeBoolean(parsed?.config?.allowSignup, defaults.config.allowSignup),
       enableChineseSite: normalizeBoolean(parsed?.config?.enableChineseSite, defaults.config.enableChineseSite),
+      backgroundTheme: normalizeBackgroundTheme(parsed?.config?.backgroundTheme, defaults.config.backgroundTheme),
       heartBeansPerGeneration: normalizePositiveNumber(parsed?.config?.heartBeansPerGeneration, defaults.config.heartBeansPerGeneration),
     },
   }
@@ -1774,6 +1782,7 @@ app.patch('/api/admin/config', requireAdminAuth, (req, res) => {
       ...patch,
       allowSignup: normalizeBoolean(patch.allowSignup, adminData.config.allowSignup),
       enableChineseSite: normalizeBoolean(patch.enableChineseSite, adminData.config.enableChineseSite),
+      backgroundTheme: normalizeBackgroundTheme(patch.backgroundTheme, adminData.config.backgroundTheme),
       heartBeansPerGeneration: normalizePositiveNumber(patch.heartBeansPerGeneration, adminData.config.heartBeansPerGeneration),
     },
   }
@@ -1784,6 +1793,7 @@ app.patch('/api/admin/config', requireAdminAuth, (req, res) => {
 app.get('/api/site-config', (_req, res) => {
   res.json({
     enableChineseSite: normalizeBoolean(adminData.config.enableChineseSite, false),
+    backgroundTheme: normalizeBackgroundTheme(adminData.config.backgroundTheme, 'vivid_rainbow'),
   })
 })
 
