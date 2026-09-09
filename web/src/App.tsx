@@ -97,6 +97,12 @@ type Copy = {
   en: string
 }
 
+type BackgroundThemeId =
+  | 'vivid_rainbow'
+  | 'elegant_dark'
+  | 'soft_pink_gold'
+  | 'ocean_dream'
+
 type HistoryItem = {
   id: string
   title: string
@@ -198,6 +204,7 @@ type AdminConfig = {
   publicBaseUrl: string
   allowSignup: boolean
   enableChineseSite: boolean
+  backgroundTheme: BackgroundThemeId
   heartBeansPerGeneration: number
   paypalCheckoutUrl?: string
   notes: string
@@ -205,6 +212,7 @@ type AdminConfig = {
 
 type PublicSiteConfig = {
   enableChineseSite: boolean
+  backgroundTheme: BackgroundThemeId
 }
 
 type PlanItem = {
@@ -406,8 +414,42 @@ const SONG_HISTORY_KEY = 'melodyvow-song-history'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const PUBLIC_SITE_CONFIG_KEY = 'melodyvow-public-site-config'
+const DEFAULT_BACKGROUND_THEME: BackgroundThemeId = 'vivid_rainbow'
+const backgroundThemeOptions: Array<{
+  id: BackgroundThemeId
+  label: string
+  description: string
+}> = [
+  {
+    id: 'vivid_rainbow',
+    label: '绚彩渐变',
+    description: '当前默认方案，适合婚礼、求婚和年轻化视觉。',
+  },
+  {
+    id: 'elegant_dark',
+    label: '欧美黑金',
+    description: '偏欧美用户喜好的黑色系渐变，整体更高级、更克制。',
+  },
+  {
+    id: 'soft_pink_gold',
+    label: '柔和粉紫金',
+    description: '柔和浪漫，适合婚礼、纪念日和女性向审美。',
+  },
+  {
+    id: 'ocean_dream',
+    label: '海盐蓝雾',
+    description: '更清爽、轻奢，适合英文站和国际化展示。',
+  },
+]
+
+function normalizeBackgroundTheme(value: unknown): BackgroundThemeId {
+  const normalized = String(value || '').trim() as BackgroundThemeId
+  return backgroundThemeOptions.some((item) => item.id === normalized) ? normalized : DEFAULT_BACKGROUND_THEME
+}
+
 const defaultPublicSiteConfig: PublicSiteConfig = {
   enableChineseSite: false,
+  backgroundTheme: DEFAULT_BACKGROUND_THEME,
 }
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
@@ -852,6 +894,7 @@ function loadPublicSiteConfig() {
     const parsed = JSON.parse(raw)
     return {
       enableChineseSite: Boolean(parsed?.enableChineseSite),
+      backgroundTheme: normalizeBackgroundTheme(parsed?.backgroundTheme),
     }
   } catch {
     return defaultPublicSiteConfig
@@ -940,6 +983,7 @@ function App() {
         if (!disposed) {
           const nextConfig = {
             enableChineseSite: Boolean((result as PublicSiteConfig).enableChineseSite),
+            backgroundTheme: normalizeBackgroundTheme((result as PublicSiteConfig).backgroundTheme),
           }
           setSiteConfig(nextConfig)
           if (typeof window !== 'undefined') {
@@ -1907,7 +1951,7 @@ function SiteLayout({
   ]
 
   return (
-    <div className="site-shell" data-locale={locale}>
+    <div className="site-shell" data-locale={locale} data-background-theme={siteConfig.backgroundTheme}>
       <div className="site-gradient" />
       <div className="site-noise" />
       {!plainPage ? (
@@ -3940,6 +3984,7 @@ function AdminDashboardPage({
     publicBaseUrl: '',
     allowSignup: true,
     enableChineseSite: false,
+    backgroundTheme: DEFAULT_BACKGROUND_THEME,
     heartBeansPerGeneration: 1,
     paypalCheckoutUrl: '',
     notes: '',
@@ -5145,6 +5190,19 @@ function AdminDashboardPage({
                     onChange={(event) => setConfig((current) => ({ ...current, heartBeansPerGeneration: Number(event.target.value) }))}
                   />
                 </label>
+                <label className="field">
+                  <span>网站背景方案</span>
+                  <select
+                    value={config.backgroundTheme}
+                    onChange={(event) => setConfig((current) => ({ ...current, backgroundTheme: normalizeBackgroundTheme(event.target.value) }))}
+                  >
+                    {backgroundThemeOptions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="field form-span-2">
                   <span>后台备注</span>
                   <textarea
@@ -5153,6 +5211,11 @@ function AdminDashboardPage({
                     rows={4}
                   />
                 </label>
+                <div className="glass-card admin-theme-preview form-span-2">
+                  <p className="mini-eyebrow">当前背景方案说明</p>
+                  <h3>{backgroundThemeOptions.find((item) => item.id === config.backgroundTheme)?.label || '网站背景方案'}</h3>
+                  <p>{backgroundThemeOptions.find((item) => item.id === config.backgroundTheme)?.description || '保存后前台会立即使用这套底图配色。'}</p>
+                </div>
               </div>
               <label className="admin-switch">
                 <input
