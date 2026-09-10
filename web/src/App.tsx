@@ -231,6 +231,27 @@ type PaymentMethod = {
   description?: string
 }
 
+type ShowcaseSessionTrack = {
+  id: string
+  title: string
+  meta: string
+  blurb: string
+  audioUrl: string
+  downloadUrl?: string
+}
+
+type ShowcaseSessionContext = {
+  mode: 'job' | 'history'
+  jobId?: string
+  title?: string
+  subtitle?: string
+  lyrics?: string
+  statusText?: string
+  generationProgress?: number
+  tracks?: ShowcaseSessionTrack[]
+  activeTrackId?: string
+}
+
 type PaymentMethodAdmin = {
   id: string
   name: string
@@ -410,6 +431,7 @@ type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
 }
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
+const SHOWCASE_SESSION_KEY = 'melodyvow-showcase-context'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const PUBLIC_SITE_CONFIG_KEY = 'melodyvow-public-site-config'
@@ -935,6 +957,66 @@ function withLocale(locale: Locale, path = '') {
   return path ? `/zh${path}` : '/zh'
 }
 
+function useIsMobileViewport(query = '(max-width: 720px)') {
+  const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia(query)
+    const syncViewport = () => setMatches(mediaQuery.matches)
+    syncViewport()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport)
+      return () => mediaQuery.removeEventListener('change', syncViewport)
+    }
+
+    mediaQuery.addListener(syncViewport)
+    return () => mediaQuery.removeListener(syncViewport)
+  }, [query])
+
+  return matches
+}
+
+function saveShowcaseSession(context: ShowcaseSessionContext) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(context))
+}
+
+function loadShowcaseSession() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SHOWCASE_SESSION_KEY)
+    if (!raw) {
+      return null
+    }
+
+    return JSON.parse(raw) as ShowcaseSessionContext
+  } catch {
+    return null
+  }
+}
+
+function normalizePricingPlan(plan: PlanItem): PlanItem {
+  return {
+    ...plan,
+    currency: 'USD',
+  }
+}
+
+function formatPlanPrice(plan: Pick<PlanItem, 'price'>) {
+  return `$${plan.price}`
+}
+
 function ScrollManager() {
   const location = useLocation()
 
@@ -947,7 +1029,7 @@ function ScrollManager() {
 
 function App() {
   const location = useLocation()
-  const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== 'undefined' ? window.matchMedia('(max-width: 720px)').matches : false))
+  const isMobileViewport = useIsMobileViewport()
   const [draft, setDraft] = useState<SongDraft>({
     groom: '',
     bride: '',
@@ -973,24 +1055,6 @@ function App() {
   const activeMemberToken = authSession?.authToken?.trim() || ''
   const activeMemberEmail = authSession?.email?.trim() || ''
   const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const mediaQuery = window.matchMedia('(max-width: 720px)')
-    const syncViewport = () => setIsMobileViewport(mediaQuery.matches)
-    syncViewport()
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', syncViewport)
-      return () => mediaQuery.removeEventListener('change', syncViewport)
-    }
-
-    mediaQuery.addListener(syncViewport)
-    return () => mediaQuery.removeListener(syncViewport)
-  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -2117,11 +2181,11 @@ function SiteLayout({
   )
 }
 
-function ServiceHubSection({ locale, title }: { locale: Locale, title: string }) {
+function ServiceHubSection({ locale, title, className = '' }: { locale: Locale, title: string, className?: string }) {
   const items = getServiceHubItems(locale)
 
   return (
-    <section className="service-hub-section">
+    <section className={`service-hub-section ${className}`.trim()}>
       <div className="glass-card service-hub-ribbon">
         <div className="service-hub-ribbon-copy">
           <span className="service-hub-kicker">{title}</span>
@@ -2174,7 +2238,9 @@ function HomeSocialLinksSection({ locale }: { locale: Locale }) {
 
 function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession }: HomePageProps) {
   const navigate = useNavigate()
+  const isMobileViewport = useIsMobileViewport()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showMobileStoryPrompt, setShowMobileStoryPrompt] = useState(false)
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
   const fallbackLanguageCode = locale === 'zh' ? 'zh' : 'en'
@@ -2184,6 +2250,15 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
 
   useEffect(() => launchHomepageFireworks(), [])
 
+  function handleCreateSongEntry() {
+    if (isMobileViewport) {
+      setShowMobileStoryPrompt(true)
+      return
+    }
+
+    void handleGenerateSong()
+  }
+
   async function handleGenerateSong() {
     if (!memberEmail || !memberToken) {
       const message = copy(locale, {
@@ -2191,6 +2266,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         en: 'Please log in before generating a song so it can be saved to your account automatically.',
       })
       onOpenModal(message)
+      setShowMobileStoryPrompt(false)
       navigate(withLocale(locale, '/auth'))
       return
     }
@@ -2204,30 +2280,33 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
     const styleLabel = draft.style.trim() ? getStyleLabel(locale, draft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
     const vocal = draft.vocal.trim() || fallbackVocal.code
     const vocalLabel = draft.vocal.trim() ? getVocalLabel(locale, draft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
+    const initialLyrics = [draft.loveStory, draft.meetingStory, draft.vowKeywords].filter(Boolean).join('\n\n').trim()
 
     const pendingPlayerKey = `pending-generate-${locale}`
-    onUpsertFloatingPlayer({
-      key: pendingPlayerKey,
-      locale,
-      title: `${groomName} & ${brideName}`,
-      subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-      eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-      tracks: [],
-      canClose: false,
-      isGenerating: true,
-      generationProgress: 6,
-      generationLabel: copy(locale, {
-        zh: '正在提交婚礼歌曲生成请求，请稍候...',
-        en: 'Submitting your wedding song request...',
-      }),
-      statusText: copy(locale, {
-        zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
-        en: 'The floating player is open and will keep showing progress here.',
-      }),
-      lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-      error: '',
-      autoPlay: false,
-    })
+    if (!isMobileViewport) {
+      onUpsertFloatingPlayer({
+        key: pendingPlayerKey,
+        locale,
+        title: `${groomName} & ${brideName}`,
+        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+        tracks: [],
+        canClose: false,
+        isGenerating: true,
+        generationProgress: 6,
+        generationLabel: copy(locale, {
+          zh: '正在提交婚礼歌曲生成请求，请稍候...',
+          en: 'Submitting your wedding song request...',
+        }),
+        statusText: copy(locale, {
+          zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
+          en: 'The floating player is open and will keep showing progress here.',
+        }),
+        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+        error: '',
+        autoPlay: false,
+      })
+    }
 
     try {
       const response = await fetch(apiUrl('/api/generate-song'), {
@@ -2263,49 +2342,70 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         throw new Error(result.message ?? '生成请求失败，请稍后再试。')
       }
 
-      onUpsertFloatingPlayer({
-        key: result.jobId,
-        locale,
-        title: `${groomName} & ${brideName}`,
-        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-        tracks: [],
-        canClose: false,
-        isGenerating: true,
-        generationProgress: 12,
-        generationLabel: copy(locale, {
-          zh: '歌词与旋律已经进入生成队列，请保持弹窗开启。',
-          en: 'Lyrics and melody are now in the queue. Please keep the player open.',
-        }),
-        statusText: copy(locale, {
-          zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
-          en: 'Your song is generating. Both versions will appear in this floating player.',
-        }),
-        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-        error: '',
-        autoPlay: false,
-      })
+      if (isMobileViewport) {
+        saveShowcaseSession({
+          mode: 'job',
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          lyrics: initialLyrics,
+          statusText: copy(locale, {
+            zh: '歌词已提交到生成流程，Showcase 会在这里持续显示歌词与生成进度。',
+            en: 'Lyrics have entered the generation flow. Showcase will keep showing the lyrics and progress here.',
+          }),
+          generationProgress: 12,
+          tracks: [],
+        })
+        setShowMobileStoryPrompt(false)
+        navigate(withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(result.jobId)}`))
+      } else {
+        onUpsertFloatingPlayer({
+          key: result.jobId,
+          locale,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+          tracks: [],
+          canClose: false,
+          isGenerating: true,
+          generationProgress: 12,
+          generationLabel: copy(locale, {
+            zh: '歌词与旋律已经进入生成队列，请保持弹窗开启。',
+            en: 'Lyrics and melody are now in the queue. Please keep the player open.',
+          }),
+          statusText: copy(locale, {
+            zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
+            en: 'Your song is generating. Both versions will appear in this floating player.',
+          }),
+          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          error: '',
+          autoPlay: false,
+        })
+      }
+      setShowMobileStoryPrompt(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成请求失败，请稍后再试。'
-      onUpsertFloatingPlayer({
-        key: pendingPlayerKey,
-        locale,
-        title: `${groomName} & ${brideName}`,
-        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-        tracks: [],
-        canClose: true,
-        isGenerating: false,
-        generationProgress: 0,
-        generationLabel: '',
-        statusText: copy(locale, {
-          zh: '请求没有成功发送，请检查提示信息后再试一次。',
-          en: 'The request could not be sent. Please review the message and try again.',
-        }),
-        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-        error: message,
-        autoPlay: false,
-      })
+      if (!isMobileViewport) {
+        onUpsertFloatingPlayer({
+          key: pendingPlayerKey,
+          locale,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+          tracks: [],
+          canClose: true,
+          isGenerating: false,
+          generationProgress: 0,
+          generationLabel: '',
+          statusText: copy(locale, {
+            zh: '请求没有成功发送，请检查提示信息后再试一次。',
+            en: 'The request could not be sent. Please review the message and try again.',
+          }),
+          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          error: message,
+          autoPlay: false,
+        })
+      }
       onOpenModal(message)
     } finally {
       setIsSubmitting(false)
@@ -2400,7 +2500,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               <button
                 type="button"
                 className="home-app-submit"
-                onClick={() => void handleGenerateSong()}
+                onClick={handleCreateSongEntry}
                 disabled={isSubmitting}
               >
                 Create My Song
@@ -2428,6 +2528,70 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                   )
                 })}
               </div>
+
+              {showMobileStoryPrompt ? (
+                <div className="home-story-prompt-backdrop" role="presentation" onClick={() => setShowMobileStoryPrompt(false)}>
+                  <div
+                    className="home-story-prompt-shell"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={copy(locale, { zh: '歌曲生成信息', en: 'Song creation details' })}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="home-story-prompt-card">
+                      <div className="home-story-prompt-head">
+                        <p>MelodyVow</p>
+                        <button
+                          type="button"
+                          className="home-story-prompt-close"
+                          onClick={() => setShowMobileStoryPrompt(false)}
+                          aria-label={copy(locale, { zh: '关闭', en: 'Close' })}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="home-story-prompt-section">
+                        <span className="home-story-prompt-label">Occasion</span>
+                        <div className="home-story-prompt-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
+                          {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
+                            const active = draft.occasion === occasion
+                            return (
+                              <button
+                                key={occasion}
+                                type="button"
+                                className={`home-story-prompt-chip ${active ? 'is-active' : ''}`}
+                                onClick={() => setDraft((current) => ({ ...current, occasion }))}
+                              >
+                                {getOccasionLabel(locale, occasion)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <label className="home-story-prompt-field">
+                        <span>Love Story</span>
+                        <textarea
+                          value={draft.loveStory}
+                          onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
+                          placeholder="Add a short story to make the lyrics feel personal"
+                          rows={4}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        className="home-story-prompt-submit"
+                        onClick={() => void handleGenerateSong()}
+                        disabled={isSubmitting}
+                      >
+                        {isSubmitting ? copy(locale, { zh: '提交中...', en: 'Submitting...' }) : 'Create My Song'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
             </div>
 
@@ -2687,33 +2851,45 @@ function buildFloatingPlayerPayloadFromJob(job: SongJob, locale: Locale, draft: 
 
 function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }: ShowcasePageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isShowcaseMobile = useIsMobileViewport()
   const [tracks, setTracks] = useState<ShowcaseTrack[]>(productShowcaseTracks)
+  const [displayMode, setDisplayMode] = useState<'demo' | 'job' | 'history'>('demo')
+  const [displayTracks, setDisplayTracks] = useState<ShowcaseSessionTrack[]>(() =>
+    productShowcaseTracks.map((track) => ({
+      id: track.id,
+      title: copy(locale, track.title),
+      meta: copy(locale, track.meta),
+      blurb: copy(locale, track.blurb),
+      audioUrl: track.audioUrl,
+      downloadUrl: track.audioUrl,
+    })),
+  )
   const [activeTrackId, setActiveTrackId] = useState(productShowcaseTracks[0]?.id ?? '')
   const [error, setError] = useState('')
-  const [isShowcaseMobile, setIsShowcaseMobile] = useState(() => (typeof window !== 'undefined' ? window.matchMedia('(max-width: 720px)').matches : false))
   const [showcasePlaying, setShowcasePlaying] = useState(false)
   const [showcaseProgress, setShowcaseProgress] = useState(0)
+  const [showcaseGenerationProgress, setShowcaseGenerationProgress] = useState(100)
+  const [showcaseIsGenerating, setShowcaseIsGenerating] = useState(false)
+  const [showcaseStatusText, setShowcaseStatusText] = useState(copy(locale, {
+    zh: '点击下方歌单，直接在这里试听 MelodyVow 的样片。',
+    en: 'Tap the list below to preview MelodyVow samples here.',
+  }))
+  const [showcaseLyrics, setShowcaseLyrics] = useState('')
   const showcaseAudioRef = useRef<HTMLAudioElement | null>(null)
   const showcaseShouldAutoplayRef = useRef(false)
-  const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? tracks[0]
+  const activeTrack = displayTracks.find((track) => track.id === activeTrackId) ?? displayTracks[0] ?? null
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const mediaQuery = window.matchMedia('(max-width: 720px)')
-    const syncViewport = () => setIsShowcaseMobile(mediaQuery.matches)
-    syncViewport()
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', syncViewport)
-      return () => mediaQuery.removeEventListener('change', syncViewport)
-    }
-
-    mediaQuery.addListener(syncViewport)
-    return () => mediaQuery.removeListener(syncViewport)
-  }, [])
+  function buildDemoTracks(items: ShowcaseTrack[]) {
+    return items.map((track) => ({
+      id: track.id,
+      title: copy(locale, track.title),
+      meta: copy(locale, track.meta),
+      blurb: copy(locale, track.blurb),
+      audioUrl: track.audioUrl,
+      downloadUrl: track.audioUrl,
+    }))
+  }
 
   useEffect(() => {
     let disposed = false
@@ -2743,6 +2919,171 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       disposed = true
     }
   }, [])
+
+  useEffect(() => {
+    if (displayMode !== 'demo') {
+      return
+    }
+
+    const nextTracks = buildDemoTracks(tracks)
+    setDisplayTracks(nextTracks)
+    setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
+    setShowcaseLyrics('')
+    setShowcaseStatusText(copy(locale, {
+      zh: '点击下方歌单，直接在这里试听 MelodyVow 的样片。',
+      en: 'Tap the list below to preview MelodyVow samples here.',
+    }))
+    setShowcaseGenerationProgress(100)
+    setShowcaseIsGenerating(false)
+  }, [displayMode, locale, tracks])
+
+  useEffect(() => {
+    const mode = searchParams.get('mode')
+    const showcaseSession = loadShowcaseSession()
+
+    if (!isShowcaseMobile || !mode) {
+      setDisplayMode('demo')
+      return
+    }
+
+    if (mode === 'job') {
+      const jobId = searchParams.get('job') || showcaseSession?.jobId || ''
+      const nextTracks = showcaseSession?.tracks?.length
+        ? showcaseSession.tracks
+        : [
+            {
+              id: jobId || 'pending-job',
+              title: showcaseSession?.title || 'MelodyVow',
+              meta: showcaseSession?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+              blurb: showcaseSession?.statusText || copy(locale, {
+                zh: '歌词与旋律已经进入生成流程，请稍候。',
+                en: 'Lyrics and melody are in the generation flow. Please wait.',
+              }),
+              audioUrl: '',
+              downloadUrl: '',
+            },
+          ]
+
+      setDisplayMode('job')
+      setDisplayTracks(nextTracks)
+      setActiveTrackId(showcaseSession?.activeTrackId || nextTracks[0]?.id || '')
+      setShowcaseLyrics(showcaseSession?.lyrics || '')
+      setShowcaseStatusText(showcaseSession?.statusText || copy(locale, {
+        zh: 'Showcase 正在承接歌词与生成进度。',
+        en: 'Showcase is now carrying the lyrics and generation progress.',
+      }))
+      setShowcaseGenerationProgress(showcaseSession?.generationProgress ?? 12)
+      setShowcaseIsGenerating(true)
+      return
+    }
+
+    if (mode === 'history' && showcaseSession?.mode === 'history' && showcaseSession.tracks?.length) {
+      setDisplayMode('history')
+      setDisplayTracks(showcaseSession.tracks)
+      setActiveTrackId(showcaseSession.activeTrackId || showcaseSession.tracks[0]?.id || '')
+      setShowcaseLyrics(showcaseSession.lyrics || '')
+      setShowcaseStatusText(showcaseSession.statusText || copy(locale, {
+        zh: '会员中心歌曲会统一在这里播放，并同时显示歌词。',
+        en: 'Member songs now play here with lyrics kept visible.',
+      }))
+      setShowcaseGenerationProgress(100)
+      setShowcaseIsGenerating(false)
+      return
+    }
+
+    setDisplayMode('demo')
+  }, [isShowcaseMobile, locale, searchParams])
+
+  useEffect(() => {
+    if (!isShowcaseMobile || displayMode !== 'job') {
+      return
+    }
+
+    const jobId = searchParams.get('job') || loadShowcaseSession()?.jobId || ''
+    if (!jobId) {
+      return
+    }
+
+    let disposed = false
+
+    const syncShowcaseJob = async (allowAutoplay = false) => {
+      try {
+        const response = await fetch(apiUrl(`/api/jobs/${jobId}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+        if (!response.ok) {
+          throw new Error('message' in result && result.message ? result.message : '任务查询失败。')
+        }
+
+        const job = result as SongJob
+        if (disposed) {
+          return
+        }
+
+        const nextLyrics = job.lyrics || loadShowcaseSession()?.lyrics || ''
+        const nextStatusText = job.error || getJobStatusLabel(locale, job.status, job.callbackEnabled)
+        const nextTracks: ShowcaseSessionTrack[] = job.status === 'ready'
+          ? (job.tracks ?? []).map((track, index) => ({
+              id: buildTrackHistoryId(job.id, index),
+              title: track.title || job.title || copy(locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` }),
+              meta: copy(locale, { zh: `生成版本 ${index + 1}`, en: `Generated version ${index + 1}` }),
+              blurb: summarizeStoryText(nextLyrics, copy(locale, {
+                zh: '歌曲已完成，点击即可播放。',
+                en: 'The song is ready. Tap to play.',
+              })),
+              audioUrl: getSongStreamUrl(buildTrackHistoryId(job.id, index)),
+              downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
+            }))
+          : [
+              {
+                id: job.id,
+                title: job.title || loadShowcaseSession()?.title || 'MelodyVow',
+                meta: loadShowcaseSession()?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+                blurb: nextStatusText,
+                audioUrl: '',
+                downloadUrl: '',
+              },
+            ]
+
+        if (job.status === 'ready' && allowAutoplay) {
+          showcaseShouldAutoplayRef.current = true
+        }
+
+        setDisplayTracks(nextTracks)
+        setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
+        setShowcaseLyrics(nextLyrics)
+        setShowcaseStatusText(nextStatusText)
+        setShowcaseGenerationProgress(computeGenerationProgress(job))
+        setShowcaseIsGenerating(job.status !== 'ready' && job.status !== 'error')
+        setError(job.status === 'error' ? (job.error || copy(locale, { zh: '生成失败，请稍后重试。', en: 'Generation failed. Please try again later.' })) : '')
+
+        saveShowcaseSession({
+          mode: 'job',
+          jobId,
+          title: job.title || loadShowcaseSession()?.title || 'MelodyVow',
+          subtitle: loadShowcaseSession()?.subtitle || '',
+          lyrics: nextLyrics,
+          statusText: nextStatusText,
+          generationProgress: computeGenerationProgress(job),
+          tracks: nextTracks,
+          activeTrackId: nextTracks[0]?.id || '',
+        })
+      } catch (loadError) {
+        if (!disposed) {
+          setError(loadError instanceof Error ? loadError.message : '任务查询失败。')
+        }
+      }
+    }
+
+    void syncShowcaseJob(true)
+    const timer = window.setInterval(() => {
+      void syncShowcaseJob()
+    }, 5000)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [displayMode, isShowcaseMobile, locale, searchParams])
 
   useEffect(() => {
     const audio = showcaseAudioRef.current
@@ -2787,6 +3128,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   useEffect(() => {
     const audio = showcaseAudioRef.current
     if (!audio || !activeTrack?.audioUrl) {
+      setShowcasePlaying(false)
+      setShowcaseProgress(0)
       return
     }
 
@@ -2856,8 +3199,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   }
 
   function handleSelectTrack(trackId: string) {
-    const trackIndex = tracks.findIndex((track) => track.id === trackId)
-    const nextTrack = tracks[trackIndex] ?? tracks[0]
+    const trackIndex = displayTracks.findIndex((track) => track.id === trackId)
+    const nextTrack = displayTracks[trackIndex] ?? displayTracks[0]
     setActiveTrackId(trackId)
     setError('')
 
@@ -2869,25 +3212,23 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     onUpsertFloatingPlayer({
       key: `showcase-${trackId}`,
       locale,
-      title: copy(locale, nextTrack?.title ?? { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' }),
-      subtitle: copy(locale, nextTrack?.meta ?? { zh: '婚礼样片', en: 'Wedding sample' }),
+      title: nextTrack?.title || copy(locale, { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' }),
+      subtitle: nextTrack?.meta || copy(locale, { zh: '婚礼样片', en: 'Wedding sample' }),
       eyebrow: copy(locale, { zh: '样片播放器', en: 'Showcase Player' }),
-      tracks: tracks.map((track) => ({
+      tracks: displayTracks.map((track) => ({
         id: track.id,
-        title: copy(locale, track.title),
-        subtitle: copy(locale, track.meta),
+        title: track.title,
+        subtitle: track.meta,
         audioUrl: track.audioUrl,
-        downloadUrl: track.audioUrl,
+        downloadUrl: track.downloadUrl || track.audioUrl,
       })),
       activeTrackIndex: Math.max(trackIndex, 0),
       canClose: true,
-      isGenerating: false,
-      generationProgress: 100,
+      isGenerating: showcaseIsGenerating,
+      generationProgress: showcaseIsGenerating ? showcaseGenerationProgress : 100,
       generationLabel: '',
-      statusText: copy(locale, {
-        zh: '所有样片播放都会统一进入浮动手机播放器。',
-        en: 'All sample playback now opens in the floating phone player.',
-      }),
+      statusText: showcaseStatusText,
+      lyrics: showcaseLyrics,
       autoPlay: true,
     })
   }
@@ -2916,8 +3257,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
                 <p className="showcase-mobile-player-eyebrow">{copy(locale, { zh: '唯一播放器', en: 'Only Player' })}</p>
                 <span className="showcase-mobile-player-count">
                   {copy(locale, {
-                    zh: `${tracks.length} 首样片`,
-                    en: `${tracks.length} tracks`,
+                    zh: `${displayTracks.length} 首歌曲`,
+                    en: `${displayTracks.length} tracks`,
                   })}
                 </span>
               </div>
@@ -2934,26 +3275,44 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
                 </button>
 
                 <div className="showcase-mobile-player-copy">
-                  <strong>{copy(locale, activeTrack?.title ?? { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' })}</strong>
-                  <span>{copy(locale, activeTrack?.meta ?? { zh: '婚礼样片', en: 'Wedding sample' })}</span>
-                  <p>{copy(locale, activeTrack?.blurb ?? { zh: '点击下方歌单，直接在这里试听。', en: 'Tap a song below to preview it here.' })}</p>
+                  <strong>{activeTrack?.title || copy(locale, { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' })}</strong>
+                  <span>{activeTrack?.meta || copy(locale, { zh: '婚礼样片', en: 'Wedding sample' })}</span>
+                  <p>{showcaseStatusText || activeTrack?.blurb || copy(locale, { zh: '点击下方歌单，直接在这里试听。', en: 'Tap a song below to preview it here.' })}</p>
                 </div>
               </div>
 
               <div className="showcase-mobile-player-progress-copy">
                 <span>
-                  {showcasePlaying
+                  {showcaseIsGenerating
+                    ? copy(locale, { zh: '歌曲生成进度', en: 'Generation Progress' })
+                    : showcasePlaying
                     ? copy(locale, { zh: '歌曲播放中', en: 'Now Playing' })
                     : copy(locale, { zh: '歌曲播放进度', en: 'Song Progress' })}
                 </span>
-                <span>{`${Math.round(showcaseProgress)}%`}</span>
+                <span>{`${Math.round(showcaseIsGenerating ? showcaseGenerationProgress : showcaseProgress)}%`}</span>
               </div>
               <div className="showcase-mobile-player-progress" aria-hidden="true">
-                <span style={{ width: `${Math.max(0, Math.min(100, showcaseProgress))}%` }} />
+                <span style={{ width: `${Math.max(0, Math.min(100, showcaseIsGenerating ? showcaseGenerationProgress : showcaseProgress))}%` }} />
               </div>
             </div>
           </div>
           {error ? <p className="form-error">{error}</p> : null}
+          <article className="glass-card showcase-mobile-lyrics">
+            <div className="showcase-mobile-lyrics-shell">
+              <div className="showcase-mobile-lyrics-card">
+                <div className="showcase-mobile-lyrics-head">
+                  <p>{copy(locale, { zh: '歌词面板', en: 'Lyrics Panel' })}</p>
+                  <span>{displayMode === 'job' ? copy(locale, { zh: '生成中可见', en: 'Visible While Generating' }) : copy(locale, { zh: '统一播放页', en: 'Unified Player' })}</span>
+                </div>
+                <div className="showcase-mobile-lyrics-body">
+                  {showcaseLyrics || copy(locale, {
+                    zh: '这里会显示当前歌曲的歌词、故事关键词，或者生成中的文案内容。',
+                    en: 'The current lyrics, story keywords, or generation copy will appear here.',
+                  })}
+                </div>
+              </div>
+            </div>
+          </article>
         </article>
 
         <article className="glass-panel floating-player-teaser">
@@ -2978,8 +3337,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
             <div className="player-now-playing floating-player-meta">
               <div>
                 <p className="mini-eyebrow">{copy(locale, { zh: '当前主推样片', en: 'Featured Sample' })}</p>
-                <h3>{copy(locale, activeTrack.title)}</h3>
-                <p>{copy(locale, activeTrack.meta)}</p>
+                <h3>{activeTrack.title}</h3>
+                <p>{activeTrack.meta}</p>
               </div>
             </div>
           ) : null}
@@ -2991,10 +3350,20 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
             <p className="mini-eyebrow">{copy(locale, { zh: '全球', en: 'Global' })}</p>
             <h3>{copy(locale, { zh: '曾经求婚成功的浪漫歌曲', en: 'Romantic Songs from Successful Proposals' })}</h3>
             <p className="showcase-mobile-intro-copy">
-              {copy(locale, {
-                zh: '下方歌单会统一进入上面的手机播放器，点击即可播放。',
-                en: 'Every sample below plays inside the mobile player above.',
-              })}
+              {displayMode === 'job'
+                ? copy(locale, {
+                    zh: '生成中的歌曲会先在这里显示歌词和进度，等 Suno 完成后自动播放。',
+                    en: 'Generated songs stay here with lyrics and progress, then autoplay once Suno finishes.',
+                  })
+                : displayMode === 'history'
+                ? copy(locale, {
+                    zh: '会员中心歌曲已经切到这里播放，你可以一边听一边看歌词。',
+                    en: 'Member songs have moved here, so you can listen while keeping the lyrics visible.',
+                  })
+                : copy(locale, {
+                    zh: '下方歌单会统一进入上面的手机播放器，点击即可播放。',
+                    en: 'Every sample below plays inside the mobile player above.',
+                  })}
             </p>
             <button
               type="button"
@@ -3007,7 +3376,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           </article>
 
           <div className="showcase-track-list">
-            {tracks.map((track, index) => {
+            {displayTracks.map((track, index) => {
               const isActive = track.id === activeTrackId
 
               return (
@@ -3019,9 +3388,9 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
                 >
                   <div className="showcase-track-index">{String(index + 1).padStart(2, '0')}</div>
                   <div className="showcase-track-copy">
-                    <strong>{copy(locale, track.title)}</strong>
-                    <span>{copy(locale, track.meta)}</span>
-                    <small>{copy(locale, track.blurb)}</small>
+                    <strong>{track.title}</strong>
+                    <span>{track.meta}</span>
+                    <small>{track.blurb}</small>
                   </div>
                   <div className={`showcase-track-icon ${isActive ? 'is-playing' : ''}`}>
                     {isActive && showcasePlaying && isShowcaseMobile ? '❚❚' : '▶'}
@@ -3164,14 +3533,14 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
 
     const fallbackPlans: PlanItem[] = locale === 'zh'
       ? [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '推荐', features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'] },
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'] },
         ]
       : [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 service credits', 'AI lyrics', 'Names in song', 'MP3 download'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: 'Recommended', features: ['15 service credits', 'Full lyrics', 'Wedding version', 'HD audio'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 service credits', 'Real singer', 'Custom arrangement', 'Dual mix'] },
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 service credits', 'AI lyrics', 'Names in song', 'MP3 download'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['15 service credits', 'Full lyrics', 'Wedding version', 'HD audio'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 service credits', 'Real singer', 'Custom arrangement', 'Dual mix'] },
         ]
 
     async function loadPlans() {
@@ -3184,7 +3553,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
         }
         const items = Array.isArray(data.items) ? data.items : []
         if (!disposed) {
-          setPlans(items.length ? items : fallbackPlans)
+          setPlans((items.length ? items : fallbackPlans).map(normalizePricingPlan))
         }
       } catch {
         if (!disposed) {
@@ -3225,7 +3594,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
             {plan.badge ? <span className="corner-badge">{plan.badge}</span> : null}
             <div className="step-badge">{plan.name.slice(0, 1)}</div>
             <h3>{plan.name}</h3>
-            <div className="price-tag">{plan.currency === 'CNY' || !plan.currency ? `¥${plan.price}` : `${plan.price}`}</div>
+            <div className="price-tag">{formatPlanPrice(plan)}</div>
             <p>{copy(locale, { zh: `包含 ${plan.heartBeans || 0} 点订阅服务额度`, en: `${plan.heartBeans || 0} service credits included` })}</p>
             <ul>
               {(plan.features || []).map((item) => (
@@ -3234,7 +3603,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
             </ul>
             <button
               type="button"
-              className="primary-button compact"
+              className="primary-button compact pricing-action-button"
               onClick={() => {
                 setSelectedPlan(plan.name)
                 navigate(withLocale(locale, `/checkout?planId=${encodeURIComponent(plan.id)}`))
@@ -3251,6 +3620,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
           zh: '订阅购买前请先阅读服务政策',
           en: 'Review service policies before purchase',
         })}
+        className="pricing-service-hub"
       />
     </SiteLayout>
   )
@@ -3270,9 +3640,9 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
     let disposed = false
 
     const fallbackPlans: PlanItem[] = [
-      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: [] },
-      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '', features: [] },
-      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: [] },
+      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [] },
+      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [] },
+      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [] },
     ]
 
     async function loadCheckoutData() {
@@ -3284,7 +3654,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
           fetch(apiUrl('/api/payment/methods')),
         ])
         const [plansData, methodsData] = await Promise.all([plansRes.json(), methodsRes.json()])
-        const nextPlans = Array.isArray(plansData.items) ? (plansData.items as PlanItem[]) : fallbackPlans
+        const nextPlans = Array.isArray(plansData.items) ? (plansData.items as PlanItem[]).map(normalizePricingPlan) : fallbackPlans
         const nextMethods = Array.isArray(methodsData.items) ? (methodsData.items as PaymentMethod[]) : []
 
         if (!disposed) {
@@ -3388,9 +3758,9 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
           {loading ? <p className="empty-state">{copy(locale, { zh: '加载中...', en: 'Loading...' })}</p> : null}
           {!loading && activePlan ? (
             <>
-              <div className="price-tag">{activePlan.currency === 'CNY' || !activePlan.currency ? `¥${activePlan.price}` : `${activePlan.price}`}</div>
+              <div className="price-tag">{formatPlanPrice(activePlan)}</div>
               <p>{copy(locale, { zh: `开通 ${activePlan.heartBeans || 0} 点订阅服务额度`, en: `${activePlan.heartBeans || 0} service credits will be activated` })}</p>
-              <button type="button" className="ghost-button compact" onClick={() => navigate(withLocale(locale, '/pricing'))}>
+              <button type="button" className="primary-button compact pricing-action-button" onClick={() => navigate(withLocale(locale, '/pricing'))}>
                 {copy(locale, { zh: '返回选择套餐', en: 'Back to Pricing' })}
               </button>
             </>
@@ -3411,7 +3781,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
               <button
                 key={method.id}
                 type="button"
-                className="primary-button"
+                className="primary-button pricing-action-button"
                 disabled={submitting || loading}
                 onClick={() => void handleStartPayment(method)}
               >
@@ -3671,6 +4041,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
 }
 
 function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer }: AccountPageProps) {
+  const navigate = useNavigate()
+  const isMobileViewport = useIsMobileViewport()
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
@@ -3756,6 +4128,36 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
 
   async function handleTogglePlay(item: HistoryItem) {
     try {
+      if (isMobileViewport) {
+        saveShowcaseSession({
+          mode: 'history',
+          title: item.title || 'MelodyVow',
+          subtitle: item.subtitle,
+          lyrics: item.lyricSnippet || '',
+          statusText: copy(locale, {
+            zh: '会员中心歌曲已切换到 Showcase 页面播放，这里可以同时查看歌词。',
+            en: 'Member songs now play inside Showcase, where the lyrics can stay visible.',
+          }),
+          generationProgress: 100,
+          activeTrackId: item.id,
+          tracks: [
+            {
+              id: item.id,
+              title: item.title || 'MelodyVow',
+              meta: item.variantLabel || item.subtitle,
+              blurb: item.lyricSnippet || copy(locale, {
+                zh: '点击播放按钮即可直接试听这首歌曲。',
+                en: 'Tap play to listen to this song here.',
+              }),
+              audioUrl: getSongStreamUrl(item.id),
+              downloadUrl: getSongDownloadUrl(item.id),
+            },
+          ],
+        })
+        navigate(withLocale(locale, `/how-it-works?mode=history&track=${encodeURIComponent(item.id)}`))
+        return
+      }
+
       onUpsertFloatingPlayer({
         key: `account-${item.id}`,
         locale,
