@@ -3925,13 +3925,10 @@
 
   .site-shell-home .hero-subtitle {
     margin: 0 auto;
-    font-size: 30px;
+    font-size: 20px;
     font-weight: 800;
     line-height: 1.02;
-    color: rgba(255, 255, 255, 0.96);
-    text-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.72),
-      0 6px 16px rgba(0, 0, 0, 0.12);
+    color: #ffffff;
   }
 
   .site-shell-home .home-phone-column {
@@ -3943,10 +3940,10 @@
   }
 
   .site-shell-home .home-phone-shell {
-    width: min(100%, 330px);
+    width: min(100%, 304px);
     margin: 0 auto;
-    padding: 14px;
-    border-radius: 26px;
+    padding: 12px;
+    border-radius: 24px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.14)) padding-box,
       linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.6)) border-box;
@@ -3969,7 +3966,7 @@
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 26px;
+    border-radius: 24px;
     border: 1px solid rgba(255, 255, 255, 0.34);
     box-shadow:
       inset 0 0 0 1px rgba(255, 255, 255, 0.1),
@@ -3993,11 +3990,11 @@
 
   .site-shell-home .home-app-mobile {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     position: relative;
     z-index: 1;
-    padding: 10px 8px 8px;
-    border-radius: 18px;
+    padding: 8px 7px 7px;
+    border-radius: 16px;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.92));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.96),
@@ -4010,9 +4007,9 @@
 
   .home-app-card-head {
     display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    grid-template-columns: 34px minmax(0, 1fr) 34px;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 0 2px;
   }
 
@@ -4020,34 +4017,34 @@
     margin: 0;
     text-align: center;
     font-family: var(--font-ui);
-    font-size: 0.8rem;
+    font-size: 0.74rem;
     font-weight: 900;
     color: rgba(20, 12, 24, 0.92);
   }
 
   .home-app-card-arrow {
-    width: 38px;
-    height: 32px;
+    width: 34px;
+    height: 28px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 10px;
     background: rgba(0, 0, 0, 0.05);
     color: rgba(20, 12, 24, 0.8);
-    font-size: 1.2rem;
+    font-size: 1rem;
     line-height: 1;
     font-weight: 900;
   }
 
   .home-app-form {
     display: grid;
-    gap: 5px;
-    padding: 2px 10px 0;
+    gap: 4px;
+    padding: 2px 8px 0;
   }
 
   .home-app-field input,
   .home-app-field select {
     width: 100%;
-    min-height: 27px;
-    padding: 0 9px;
+    min-height: 26px;
+    padding: 0 8px;
     border-radius: 999px;
     border: 1px solid rgba(16, 10, 24, 0.16);
     background: rgba(255, 255, 255, 0.7);
@@ -4067,13 +4064,13 @@
 
   .home-app-submit {
     width: 100%;
-    min-height: 35px;
+    min-height: 32px;
     border: 0;
     border-radius: 999px;
     background: linear-gradient(90deg, #ff2f7a, #ff5aa0);
     color: #ffffff;
     font-family: var(--font-display);
-    font-size: 0.82rem;
+    font-size: 0.76rem;
     font-weight: 900;
     letter-spacing: 0.01em;
     box-shadow:
@@ -4088,17 +4085,17 @@
   .home-app-voice-row {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 5px;
+    gap: 4px;
     padding: 2px 2px 0;
   }
 
   .home-app-voice-chip {
-    min-height: 23px;
+    min-height: 21px;
     padding: 0 4px;
     border-radius: 999px;
     border: 0;
     font-family: var(--font-ui);
-    font-size: 0.54rem;
+    font-size: 0.5rem;
     font-weight: 900;
     color: rgba(20, 12, 24, 0.86);
     background: linear-gradient(90deg, rgba(255, 233, 238, 0.96), rgba(255, 207, 220, 0.94));
