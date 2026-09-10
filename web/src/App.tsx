@@ -108,7 +108,11 @@ type HistoryItem = {
   title: string
   subtitle: string
   status: string
+  rawStatus?: string
   action: string
+  jobId?: string
+  trackCount?: number
+  trackIndex?: number
   variantLabel?: string
   audioUrl?: string
   downloadUrl?: string
@@ -537,6 +541,7 @@ function sanitizeHistoryItem(item: HistoryItem) {
 
   return {
     ...item,
+    rawStatus: item.rawStatus || item.status,
     audioUrl: playbackUrl,
     downloadUrl: item.downloadUrl || playbackUrl,
     sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
@@ -2878,6 +2883,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   const [showcaseLyrics, setShowcaseLyrics] = useState('')
   const showcaseAudioRef = useRef<HTMLAudioElement | null>(null)
   const showcaseShouldAutoplayRef = useRef(false)
+  const showcaseLastJobStatusRef = useRef('')
   const activeTrack = displayTracks.find((track) => track.id === activeTrackId) ?? displayTracks[0] ?? null
 
   function buildDemoTracks(items: ShowcaseTrack[]) {
@@ -3044,7 +3050,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
               },
             ]
 
-        if (job.status === 'ready' && allowAutoplay) {
+        if (job.status === 'ready' && (allowAutoplay || showcaseLastJobStatusRef.current !== 'ready')) {
           showcaseShouldAutoplayRef.current = true
         }
 
@@ -3086,6 +3092,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           tracks: nextTracks,
           activeTrackId: nextTracks[0]?.id || '',
         })
+        showcaseLastJobStatusRef.current = job.status
       } catch (loadError) {
         if (!disposed) {
           setError(loadError instanceof Error ? loadError.message : '任务查询失败。')
@@ -4184,7 +4191,45 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
 
   async function handleTogglePlay(item: HistoryItem) {
     try {
+      const groupJobId = item.jobId || item.id
+      const relatedReadyTracks = history.filter((candidate) => {
+        const candidateJobId = candidate.jobId || candidate.id
+        return candidateJobId === groupJobId && candidate.rawStatus === 'ready' && Boolean(candidate.audioUrl || candidate.downloadUrl)
+      })
+      const canPlayCurrentItem = item.rawStatus === 'ready' && Boolean(item.audioUrl || item.downloadUrl)
+
       if (isMobileViewport) {
+        if (!canPlayCurrentItem && groupJobId) {
+          saveShowcaseSession({
+            mode: 'job',
+            jobId: groupJobId,
+            title: item.title || 'MelodyVow',
+            subtitle: item.subtitle,
+            lyrics: item.lyricSnippet || '',
+            statusText: copy(locale, {
+              zh: '这首歌还在生成中，Showcase 会继续显示进度，完成后自动播放。',
+              en: 'This song is still generating. Showcase will keep showing progress and autoplay once it is ready.',
+            }),
+            generationProgress: 72,
+            tracks: [],
+            activeTrackId: '',
+          })
+          navigate(withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(groupJobId)}`))
+          return
+        }
+
+        const mobileTracks = (relatedReadyTracks.length ? relatedReadyTracks : [item]).map((track) => ({
+          id: track.id,
+          title: track.title || 'MelodyVow',
+          meta: track.variantLabel || track.subtitle,
+          blurb: track.lyricSnippet || copy(locale, {
+            zh: '点击播放按钮即可直接试听这首歌曲。',
+            en: 'Tap play to listen to this song here.',
+          }),
+          audioUrl: getSongStreamUrl(track.id),
+          downloadUrl: getSongDownloadUrl(track.id),
+        }))
+
         // #region debug-point E:account-history-handoff
         reportDebugEvent({
           hypothesisId: 'E',
@@ -4192,6 +4237,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           msg: '[DEBUG] Account handed off song playback to Showcase session',
           data: {
             songId: item.id,
+            jobId: groupJobId,
+            relatedReadyTrackCount: relatedReadyTracks.length,
             title: item.title || '',
             audioUrl: item.audioUrl || '',
             downloadUrl: item.downloadUrl || '',
@@ -4210,21 +4257,17 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           }),
           generationProgress: 100,
           activeTrackId: item.id,
-          tracks: [
-            {
-              id: item.id,
-              title: item.title || 'MelodyVow',
-              meta: item.variantLabel || item.subtitle,
-              blurb: item.lyricSnippet || copy(locale, {
-                zh: '点击播放按钮即可直接试听这首歌曲。',
-                en: 'Tap play to listen to this song here.',
-              }),
-              audioUrl: getSongStreamUrl(item.id),
-              downloadUrl: getSongDownloadUrl(item.id),
-            },
-          ],
+          tracks: mobileTracks,
         })
         navigate(withLocale(locale, `/how-it-works?mode=history&track=${encodeURIComponent(item.id)}`))
+        return
+      }
+
+      if (!canPlayCurrentItem) {
+        onOpenModal(copy(locale, {
+          zh: '这首歌还在生成中，桌面端暂时不能播放，请稍后刷新会员中心。',
+          en: 'This song is still generating. Desktop playback is not ready yet. Please refresh your member center shortly.',
+        }))
         return
       }
 
@@ -4309,7 +4352,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
 
         <section className="account-song-list">
           {history.map((item) => (
-            <article key={item.id} className="glass-card account-song-row">
+            <article key={item.id} className={`glass-card account-song-row ${item.rawStatus === 'ready' ? '' : 'is-pending'}`}>
               <div className="account-song-main">
                 <h3 className="account-song-title">{item.title}</h3>
                 <p className="account-song-subtitle">{item.subtitle}</p>
@@ -4326,18 +4369,22 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   className="ghost-button compact"
                   onClick={() => void handleTogglePlay(item)}
                 >
-                  {copy(locale, { zh: '浮动播放器', en: 'Open Player' })}
+                  {item.rawStatus === 'ready'
+                    ? copy(locale, { zh: '浮动播放器', en: 'Open Player' })
+                    : copy(locale, { zh: '查看进度', en: 'View Progress' })}
                 </button>
                 <button
                   type="button"
                   className="ghost-button compact"
                   onClick={() => void handleShareSong(item)}
+                  disabled={!item.downloadUrl && !item.audioUrl}
                 >
                   {copy(locale, { zh: '分享链接', en: 'Share Link' })}
                 </button>
                 <button
                   type="button"
                   className="primary-button compact"
+                  disabled={!item.downloadUrl && !item.audioUrl}
                   onClick={() => {
                     reportDebugEvent({
                       hypothesisId: 'C',

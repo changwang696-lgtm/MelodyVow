@@ -1022,9 +1022,13 @@ function mapSongToMemberHistory(song) {
 
   return {
     id: song.id,
+    jobId: song.jobId || song.id,
+    trackCount: Number(song.trackCount || 0),
+    trackIndex: Number(song.trackIndex || 0),
     title: song.title,
     subtitle: song.variantLabel ? `${song.couple} · ${song.variantLabel}` : song.couple,
     status: song.status === 'ready' ? '已生成' : song.status,
+    rawStatus: song.status,
     action: '下载音频',
     audioUrl: playbackUrl,
     downloadUrl,
@@ -2238,9 +2242,9 @@ app.post('/api/generate-song', async (req, res) => {
       sunoTaskId,
     })
 
-    if (!PUBLIC_BASE_URL) {
-      void pollSunoTask(job.id, sunoTaskId)
-    }
+    // Always keep a polling fallback alive. Production normally relies on callback,
+    // but callback loss would otherwise leave jobs stuck in generating_song forever.
+    void pollSunoTask(job.id, sunoTaskId)
 
     res.json({
       jobId: job.id,
