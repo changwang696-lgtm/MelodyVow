@@ -422,7 +422,7 @@ const backgroundThemeOptions: Array<{
   {
     id: 'vivid_rainbow',
     label: '绚彩渐变',
-    description: '当前默认方案，适合婚礼、求婚和年轻化视觉。',
+    description: '首页同款的高亮绚彩渐变，保存后全站页面都会切换到这套背景。',
   },
   {
     id: 'elegant_dark',
@@ -2147,58 +2147,42 @@ function HomeSocialLinksSection({ locale }: { locale: Locale }) {
 function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession }: HomePageProps) {
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState('')
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const [detailsError, setDetailsError] = useState('')
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
-  const missingFields = [
-    !draft.groom.trim() ? copy(locale, { zh: '新郎姓名', en: 'groom name' }) : '',
-    !draft.bride.trim() ? copy(locale, { zh: '新娘姓名', en: 'bride name' }) : '',
-    !draft.languageCode.trim() ? copy(locale, { zh: '歌曲语言', en: 'song language' }) : '',
-    !draft.style.trim() ? copy(locale, { zh: '曲风偏好', en: 'music style' }) : '',
-    !draft.vocal.trim() ? copy(locale, { zh: '歌唱声音', en: 'singing voice' }) : '',
-  ].filter(Boolean)
-  const isHomeFormValid = missingFields.length === 0
+  const fallbackLanguageCode = locale === 'zh' ? 'zh' : 'en'
+  const fallbackLanguage = songLanguages.find((item) => item.code === fallbackLanguageCode) ?? songLanguages[0]
+  const fallbackStyle = weddingStyleOptions[0]
+  const fallbackVocal = vocalOptions.find((item) => item.code === 'female') ?? vocalOptions[0]
 
   useEffect(() => launchHomepageFireworks(), [])
 
   async function handleGenerateSong() {
-    if (!isHomeFormValid) {
-      const message = copy(locale, {
-        zh: '请先完成必填项。',
-        en: 'Please complete the required fields.',
-      })
-      setSubmitError(message)
-      return
-    }
-
-    if (!draft.loveStory.trim()) {
-      setDetailsError('')
-      setDetailsOpen(true)
-      return
-    }
-
     if (!memberEmail || !memberToken) {
       const message = copy(locale, {
         zh: '请先登录会员后再生成歌曲，这样新生成的歌曲才能自动绑定到你的会员中心。',
         en: 'Please log in before generating a song so it can be saved to your account automatically.',
       })
-      setSubmitError(message)
       onOpenModal(message)
       navigate(withLocale(locale, '/auth'))
       return
     }
 
-    setSubmitError('')
     setIsSubmitting(true)
+    const groomName = draft.groom.trim() || copy(locale, { zh: '新郎', en: 'Groom' })
+    const brideName = draft.bride.trim() || copy(locale, { zh: '新娘', en: 'Bride' })
+    const languageCode = draft.languageCode.trim() || fallbackLanguage.code
+    const languageLabel = draft.languageLabel.trim() || fallbackLanguage.label
+    const style = draft.style.trim() || fallbackStyle.id
+    const styleLabel = draft.style.trim() ? getStyleLabel(locale, draft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
+    const vocal = draft.vocal.trim() || fallbackVocal.code
+    const vocalLabel = draft.vocal.trim() ? getVocalLabel(locale, draft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
 
     const pendingPlayerKey = `pending-generate-${locale}`
     onUpsertFloatingPlayer({
       key: pendingPlayerKey,
       locale,
-      title: `${draft.groom} & ${draft.bride}`,
-      subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+      title: `${groomName} & ${brideName}`,
+      subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
       eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
       tracks: [],
       canClose: false,
@@ -2225,16 +2209,16 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           ...getMemberAuthHeaders(authSession),
         },
         body: JSON.stringify({
-          groom: draft.groom,
-          bride: draft.bride,
+          groom: groomName,
+          bride: brideName,
           userEmail: memberEmail,
           occasion: draft.occasion,
-          style: draft.style,
-          styleLabel: getStyleLabel(locale, draft.style),
-          languageCode: draft.languageCode,
-          languageLabel: draft.languageLabel,
-          vocal: draft.vocal,
-          vocalLabel: draft.vocalLabel,
+          style,
+          styleLabel,
+          languageCode,
+          languageLabel,
+          vocal,
+          vocalLabel,
           loveStory: draft.loveStory,
           meetingStory: draft.meetingStory,
           vowKeywords: draft.vowKeywords,
@@ -2254,8 +2238,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       onUpsertFloatingPlayer({
         key: result.jobId,
         locale,
-        title: `${draft.groom} & ${draft.bride}`,
-        subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+        title: `${groomName} & ${brideName}`,
+        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
         eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
         tracks: [],
         canClose: false,
@@ -2275,12 +2259,11 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成请求失败，请稍后再试。'
-      setSubmitError(message)
       onUpsertFloatingPlayer({
         key: pendingPlayerKey,
         locale,
-        title: `${draft.groom} & ${draft.bride}`,
-        subtitle: `${draft.languageLabel} · ${getStyleLabel(locale, draft.style)} · ${getVocalLabel(locale, draft.vocal)}`,
+        title: `${groomName} & ${brideName}`,
+        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
         eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
         tracks: [],
         canClose: true,
@@ -2390,7 +2373,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 type="button"
                 className="home-app-submit"
                 onClick={() => void handleGenerateSong()}
-                disabled={isSubmitting || !isHomeFormValid}
+                disabled={isSubmitting}
               >
                 Create My Song
               </button>
@@ -2418,12 +2401,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 })}
               </div>
 
-              {!isHomeFormValid ? (
-                <p className="home-app-hint">
-                  {copy(locale, { zh: '请先完成必填项', en: 'Please complete the required fields.' })}
-                </p>
-              ) : null}
-              {submitError ? <p className="home-app-hint is-error">{submitError}</p> : null}
             </div>
 
             <div className="home-phone-legacy">
@@ -2567,22 +2544,12 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 type="button"
                 className="primary-button wide home-phone-submit"
                 onClick={() => void handleGenerateSong()}
-                disabled={isSubmitting || !isHomeFormValid}
+                disabled={isSubmitting}
               >
                 {isSubmitting
                   ? copy(locale, { zh: '正在生成歌词与歌曲...', en: 'Generating lyrics and song...' })
                   : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
               </button>
-
-              {!isHomeFormValid ? (
-                <p className="form-hint">
-                  {copy(locale, {
-                    zh: '请先完成必填项',
-                    en: 'Please complete the required fields.',
-                  })}
-                </p>
-              ) : null}
-              {submitError ? <p className="form-error">{submitError}</p> : null}
             </div>
           </section>
 
@@ -2605,38 +2572,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
             ))}
           </section>
 
-          {detailsOpen ? (
-            <div className="modal-backdrop" role="presentation" onClick={() => setDetailsOpen(false)}>
-              <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-                <h2>{copy(locale, { zh: '补充爱情故事', en: 'Add Your Love Story' })}</h2>
-                <p>{copy(locale, { zh: '为了让歌词更像你们，请简单写几句话。', en: 'Add a few lines so the lyrics feel personal.' })}</p>
-                <label className="field">
-                  <span>{copy(locale, { zh: '爱情故事', en: 'Love Story' })}</span>
-                  <textarea
-                    value={draft.loveStory}
-                    onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
-                    rows={4}
-                    placeholder={copy(locale, { zh: '例如：我们如何相遇、最难忘的瞬间…', en: 'How you met, a memorable moment…' })}
-                  />
-                </label>
-                {detailsError ? <p className="form-error">{detailsError}</p> : null}
-                <button
-                  type="button"
-                  className="primary-button wide"
-                  onClick={() => {
-                    if (!draft.loveStory.trim()) {
-                      setDetailsError(copy(locale, { zh: '请填写爱情故事。', en: 'Please add a short love story.' }))
-                      return
-                    }
-                    setDetailsOpen(false)
-                    void handleGenerateSong()
-                  }}
-                >
-                  {copy(locale, { zh: '继续生成', en: 'Continue' })}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </>
       )}
     >

@@ -22,7 +22,31 @@
   --site-grad-spot-2: rgba(225, 255, 87, 0.8);
   --site-grad-spot-3: rgba(0, 224, 224, 0.75);
   --site-grad-spot-4: rgba(255, 56, 143, 0.92);
+  --site-grad-spot-1-position: 12% 78%;
+  --site-grad-spot-2-position: 82% 20%;
+  --site-grad-spot-3-position: 90% 62%;
+  --site-grad-spot-4-position: 22% 18%;
+  --site-grad-spot-1-size: 26%;
+  --site-grad-spot-2-size: 24%;
+  --site-grad-spot-3-size: 28%;
+  --site-grad-spot-4-size: 28%;
   --site-grad-base: linear-gradient(135deg, #ff4e88 0%, #ffb657 25%, #dcff5a 49%, #55e8ff 74%, #7d6cff 100%);
+}
+
+.site-shell[data-background-theme='vivid_rainbow'] {
+  --site-grad-spot-1: rgba(247, 59, 136, 0.92);
+  --site-grad-spot-2: rgba(241, 237, 76, 0.9);
+  --site-grad-spot-3: rgba(82, 222, 211, 0.72);
+  --site-grad-spot-4: rgba(160, 75, 238, 0.82);
+  --site-grad-spot-1-position: 8% 8%;
+  --site-grad-spot-2-position: 29% 16%;
+  --site-grad-spot-3-position: 84% 84%;
+  --site-grad-spot-4-position: 4% 94%;
+  --site-grad-spot-1-size: 34%;
+  --site-grad-spot-2-size: 28%;
+  --site-grad-spot-3-size: 24%;
+  --site-grad-spot-4-size: 30%;
+  --site-grad-base: linear-gradient(135deg, #f73b88 0%, #f73b88 18%, #f1ed4c 40%, #52ded3 60%, #17e4d5 78%, #a04bee 100%);
 }
 
 .site-shell[data-background-theme='elegant_dark'] {
@@ -42,11 +66,19 @@
 }
 
 .site-shell[data-background-theme='ocean_dream'] {
-  --site-grad-spot-1: rgba(255, 224, 136, 0.28);
-  --site-grad-spot-2: rgba(209, 151, 48, 0.24);
-  --site-grad-spot-3: rgba(255, 201, 82, 0.2);
-  --site-grad-spot-4: rgba(255, 238, 184, 0.18);
-  --site-grad-base: linear-gradient(135deg, #120b04 0%, #261607 24%, #4c2d0a 48%, #7a4a12 72%, #c8942f 100%);
+  --site-grad-spot-1: rgba(255, 218, 170, 0.35);
+  --site-grad-spot-2: rgba(255, 209, 224, 0);
+  --site-grad-spot-3: rgba(255, 228, 214, 0);
+  --site-grad-spot-4: rgba(255, 247, 234, 0);
+  --site-grad-spot-1-position: 50% 25%;
+  --site-grad-spot-2-position: 50% 50%;
+  --site-grad-spot-3-position: 50% 50%;
+  --site-grad-spot-4-position: 50% 50%;
+  --site-grad-spot-1-size: 58%;
+  --site-grad-spot-2-size: 0%;
+  --site-grad-spot-3-size: 0%;
+  --site-grad-spot-4-size: 0%;
+  --site-grad-base: linear-gradient(180deg, #FFE6EF 0%, #FFD1E0 35%, #FFE4D6 70%, #FFF7EA 100%);
 }
 
 .site-shell[data-locale='zh'] {
@@ -74,10 +106,10 @@
 
 .site-gradient {
   background:
-    radial-gradient(circle at 12% 78%, var(--site-grad-spot-1), transparent 26%),
-    radial-gradient(circle at 82% 20%, var(--site-grad-spot-2), transparent 24%),
-    radial-gradient(circle at 90% 62%, var(--site-grad-spot-3), transparent 28%),
-    radial-gradient(circle at 22% 18%, var(--site-grad-spot-4), transparent 28%),
+    radial-gradient(circle at var(--site-grad-spot-1-position), var(--site-grad-spot-1), transparent var(--site-grad-spot-1-size)),
+    radial-gradient(circle at var(--site-grad-spot-2-position), var(--site-grad-spot-2), transparent var(--site-grad-spot-2-size)),
+    radial-gradient(circle at var(--site-grad-spot-3-position), var(--site-grad-spot-3), transparent var(--site-grad-spot-3-size)),
+    radial-gradient(circle at var(--site-grad-spot-4-position), var(--site-grad-spot-4), transparent var(--site-grad-spot-4-size)),
     var(--site-grad-base);
 }
 
