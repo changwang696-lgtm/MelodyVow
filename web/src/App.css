@@ -4038,7 +4038,7 @@
   .site-shell-home .hero-title-art {
     display: block;
     width: min(92vw, 520px);
-    margin: -20px auto 0;
+    margin: -45px auto 0;
     filter:
       drop-shadow(0 18px 34px rgba(0, 0, 0, 0.18))
       drop-shadow(0 0 0 rgba(255, 255, 255, 0));
@@ -4345,7 +4345,7 @@
     flex: 0 0 auto;
     box-sizing: border-box;
     width: min(100%, 304px);
-    margin: 0 auto;
+    margin: -25px auto 0;
     padding: 12px;
     border-radius: 24px;
     background:
