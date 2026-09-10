@@ -2012,12 +2012,12 @@ function SiteLayout({
           <section className="home-hero-layout">
             <section className="hero-banner hero-banner-home">
               <p className="eyebrow">{eyebrow}</p>
-              <div className="headline-stack">
-                <h1 className="visually-hidden">{title}</h1>
-                <img className="hero-title-art" src={heroTitleImage} alt="" />
-              </div>
               <div className="home-subtitle-wrap">
                 <p className="hero-subtitle">{subtitle}</p>
+                <div className="headline-stack">
+                  <h1 className="visually-hidden">{title}</h1>
+                  <img className="hero-title-art" src={heroTitleImage} alt="" />
+                </div>
                 <button
                   type="button"
                   className="home-showcase-float-button"
