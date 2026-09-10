@@ -2310,7 +2310,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       })}
       subtitle={copy(locale, {
         zh: '输入新郎新娘名字，生成一首专属婚礼纪念歌曲',
-        en: 'Turn your names into a wedding song made for your story.',
+        en: 'Turn Your Names Into a Wedding Song',
       })}
       eyebrow="MelodyVow"
       active="home"
