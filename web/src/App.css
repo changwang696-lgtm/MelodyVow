@@ -3793,14 +3793,14 @@
     height: 100vh;
     overflow: hidden;
     background:
-      radial-gradient(circle at 16% 14%, rgb(255, 106, 106), transparent 16%),
-      radial-gradient(circle at 44% 18%, rgb(255, 255, 68), transparent 12%),
+      radial-gradient(circle at 16% 14%, rgb(251, 62, 62), transparent 16%),
+      radial-gradient(circle at 44% 18%, rgb(251, 60, 60), transparent 12%),
       radial-gradient(circle at 20% 18%, rgba(255, 252, 57, 0.9), transparent 44%),
-      radial-gradient(circle at 0% 0%, rgba(247, 59, 136, 0.92), transparent 62%),
+      radial-gradient(circle at 0% 0%, rgba(253, 230, 58, 0.92), transparent 62%),
       radial-gradient(circle at 36% 58%, rgba(82, 222, 211, 0.78), transparent 22%),
       radial-gradient(circle at 0% 100%, rgba(160, 75, 238, 0.88), transparent 42%),
       radial-gradient(circle at 100% 100%, rgba(23, 228, 213, 0.9), transparent 38%),
-      linear-gradient(135deg, #f73b88 30%, #f1ed4c 24%, #52ded3 46%, #17e4d5 74%, #a04bee 100%);
+      linear-gradient(135deg, #f73b88 30%, #f1ed4c 44%, #52ded3 46%, #17e4d5 54%, #a04bee 100%);
   }
 
   .site-shell-home .site-gradient,
@@ -3856,7 +3856,7 @@
 
   .site-shell-home .nav-link:hover,
   .site-shell-home .nav-link.active {
-    color: #111111;
+    color: #ffffff;
     background: transparent;
     transform: none;
   }
