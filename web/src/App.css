@@ -3793,9 +3793,9 @@
     height: 100vh;
     overflow: hidden;
     background:
-      radial-gradient(circle at 0% 0%, rgba(247, 59, 136, 0.95), transparent 56%),
-      radial-gradient(circle at 18% 18%, rgba(244, 236, 73, 0.9), transparent 54%),
-      radial-gradient(circle at 28% 56%, rgba(82, 222, 211, 0.9), transparent 56%),
+      radial-gradient(circle at 0% 0%, rgba(247, 59, 136, 0.97), transparent 70%),
+      radial-gradient(circle at 20% 20%, rgba(244, 236, 73, 0.94), transparent 66%),
+      radial-gradient(circle at 34% 58%, rgba(82, 222, 211, 0.82), transparent 36%),
       radial-gradient(circle at 0% 100%, rgba(160, 75, 238, 0.88), transparent 62%),
       radial-gradient(circle at 100% 100%, rgba(23, 228, 213, 0.92), transparent 58%),
       linear-gradient(135deg, #f73b88 0%, #f4ec49 22%, #52ded3 46%, #17e4d5 76%, #a04bee 100%);
@@ -3829,7 +3829,7 @@
     position: static;
     display: flex;
     flex: 1;
-    gap: 10px;
+    gap: 16px;
     padding: 0;
     background: transparent;
     box-shadow: none;
@@ -3838,20 +3838,20 @@
   }
 
   .site-shell-home .nav-link {
-    padding: 6px 8px;
-    font-size: 0.72rem;
+    padding: 0;
+    font-size: 0.8rem;
     font-weight: 900;
-    border-radius: 999px;
-    color: rgba(255, 255, 255, 0.92);
-    background: rgba(255, 255, 255, 0.14);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0;
+    color: #111111;
+    background: transparent;
+    border: 0;
     transform: none;
   }
 
   .site-shell-home .nav-link:hover,
   .site-shell-home .nav-link.active {
-    color: rgba(22, 10, 26, 0.92);
-    background: rgba(255, 255, 255, 0.78);
+    color: #111111;
+    background: transparent;
     transform: none;
   }
 
