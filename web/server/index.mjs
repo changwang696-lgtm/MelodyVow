@@ -874,7 +874,10 @@ function handleSunoCallback(req, res) {
     status: 'callback_received',
     callbackPayload: payload,
   })
-  applySunoStatus(jobId, payload)
+  const next = applySunoStatus(jobId, payload)
+  if (next?.status !== 'ready' && next?.status !== 'error') {
+    void pollSunoTask(jobId, taskId)
+  }
   res.json({ ok: true })
 }
 
@@ -972,22 +975,26 @@ function validateGenerateInput(body) {
   const loveStory = typeof body.loveStory === 'string' ? body.loveStory.trim() : ''
   const meetingStory = typeof body.meetingStory === 'string' ? body.meetingStory.trim() : ''
   const vowKeywords = typeof body.vowKeywords === 'string' ? body.vowKeywords.trim() : ''
-
-  if (!groom || !bride || !style || !languageCode || !languageLabel || !vocal || !vocalLabel) {
-    throw new Error('请完整填写新郎、新娘、歌曲语言、曲风和歌唱声音。')
-  }
+  const safeGroom = groom || 'Groom'
+  const safeBride = bride || 'Bride'
+  const safeStyle = style || 'soft_pop'
+  const safeStyleLabel = styleLabel || 'Soft Pop'
+  const safeLanguageCode = languageCode || 'en'
+  const safeLanguageLabel = languageLabel || 'English'
+  const safeVocal = vocal || 'female'
+  const safeVocalLabel = vocalLabel || 'Female Vocal'
 
   return {
-    groom,
-    bride,
+    groom: safeGroom,
+    bride: safeBride,
     userEmail,
     occasion,
-    style,
-    styleLabel,
-    languageCode,
-    languageLabel,
-    vocal,
-    vocalLabel,
+    style: safeStyle,
+    styleLabel: safeStyleLabel,
+    languageCode: safeLanguageCode,
+    languageLabel: safeLanguageLabel,
+    vocal: safeVocal,
+    vocalLabel: safeVocalLabel,
     loveStory,
     meetingStory,
     vowKeywords,
@@ -1265,13 +1272,13 @@ function normalizeTracksFromRaw(trackOrTracks) {
 
   return array
     .map((track) => {
-      const sourceAudioUrl = pickUsableAudioUrl(
+      const sourceAudioUrl = pickPreferredAudioUrl(
         track?.audio_url,
         track?.audioUrl,
         track?.stream_audio_url,
         track?.streamAudioUrl,
       )
-      const sourceDownloadUrl = pickUsableAudioUrl(
+      const sourceDownloadUrl = pickPreferredAudioUrl(
         track?.download_url,
         track?.downloadUrl,
         track?.audio_url,
@@ -1279,8 +1286,8 @@ function normalizeTracksFromRaw(trackOrTracks) {
         track?.stream_audio_url,
         track?.streamAudioUrl,
       )
-      const playbackUrl = pickUsableAudioUrl(sourceAudioUrl, sourceDownloadUrl)
-      const downloadUrl = pickUsableAudioUrl(sourceDownloadUrl, sourceAudioUrl)
+      const playbackUrl = pickPreferredAudioUrl(sourceAudioUrl, sourceDownloadUrl)
+      const downloadUrl = pickPreferredAudioUrl(sourceDownloadUrl, sourceAudioUrl)
 
       return {
         id: String(track?.id || track?.clip_id || track?.task_id || '').trim(),
@@ -1302,7 +1309,7 @@ function normalizeTracksFromRaw(trackOrTracks) {
 function getNormalizedTaskState(payload) {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload
   const rawStatus = pickFirstDefined(data?.status, payload?.status)
-  const audioUrl = pickUsableAudioUrl(
+  const audioUrl = pickPreferredAudioUrl(
     data?.download_url,
     data?.downloadUrl,
     data?.audio_url,
@@ -1318,7 +1325,7 @@ function getNormalizedTaskState(payload) {
   )
   const state = String(pickFirstDefined(data?.state, payload?.state) || '').trim().toLowerCase()
 
-  if (rawStatus === 3 || rawStatus === '3' || state === 'completed' || audioUrl) {
+  if ((rawStatus === 3 || rawStatus === '3' || state === 'completed') && audioUrl) {
     return 'ready'
   }
 
