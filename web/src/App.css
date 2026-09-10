@@ -3578,6 +3578,63 @@
     margin-left: auto;
   }
 
+  .site-shell-showcase .site-header {
+    position: sticky;
+    top: 0;
+    padding: 10px 0 8px;
+    gap: 10px;
+    width: min(100% - 18px, 1180px);
+  }
+
+  .site-shell-showcase .brand-mark,
+  .site-shell-showcase .nav-toggle,
+  .site-shell-showcase .header-actions {
+    display: none;
+  }
+
+  .site-shell-showcase .site-nav {
+    position: static;
+    display: flex;
+    flex: 1;
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding: 4px 7px;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 8px 18px rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(10px);
+    justify-content: center;
+    align-items: center;
+    width: fit-content;
+    margin: 0 auto;
+  }
+
+  .site-shell-showcase .nav-link {
+    width: auto;
+    padding: 0;
+    font-size: 0.4rem;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    border-radius: 0;
+    color: #111111;
+    background: transparent;
+    border: 0;
+    text-align: center;
+    transform: none;
+  }
+
+  .site-shell-showcase .nav-link:hover,
+  .site-shell-showcase .nav-link.active {
+    color: #ffffff;
+    background: transparent;
+    transform: none;
+  }
+
+
   .header-cta {
     display: none;
   }
@@ -4476,7 +4533,7 @@
     border: 1px solid rgba(16, 10, 24, 0.16);
     background: rgba(255, 255, 255, 0.7);
     font-family: var(--font-ui);
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
     color: rgba(20, 12, 24, 0.9);
     line-height: 1.2;
@@ -4495,6 +4552,12 @@
     min-height: 34px;
     box-sizing: border-box;
     flex: 0 0 34px;
+  }
+
+  .home-app-field input::placeholder {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(20, 12, 24, 0.58);
   }
 
   .home-app-field select {
@@ -4547,8 +4610,9 @@
     border-radius: 999px;
     border: 0;
     font-family: var(--font-ui);
-    font-size: 0.5rem;
+    font-size: 0.62rem;
     font-weight: 900;
+    line-height: 1.05;
     color: rgba(20, 12, 24, 0.86);
     background: linear-gradient(90deg, rgba(255, 233, 238, 0.96), rgba(255, 207, 220, 0.94));
     box-shadow:
