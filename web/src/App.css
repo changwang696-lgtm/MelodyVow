@@ -3793,14 +3793,14 @@
     height: 100vh;
     overflow: hidden;
     background:
-      radial-gradient(circle at 22% 16%, rgba(255, 255, 255, 0.6), transparent 20%),
-      radial-gradient(circle at 58% 18%, rgba(255, 255, 255, 0.28), transparent 14%),
-      radial-gradient(circle at 18% 18%, rgba(255, 243, 104, 1), transparent 52%),
-      radial-gradient(circle at 0% 0%, rgba(247, 59, 136, 1), transparent 58%),
-      radial-gradient(circle at 34% 58%, rgba(82, 222, 211, 0.96), transparent 24%),
-      radial-gradient(circle at 0% 100%, rgba(160, 75, 238, 0.94), transparent 46%),
-      radial-gradient(circle at 100% 100%, rgba(23, 228, 213, 0.98), transparent 40%),
-      linear-gradient(135deg, #ff4f98 0%, #fff066 23%, #6df3ea 46%, #22f2df 74%, #b15cff 100%);
+      radial-gradient(circle at 16% 14%, rgba(255, 255, 255, 0.34), transparent 16%),
+      radial-gradient(circle at 44% 18%, rgba(255, 255, 255, 0.22), transparent 12%),
+      radial-gradient(circle at 20% 18%, rgba(241, 237, 76, 0.9), transparent 44%),
+      radial-gradient(circle at 0% 0%, rgba(247, 59, 136, 0.92), transparent 62%),
+      radial-gradient(circle at 36% 58%, rgba(82, 222, 211, 0.78), transparent 22%),
+      radial-gradient(circle at 0% 100%, rgba(160, 75, 238, 0.88), transparent 42%),
+      radial-gradient(circle at 100% 100%, rgba(23, 228, 213, 0.9), transparent 38%),
+      linear-gradient(135deg, #f73b88 0%, #f1ed4c 24%, #52ded3 46%, #17e4d5 74%, #a04bee 100%);
   }
 
   .site-shell-home .site-gradient,
@@ -3843,7 +3843,7 @@
 
   .site-shell-home .nav-link {
     padding: 0;
-    font-size: 0.72rem;
+    font-size: 0.4rem;
     font-weight: 900;
     line-height: 1;
     white-space: nowrap;
