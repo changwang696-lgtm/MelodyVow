@@ -2322,14 +2322,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           <section className="home-phone-shell">
             <div className="home-app-mobile">
               <div className="home-app-card-head">
-                <button
-                  type="button"
-                  className="home-app-card-arrow"
-                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
-                  aria-label={copy(locale, { zh: '查看样片', en: 'View showcase' })}
-                >
-                  ‹
-                </button>
+                <span className="home-app-card-spacer" aria-hidden="true" />
                 <p className="home-app-card-title">Successful Proposal Cases</p>
                 <button
                   type="button"
@@ -2356,7 +2349,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                     placeholder="Bride Name"
                   />
                 </label>
-                <label className="home-app-field">
+                <label className="home-app-field home-app-field-select">
                   <select
                     value={draft.languageCode}
                     onChange={(event) =>
@@ -2378,7 +2371,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                     ))}
                   </select>
                 </label>
-                <label className="home-app-field">
+                <label className="home-app-field home-app-field-select">
                   <select
                     value={draft.style}
                     onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}

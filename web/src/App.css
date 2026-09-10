@@ -3913,7 +3913,7 @@
   .site-shell-home .hero-title-art {
     display: block;
     width: min(92vw, 520px);
-    margin: 0 auto;
+    margin: -20px auto 0;
     filter:
       drop-shadow(0 18px 34px rgba(0, 0, 0, 0.18))
       drop-shadow(0 0 0 rgba(255, 255, 255, 0));
@@ -4022,6 +4022,12 @@
     color: rgba(20, 12, 24, 0.92);
   }
 
+  .home-app-card-spacer {
+    width: 34px;
+    height: 28px;
+    display: block;
+  }
+
   .home-app-card-arrow {
     width: 34px;
     height: 28px;
@@ -4049,7 +4055,7 @@
     border: 1px solid rgba(16, 10, 24, 0.16);
     background: rgba(255, 255, 255, 0.7);
     font-family: var(--font-ui);
-    font-size: 16px;
+    font-size: 12px;
     font-weight: 700;
     color: rgba(20, 12, 24, 0.9);
     line-height: 1.2;
@@ -4058,8 +4064,26 @@
       0 6px 14px rgba(0, 0, 0, 0.04);
   }
 
+  .home-app-field {
+    position: relative;
+    display: block;
+  }
+
   .home-app-field select {
     appearance: none;
+    padding-right: 20px;
+  }
+
+  .home-app-field-select::after {
+    content: 'ˇ';
+    position: absolute;
+    right: 9px;
+    top: 50%;
+    transform: translateY(-52%);
+    font-size: 12px;
+    font-weight: 900;
+    color: rgba(20, 12, 24, 0.72);
+    pointer-events: none;
   }
 
   .home-app-submit {
