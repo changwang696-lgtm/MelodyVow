@@ -2148,12 +2148,13 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
   const missingFields = [
     !draft.groom.trim() ? copy(locale, { zh: '新郎姓名', en: 'groom name' }) : '',
     !draft.bride.trim() ? copy(locale, { zh: '新娘姓名', en: 'bride name' }) : '',
-    !draft.loveStory.trim() ? copy(locale, { zh: '爱情故事', en: 'love story' }) : '',
     !draft.languageCode.trim() ? copy(locale, { zh: '歌曲语言', en: 'song language' }) : '',
     !draft.style.trim() ? copy(locale, { zh: '曲风偏好', en: 'music style' }) : '',
     !draft.vocal.trim() ? copy(locale, { zh: '歌唱声音', en: 'singing voice' }) : '',
@@ -2169,6 +2170,12 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         en: 'Please complete the required fields.',
       })
       setSubmitError(message)
+      return
+    }
+
+    if (!draft.loveStory.trim()) {
+      setDetailsError('')
+      setDetailsOpen(true)
       return
     }
 
@@ -2311,164 +2318,333 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       onLogout={onLogout}
       authSession={authSession}
       homePanel={(
-        <section className="home-phone-shell">
-          <div className="phone-brand-block">
-            <h2>MelodyVow</h2>
-          </div>
+        <>
+          <section className="home-phone-shell">
+            <div className="home-app-mobile">
+              <div className="home-app-card-head">
+                <button
+                  type="button"
+                  className="home-app-card-arrow"
+                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  aria-label={copy(locale, { zh: '查看样片', en: 'View showcase' })}
+                >
+                  ‹
+                </button>
+                <p className="home-app-card-title">Successful Proposal Cases</p>
+                <button
+                  type="button"
+                  className="home-app-card-arrow"
+                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  aria-label={copy(locale, { zh: '查看样片', en: 'View showcase' })}
+                >
+                  ›
+                </button>
+              </div>
 
-          <div className="phone-record-visual" aria-hidden="true">
-            <img className="phone-record-disc" src={phoneDiscImage} alt="" />
-            <img className="phone-record-couple" src={coupleImage} alt="" />
-            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
-          </div>
+              <div className="home-app-form">
+                <label className="home-app-field">
+                  <input
+                    value={draft.groom}
+                    onChange={(event) => setDraft((current) => ({ ...current, groom: event.target.value }))}
+                    placeholder="Groom Name"
+                  />
+                </label>
+                <label className="home-app-field">
+                  <input
+                    value={draft.bride}
+                    onChange={(event) => setDraft((current) => ({ ...current, bride: event.target.value }))}
+                    placeholder="Bride Name"
+                  />
+                </label>
+                <label className="home-app-field">
+                  <select
+                    value={draft.languageCode}
+                    onChange={(event) =>
+                      setDraft((current) => {
+                        const selected = songLanguages.find((item) => item.code === event.target.value)
+                        return {
+                          ...current,
+                          languageCode: event.target.value,
+                          languageLabel: selected?.label ?? '',
+                        }
+                      })
+                    }
+                  >
+                    <option value="">Song Language</option>
+                    {songLanguages.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {`${language.label} / ${language.nativeLabel}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="home-app-field">
+                  <select
+                    value={draft.style}
+                    onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
+                  >
+                    <option value="">Music Style</option>
+                    {weddingStyleOptions.map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {locale === 'zh' ? style.zhLabel : style.enLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
-          <div className="phone-form-grid">
-            <label className="field form-span-2">
-              <span>{copy(locale, { zh: '使用场景', en: 'Occasion' })}</span>
-              <div className="occasion-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
-                {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
-                  const active = draft.occasion === occasion
+              <button
+                type="button"
+                className="home-app-submit"
+                onClick={() => void handleGenerateSong()}
+                disabled={isSubmitting || !isHomeFormValid}
+              >
+                Create My Song
+              </button>
 
+              <div className="home-app-voice-row" role="group" aria-label={copy(locale, { zh: '歌唱声音', en: 'Singing voice' })}>
+                {vocalOptions.map((vocal) => {
+                  const label = vocal.code === 'female'
+                    ? 'Female'
+                    : vocal.code === 'duet'
+                      ? 'Male & Female'
+                      : vocal.code === 'male'
+                        ? 'Male'
+                        : 'Child'
+                  const active = draft.vocal === vocal.code
                   return (
                     <button
-                      key={occasion}
+                      key={vocal.code}
                       type="button"
-                      className={`occasion-chip ${active ? 'active' : ''}`}
-                      onClick={() => setDraft((current) => ({ ...current, occasion }))}
+                      className={`home-app-voice-chip ${active ? 'is-active' : ''}`}
+                      onClick={() => setDraft((current) => ({ ...current, vocal: vocal.code, vocalLabel: getVocalLabel(locale, vocal.code) }))}
                     >
-                      {getOccasionLabel(locale, occasion)}
+                      {label}
                     </button>
                   )
                 })}
               </div>
-            </label>
 
-            <label className="field">
-              <span>{copy(locale, { zh: '新郎姓名', en: 'Groom Name' })}</span>
-              <input
-                value={draft.groom}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, groom: event.target.value }))
-                }
-                placeholder={copy(locale, { zh: '请输入新郎姓名', en: 'Enter groom name' })}
-              />
-            </label>
+              {!isHomeFormValid ? (
+                <p className="home-app-hint">
+                  {copy(locale, { zh: '请先完成必填项', en: 'Please complete the required fields.' })}
+                </p>
+              ) : null}
+              {submitError ? <p className="home-app-hint is-error">{submitError}</p> : null}
+            </div>
 
-            <label className="field">
-              <span>{copy(locale, { zh: '新娘姓名', en: 'Bride Name' })}</span>
-              <input
-                value={draft.bride}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, bride: event.target.value }))
-                }
-                placeholder={copy(locale, { zh: '请输入新娘姓名', en: 'Enter bride name' })}
-              />
-            </label>
+            <div className="home-phone-legacy">
+              <div className="phone-brand-block">
+                <h2>MelodyVow</h2>
+              </div>
 
-            <label className="field form-span-2">
-              <span>{copy(locale, { zh: '爱情故事', en: 'Love Story' })}</span>
-              <textarea
-                value={draft.loveStory}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, loveStory: event.target.value }))
-                }
-                placeholder={copy(locale, {
-                  zh: '简短写一点故事，让歌词更像你们。',
-                  en: 'Add a short story to make the lyrics feel personal.',
-                })}
-                rows={3}
-              />
-            </label>
+              <div className="phone-record-visual" aria-hidden="true">
+                <img className="phone-record-disc" src={phoneDiscImage} alt="" />
+                <img className="phone-record-couple" src={coupleImage} alt="" />
+                <img className="phone-record-heart" src={pinkHeartImage} alt="" />
+              </div>
 
-            <label className="field">
-              <span>{copy(locale, { zh: '歌曲语言', en: 'Song Language' })}</span>
-              <select
-                value={draft.languageCode}
-                onChange={(event) =>
-                  setDraft((current) => {
-                    const selected = songLanguages.find((item) => item.code === event.target.value)
+              <div className="phone-form-grid">
+                <label className="field form-span-2">
+                  <span>{copy(locale, { zh: '使用场景', en: 'Occasion' })}</span>
+                  <div className="occasion-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
+                    {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
+                      const active = draft.occasion === occasion
 
-                    return {
-                      ...current,
-                      languageCode: event.target.value,
-                      languageLabel: selected?.label ?? '',
+                      return (
+                        <button
+                          key={occasion}
+                          type="button"
+                          className={`occasion-chip ${active ? 'active' : ''}`}
+                          onClick={() => setDraft((current) => ({ ...current, occasion }))}
+                        >
+                          {getOccasionLabel(locale, occasion)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>{copy(locale, { zh: '新郎姓名', en: 'Groom Name' })}</span>
+                  <input
+                    value={draft.groom}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, groom: event.target.value }))
                     }
-                  })
-                }
+                    placeholder={copy(locale, { zh: '请输入新郎姓名', en: 'Enter groom name' })}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>{copy(locale, { zh: '新娘姓名', en: 'Bride Name' })}</span>
+                  <input
+                    value={draft.bride}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, bride: event.target.value }))
+                    }
+                    placeholder={copy(locale, { zh: '请输入新娘姓名', en: 'Enter bride name' })}
+                  />
+                </label>
+
+                <label className="field form-span-2">
+                  <span>{copy(locale, { zh: '爱情故事', en: 'Love Story' })}</span>
+                  <textarea
+                    value={draft.loveStory}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, loveStory: event.target.value }))
+                    }
+                    placeholder={copy(locale, {
+                      zh: '简短写一点故事，让歌词更像你们。',
+                      en: 'Add a short story to make the lyrics feel personal.',
+                    })}
+                    rows={3}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>{copy(locale, { zh: '歌曲语言', en: 'Song Language' })}</span>
+                  <select
+                    value={draft.languageCode}
+                    onChange={(event) =>
+                      setDraft((current) => {
+                        const selected = songLanguages.find((item) => item.code === event.target.value)
+
+                        return {
+                          ...current,
+                          languageCode: event.target.value,
+                          languageLabel: selected?.label ?? '',
+                        }
+                      })
+                    }
+                  >
+                    <option value="">
+                      {copy(locale, { zh: '请选择歌曲语言', en: 'Please select a language' })}
+                    </option>
+                    {songLanguages.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {`${language.label} / ${language.nativeLabel}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>{copy(locale, { zh: '曲风偏好', en: 'Music Style' })}</span>
+                  <select
+                    value={draft.style}
+                    onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
+                  >
+                    <option value="">
+                      {copy(locale, { zh: '请选择曲风偏好', en: 'Please select a style' })}
+                    </option>
+                    {weddingStyleOptions.map((style) => (
+                      <option key={style.id} value={style.id}>
+                        {locale === 'zh' ? style.zhLabel : style.enLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field form-span-2">
+                  <span>{copy(locale, { zh: '歌唱声音', en: 'Singing Voice' })}</span>
+                  <select
+                    value={draft.vocal}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        vocal: event.target.value,
+                        vocalLabel: event.target.value ? getVocalLabel(locale, event.target.value) : '',
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {copy(locale, { zh: '请选择歌唱声音', en: 'Please select a voice' })}
+                    </option>
+                    {vocalOptions.map((vocal) => (
+                      <option key={vocal.code} value={vocal.code}>
+                        {locale === 'zh' ? vocal.zhLabel : vocal.enLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                className="primary-button wide home-phone-submit"
+                onClick={() => void handleGenerateSong()}
+                disabled={isSubmitting || !isHomeFormValid}
               >
-                <option value="">
-                  {copy(locale, { zh: '请选择歌曲语言', en: 'Please select a language' })}
-                </option>
-                {songLanguages.map((language) => (
-                  <option key={language.code} value={language.code}>
-                    {`${language.label} / ${language.nativeLabel}`}
-                  </option>
-                ))}
-              </select>
-            </label>
+                {isSubmitting
+                  ? copy(locale, { zh: '正在生成歌词与歌曲...', en: 'Generating lyrics and song...' })
+                  : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
+              </button>
 
-            <label className="field">
-              <span>{copy(locale, { zh: '曲风偏好', en: 'Music Style' })}</span>
-              <select
-                value={draft.style}
-                onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
+              {!isHomeFormValid ? (
+                <p className="form-hint">
+                  {copy(locale, {
+                    zh: '请先完成必填项',
+                    en: 'Please complete the required fields.',
+                  })}
+                </p>
+              ) : null}
+              {submitError ? <p className="form-error">{submitError}</p> : null}
+            </div>
+          </section>
+
+          <section className="home-app-shortcuts" aria-label={copy(locale, { zh: '快捷入口', en: 'Quick actions' })}>
+            {[
+              { key: 'signup', badge: 1, title: 'Sign up', to: withLocale(locale, '/auth') },
+              { key: 'pricing', badge: 2, title: 'Pricing', to: withLocale(locale, '/pricing') },
+              { key: 'styles', badge: 3, title: 'Music Styles', to: withLocale(locale, '/styles') },
+            ].map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="home-app-shortcut-card"
+                onClick={() => navigate(item.to)}
               >
-                <option value="">
-                  {copy(locale, { zh: '请选择曲风偏好', en: 'Please select a style' })}
-                </option>
-                {weddingStyleOptions.map((style) => (
-                  <option key={style.id} value={style.id}>
-                    {locale === 'zh' ? style.zhLabel : style.enLabel}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <span className="home-app-shortcut-badge">{item.badge}</span>
+                <span className="home-app-shortcut-title">{item.title}</span>
+                <span className="home-app-shortcut-cta">GO</span>
+              </button>
+            ))}
+          </section>
 
-            <label className="field form-span-2">
-              <span>{copy(locale, { zh: '歌唱声音', en: 'Singing Voice' })}</span>
-              <select
-                value={draft.vocal}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    vocal: event.target.value,
-                    vocalLabel: event.target.value ? getVocalLabel(locale, event.target.value) : '',
-                  }))
-                }
-              >
-                <option value="">
-                  {copy(locale, { zh: '请选择歌唱声音', en: 'Please select a voice' })}
-                </option>
-                {vocalOptions.map((vocal) => (
-                  <option key={vocal.code} value={vocal.code}>
-                    {locale === 'zh' ? vocal.zhLabel : vocal.enLabel}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <button
-            type="button"
-            className="primary-button wide home-phone-submit"
-            onClick={() => void handleGenerateSong()}
-            disabled={isSubmitting || !isHomeFormValid}
-          >
-            {isSubmitting
-              ? copy(locale, { zh: '正在生成歌词与歌曲...', en: 'Generating lyrics and song...' })
-              : copy(locale, { zh: '开始生成婚礼歌', en: 'Create My Song' })}
-          </button>
-
-          {!isHomeFormValid ? (
-            <p className="form-hint">
-              {copy(locale, {
-                zh: '请先完成必填项',
-                en: 'Please complete the required fields.',
-              })}
-            </p>
+          {detailsOpen ? (
+            <div className="modal-backdrop" role="presentation" onClick={() => setDetailsOpen(false)}>
+              <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+                <h2>{copy(locale, { zh: '补充爱情故事', en: 'Add Your Love Story' })}</h2>
+                <p>{copy(locale, { zh: '为了让歌词更像你们，请简单写几句话。', en: 'Add a few lines so the lyrics feel personal.' })}</p>
+                <label className="field">
+                  <span>{copy(locale, { zh: '爱情故事', en: 'Love Story' })}</span>
+                  <textarea
+                    value={draft.loveStory}
+                    onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
+                    rows={4}
+                    placeholder={copy(locale, { zh: '例如：我们如何相遇、最难忘的瞬间…', en: 'How you met, a memorable moment…' })}
+                  />
+                </label>
+                {detailsError ? <p className="form-error">{detailsError}</p> : null}
+                <button
+                  type="button"
+                  className="primary-button wide"
+                  onClick={() => {
+                    if (!draft.loveStory.trim()) {
+                      setDetailsError(copy(locale, { zh: '请填写爱情故事。', en: 'Please add a short love story.' }))
+                      return
+                    }
+                    setDetailsOpen(false)
+                    void handleGenerateSong()
+                  }}
+                >
+                  {copy(locale, { zh: '继续生成', en: 'Continue' })}
+                </button>
+              </div>
+            </div>
           ) : null}
-          {submitError ? <p className="form-error">{submitError}</p> : null}
-        </section>
+        </>
       )}
     >
       <ServiceHubSection
