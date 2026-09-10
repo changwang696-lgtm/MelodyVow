@@ -947,6 +947,7 @@ function ScrollManager() {
 
 function App() {
   const location = useLocation()
+  const [isMobileViewport, setIsMobileViewport] = useState(() => (typeof window !== 'undefined' ? window.matchMedia('(max-width: 720px)').matches : false))
   const [draft, setDraft] = useState<SongDraft>({
     groom: '',
     bride: '',
@@ -971,6 +972,25 @@ function App() {
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
   const activeMemberToken = authSession?.authToken?.trim() || ''
   const activeMemberEmail = authSession?.email?.trim() || ''
+  const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 720px)')
+    const syncViewport = () => setIsMobileViewport(mediaQuery.matches)
+    syncViewport()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport)
+      return () => mediaQuery.removeEventListener('change', syncViewport)
+    }
+
+    mediaQuery.addListener(syncViewport)
+    return () => mediaQuery.removeListener(syncViewport)
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -1546,7 +1566,7 @@ function App() {
         </div>
       ) : null}
 
-      {floatingPlayer ? (
+      {floatingPlayer && !shouldHideFloatingPlayer ? (
         <FloatingPhonePlayer
           player={floatingPlayer}
           onClose={closeFloatingPlayer}
@@ -1836,6 +1856,7 @@ function SiteLayout({
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
+  const useHomeMobileChrome = ['home', 'how', 'styles', 'pricing', 'account'].includes(active)
   const currentAuthSession = authSession ?? loadAuthSession()
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
   const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
@@ -1894,7 +1915,7 @@ function SiteLayout({
 
   return (
     <div
-      className={`site-shell ${active === 'home' ? 'site-shell-home' : ''} ${active === 'account' ? 'site-shell-account' : ''}`.trim()}
+      className={`site-shell ${active === 'home' ? 'site-shell-home' : ''} ${active === 'how' ? 'site-shell-showcase' : ''} ${active === 'styles' ? 'site-shell-styles' : ''} ${active === 'pricing' ? 'site-shell-pricing' : ''} ${active === 'account' ? 'site-shell-account' : ''}`.trim()}
       data-locale={locale}
       data-background-theme={siteConfig.backgroundTheme}
     >
@@ -1909,7 +1930,7 @@ function SiteLayout({
         </>
       ) : null}
 
-      <header className={`site-header ${active === 'home' ? 'site-header-home' : ''}`.trim()}>
+      <header className={`site-header ${useHomeMobileChrome ? 'site-header-home' : ''}`.trim()}>
         <button
           type="button"
           className="brand-mark brand-button"
@@ -2052,6 +2073,13 @@ function SiteLayout({
             <aside className="home-phone-column">
               {homePanel}
             </aside>
+          </section>
+        ) : useHomeMobileChrome && ['how', 'styles', 'pricing', 'account'].includes(active) ? (
+          <section className="hero-banner hero-banner-home mobile-shared-hero">
+            <p className="eyebrow">MelodyVow</p>
+            <div className="home-subtitle-wrap">
+              <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p>
+            </div>
           </section>
         ) : !hideHero ? (
           <section className="hero-banner">
@@ -2662,7 +2690,30 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   const [tracks, setTracks] = useState<ShowcaseTrack[]>(productShowcaseTracks)
   const [activeTrackId, setActiveTrackId] = useState(productShowcaseTracks[0]?.id ?? '')
   const [error, setError] = useState('')
+  const [isShowcaseMobile, setIsShowcaseMobile] = useState(() => (typeof window !== 'undefined' ? window.matchMedia('(max-width: 720px)').matches : false))
+  const [showcasePlaying, setShowcasePlaying] = useState(false)
+  const [showcaseProgress, setShowcaseProgress] = useState(0)
+  const showcaseAudioRef = useRef<HTMLAudioElement | null>(null)
+  const showcaseShouldAutoplayRef = useRef(false)
   const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? tracks[0]
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 720px)')
+    const syncViewport = () => setIsShowcaseMobile(mediaQuery.matches)
+    syncViewport()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport)
+      return () => mediaQuery.removeEventListener('change', syncViewport)
+    }
+
+    mediaQuery.addListener(syncViewport)
+    return () => mediaQuery.removeListener(syncViewport)
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -2693,11 +2744,128 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     }
   }, [])
 
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio) {
+      return
+    }
+
+    const handleTimeUpdate = () => {
+      if (audio.duration) {
+        setShowcaseProgress((audio.currentTime / audio.duration) * 100)
+      } else {
+        setShowcaseProgress(0)
+      }
+    }
+
+    const handlePlay = () => {
+      setShowcasePlaying(true)
+    }
+
+    const handlePause = () => {
+      setShowcasePlaying(false)
+    }
+
+    const handleEnded = () => {
+      setShowcasePlaying(false)
+      setShowcaseProgress(100)
+    }
+
+    audio.addEventListener('timeupdate', handleTimeUpdate)
+    audio.addEventListener('play', handlePlay)
+    audio.addEventListener('pause', handlePause)
+    audio.addEventListener('ended', handleEnded)
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate)
+      audio.removeEventListener('play', handlePlay)
+      audio.removeEventListener('pause', handlePause)
+      audio.removeEventListener('ended', handleEnded)
+    }
+  }, [])
+
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio || !activeTrack?.audioUrl) {
+      return
+    }
+
+    audio.src = activeTrack.audioUrl
+    audio.load()
+    setShowcaseProgress(0)
+    setShowcasePlaying(false)
+
+    if (!showcaseShouldAutoplayRef.current) {
+      return
+    }
+
+    const tryPlay = async () => {
+      try {
+        await audio.play()
+      } catch {
+        setError(copy(locale, {
+          zh: '当前样片暂时无法播放，请稍后再试。',
+          en: 'This sample cannot be played right now. Please try again later.',
+        }))
+      } finally {
+        showcaseShouldAutoplayRef.current = false
+      }
+    }
+
+    void tryPlay()
+  }, [activeTrack, locale])
+
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio || isShowcaseMobile) {
+      return
+    }
+
+    audio.pause()
+    setShowcasePlaying(false)
+  }, [isShowcaseMobile])
+
+  useEffect(() => () => {
+    const audio = showcaseAudioRef.current
+    if (audio) {
+      audio.pause()
+    }
+  }, [])
+
+  async function handleMobileShowcasePlayback() {
+    const audio = showcaseAudioRef.current
+    if (!audio || !activeTrack?.audioUrl) {
+      return
+    }
+
+    setError('')
+
+    if (audio.paused) {
+      try {
+        await audio.play()
+      } catch {
+        setError(copy(locale, {
+          zh: '当前样片暂时无法播放，请稍后再试。',
+          en: 'This sample cannot be played right now. Please try again later.',
+        }))
+      }
+      return
+    }
+
+    audio.pause()
+  }
+
   function handleSelectTrack(trackId: string) {
     const trackIndex = tracks.findIndex((track) => track.id === trackId)
     const nextTrack = tracks[trackIndex] ?? tracks[0]
     setActiveTrackId(trackId)
     setError('')
+
+    if (isShowcaseMobile) {
+      showcaseShouldAutoplayRef.current = true
+      return
+    }
+
     onUpsertFloatingPlayer({
       key: `showcase-${trackId}`,
       locale,
@@ -2740,6 +2908,54 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       hideHero
     >
       <section className="showcase-layout">
+        <article className="glass-card showcase-mobile-player">
+          <audio ref={showcaseAudioRef} preload="metadata" />
+          <div className="showcase-mobile-player-shell">
+            <div className="showcase-mobile-player-card">
+              <div className="showcase-mobile-player-head">
+                <p className="showcase-mobile-player-eyebrow">{copy(locale, { zh: '唯一播放器', en: 'Only Player' })}</p>
+                <span className="showcase-mobile-player-count">
+                  {copy(locale, {
+                    zh: `${tracks.length} 首样片`,
+                    en: `${tracks.length} tracks`,
+                  })}
+                </span>
+              </div>
+
+              <div className="showcase-mobile-player-main">
+                <button
+                  type="button"
+                  className={`showcase-mobile-play-button ${showcasePlaying ? 'is-playing' : ''}`}
+                  onClick={() => void handleMobileShowcasePlayback()}
+                  disabled={!activeTrack?.audioUrl}
+                  aria-label={copy(locale, { zh: '播放或暂停样片', en: 'Play or pause sample' })}
+                >
+                  {showcasePlaying ? '❚❚' : '▶'}
+                </button>
+
+                <div className="showcase-mobile-player-copy">
+                  <strong>{copy(locale, activeTrack?.title ?? { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' })}</strong>
+                  <span>{copy(locale, activeTrack?.meta ?? { zh: '婚礼样片', en: 'Wedding sample' })}</span>
+                  <p>{copy(locale, activeTrack?.blurb ?? { zh: '点击下方歌单，直接在这里试听。', en: 'Tap a song below to preview it here.' })}</p>
+                </div>
+              </div>
+
+              <div className="showcase-mobile-player-progress-copy">
+                <span>
+                  {showcasePlaying
+                    ? copy(locale, { zh: '歌曲播放中', en: 'Now Playing' })
+                    : copy(locale, { zh: '歌曲播放进度', en: 'Song Progress' })}
+                </span>
+                <span>{`${Math.round(showcaseProgress)}%`}</span>
+              </div>
+              <div className="showcase-mobile-player-progress" aria-hidden="true">
+                <span style={{ width: `${Math.max(0, Math.min(100, showcaseProgress))}%` }} />
+              </div>
+            </div>
+          </div>
+          {error ? <p className="form-error">{error}</p> : null}
+        </article>
+
         <article className="glass-panel floating-player-teaser">
           <div className="phone-brand-block">
             <h2>{copy(locale, { zh: '悬浮手机播放器', en: 'Floating Phone Player' })}</h2>
@@ -2774,6 +2990,12 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           <article className="glass-card showcase-intro">
             <p className="mini-eyebrow">{copy(locale, { zh: '全球', en: 'Global' })}</p>
             <h3>{copy(locale, { zh: '曾经求婚成功的浪漫歌曲', en: 'Romantic Songs from Successful Proposals' })}</h3>
+            <p className="showcase-mobile-intro-copy">
+              {copy(locale, {
+                zh: '下方歌单会统一进入上面的手机播放器，点击即可播放。',
+                en: 'Every sample below plays inside the mobile player above.',
+              })}
+            </p>
             <button
               type="button"
               className="showcase-home-link"
@@ -2799,9 +3021,10 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
                   <div className="showcase-track-copy">
                     <strong>{copy(locale, track.title)}</strong>
                     <span>{copy(locale, track.meta)}</span>
+                    <small>{copy(locale, track.blurb)}</small>
                   </div>
                   <div className={`showcase-track-icon ${isActive ? 'is-playing' : ''}`}>
-                    ▶
+                    {isActive && showcasePlaying && isShowcaseMobile ? '❚❚' : '▶'}
                   </div>
                 </button>
               )
