@@ -476,7 +476,7 @@ const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfi
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
-const DEBUG_SESSION_ID = 'suno-expired-url'
+const DEBUG_SESSION_ID = 'song-playback-regression'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
@@ -3048,6 +3048,25 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           showcaseShouldAutoplayRef.current = true
         }
 
+        // #region debug-point B:showcase-job-sync
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.syncShowcaseJob',
+          msg: '[DEBUG] Showcase synced job payload into mobile player state',
+          data: {
+            jobId,
+            jobStatus: job.status,
+            allowAutoplay,
+            willAutoplay: showcaseShouldAutoplayRef.current,
+            nextTrackCount: nextTracks.length,
+            nextFirstTrackId: nextTracks[0]?.id || '',
+            nextFirstTrackAudioUrl: nextTracks[0]?.audioUrl || '',
+            nextFirstTrackDownloadUrl: nextTracks[0]?.downloadUrl || '',
+            nextActiveTrackId: nextTracks[0]?.id || '',
+          },
+        })
+        // #endregion
+
         setDisplayTracks(nextTracks)
         setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
         setShowcaseLyrics(nextLyrics)
@@ -3128,6 +3147,19 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   useEffect(() => {
     const audio = showcaseAudioRef.current
     if (!audio || !activeTrack?.audioUrl) {
+      // #region debug-point B:showcase-audio-missing
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+        msg: '[DEBUG] Showcase audio effect missing playable track',
+        data: {
+          activeTrackId: activeTrack?.id || '',
+          activeTrackAudioUrl: activeTrack?.audioUrl || '',
+          activeTrackDownloadUrl: activeTrack?.downloadUrl || '',
+          hasAudioElement: Boolean(audio),
+        },
+      })
+      // #endregion
       setShowcasePlaying(false)
       setShowcaseProgress(0)
       return
@@ -3145,7 +3177,31 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     const tryPlay = async () => {
       try {
         await audio.play()
+        // #region debug-point B:showcase-autoplay-success
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+          msg: '[DEBUG] Showcase autoplay succeeded',
+          data: {
+            activeTrackId: activeTrack.id,
+            activeTrackAudioUrl: activeTrack.audioUrl,
+            activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+          },
+        })
+        // #endregion
       } catch {
+        // #region debug-point B:showcase-autoplay-failed
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+          msg: '[DEBUG] Showcase autoplay failed',
+          data: {
+            activeTrackId: activeTrack.id,
+            activeTrackAudioUrl: activeTrack.audioUrl,
+            activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+          },
+        })
+        // #endregion
         setError(copy(locale, {
           zh: '当前样片暂时无法播放，请稍后再试。',
           en: 'This sample cannot be played right now. Please try again later.',
@@ -4129,6 +4185,20 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
   async function handleTogglePlay(item: HistoryItem) {
     try {
       if (isMobileViewport) {
+        // #region debug-point E:account-history-handoff
+        reportDebugEvent({
+          hypothesisId: 'E',
+          location: 'web/src/App.tsx:AccountPage.handleTogglePlay',
+          msg: '[DEBUG] Account handed off song playback to Showcase session',
+          data: {
+            songId: item.id,
+            title: item.title || '',
+            audioUrl: item.audioUrl || '',
+            downloadUrl: item.downloadUrl || '',
+            lyricSnippetLength: (item.lyricSnippet || '').length,
+          },
+        })
+        // #endregion
         saveShowcaseSession({
           mode: 'history',
           title: item.title || 'MelodyVow',

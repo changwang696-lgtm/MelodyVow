@@ -24,7 +24,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
 const ADMIN_DATA_FILE = path.join(DATA_DIR, 'admin-data.json')
-const DEBUG_ENV_FILE = path.join(process.cwd(), '.dbg', 'suno-expired-url.env')
+const DEBUG_ENV_FILE = path.join(process.cwd(), '.dbg', 'song-playback-regression.env')
 const BACKGROUND_THEME_IDS = new Set(['vivid_rainbow', 'elegant_dark', 'soft_pink_gold', 'ocean_dream'])
 
 const jobs = new Map()
@@ -875,6 +875,21 @@ function handleSunoCallback(req, res) {
     callbackPayload: payload,
   })
   const next = applySunoStatus(jobId, payload)
+  // #region debug-point D:callback-apply-status
+  reportDebugEvent({
+    hypothesisId: 'D',
+    location: 'web/server/index.mjs:handleSunoCallback',
+    msg: '[DEBUG] Applied callback payload to current Suno job state',
+    data: {
+      taskId,
+      jobId,
+      nextStatus: next?.status || '',
+      nextTrackCount: Array.isArray(next?.tracks) ? next.tracks.length : 0,
+      nextFirstTrackAudioUrl: next?.tracks?.[0]?.audioUrl || '',
+      nextFirstTrackDownloadUrl: next?.tracks?.[0]?.downloadUrl || '',
+    },
+  })
+  // #endregion
   if (next?.status !== 'ready' && next?.status !== 'error') {
     void pollSunoTask(jobId, taskId)
   }
@@ -883,7 +898,7 @@ function handleSunoCallback(req, res) {
 
 function reportDebugEvent(event) {
   let debugServerUrl = 'http://127.0.0.1:7777/event'
-  let debugSessionId = 'suno-expired-url'
+  let debugSessionId = 'song-playback-regression'
 
   try {
     const envContent = fs.readFileSync(DEBUG_ENV_FILE, 'utf8')
@@ -2322,6 +2337,26 @@ async function proxySongAudio(req, res, disposition = 'inline') {
   const songId = String(req.params.songId || '').trim()
   const { storedSong, sourceUrl } = resolveSongSource(songId)
 
+  // #region debug-point C:proxy-song-audio
+  reportDebugEvent({
+    hypothesisId: 'C',
+    location: 'web/server/index.mjs:proxySongAudio',
+    msg: '[DEBUG] Proxying song audio request',
+    data: {
+      songId,
+      disposition,
+      hasStoredSong: Boolean(storedSong),
+      sourceUrl: sourceUrl || '',
+      storedSongAudioUrl: storedSong?.audioUrl || '',
+      storedSongDownloadUrl: storedSong?.downloadUrl || '',
+      storedSongSourceAudioUrl: storedSong?.sourceAudioUrl || '',
+      storedSongSourceDownloadUrl: storedSong?.sourceDownloadUrl || '',
+      jobId: storedSong?.jobId || '',
+      trackIndex: storedSong?.trackIndex ?? -1,
+    },
+  })
+  // #endregion
+
   if (!sourceUrl) {
     res.status(404).json({ message: '当前歌曲还没有可下载的音频链接。' })
     return
@@ -2340,7 +2375,20 @@ async function proxySongAudio(req, res, disposition = 'inline') {
     res.setHeader('Content-Length', String(audioBuffer.length))
     res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`)
     res.status(200).end(audioBuffer)
-  } catch {
+  } catch (error) {
+    // #region debug-point C:proxy-song-audio-error
+    reportDebugEvent({
+      hypothesisId: 'C',
+      location: 'web/server/index.mjs:proxySongAudio',
+      msg: '[DEBUG] Proxy song audio request failed',
+      data: {
+        songId,
+        disposition,
+        sourceUrl,
+        error: error instanceof Error ? error.message : 'unknown',
+      },
+    })
+    // #endregion
     res.status(502).json({ message: disposition === 'attachment' ? '下载歌曲失败，请稍后再试。' : '歌曲播放链接暂时不可用。' })
   }
 }
