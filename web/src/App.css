@@ -3906,6 +3906,7 @@
 
   .site-shell-home {
     min-height: 100vh;
+    min-height: 100svh;
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
@@ -3985,6 +3986,7 @@
 
   .site-shell-home .page-container.page-container-home {
     min-height: calc(100vh - 62px);
+    min-height: calc(100svh - 62px);
     height: auto;
     padding: 0 0 20px;
     overflow: visible;
@@ -3992,13 +3994,17 @@
 
   .site-shell-home .home-hero-layout {
     width: 100%;
-    min-height: 100%;
+    min-height: calc(100vh - 62px);
+    min-height: calc(100svh - 62px);
     height: auto;
     padding-top: 6px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     margin-bottom: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    justify-content: space-between;
+    gap: 8px;
+    box-sizing: border-box;
   }
 
   .site-shell-home .hero-banner-home {
@@ -4323,12 +4329,14 @@
   }
 
   .site-shell-home .home-phone-column {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 10px;
+    margin-top: auto;
     min-height: 0;
+    width: 100%;
   }
 
   .site-shell-home .home-phone-shell {
