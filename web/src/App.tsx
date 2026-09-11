@@ -252,6 +252,7 @@ type ShowcaseSessionContext = {
   lyrics?: string
   statusText?: string
   generationProgress?: number
+  isGenerating?: boolean
   tracks?: ShowcaseSessionTrack[]
   activeTrackId?: string
 }
@@ -301,6 +302,7 @@ type HomePageProps = {
   onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
   onLogout: () => void
   authSession: AuthSession | null
+  onAddPendingMemberSongs: (items: HistoryItem[]) => void
 }
 
 type StylesPageProps = {
@@ -536,6 +538,38 @@ function buildTrackHistoryId(jobId: string, index: number) {
   return `${jobId}__track_${index + 1}`
 }
 
+function buildPendingHistoryItems(params: {
+  jobId: string
+  title: string
+  subtitle: string
+  languageLabel?: string
+  styleLabel?: string
+  vocalLabel?: string
+  lyricSnippet?: string
+}) {
+  return Array.from({ length: 2 }, (_, index) => ({
+    id: buildTrackHistoryId(params.jobId, index),
+    jobId: params.jobId,
+    trackCount: 2,
+    trackIndex: index,
+    title: params.title,
+    subtitle: params.subtitle,
+    status: 'generating_song',
+    rawStatus: 'generating_song',
+    action: '下载音频',
+    variantLabel: `Version ${index + 1}`,
+    audioUrl: '',
+    downloadUrl: '',
+    sourceAudioUrl: '',
+    sourceDownloadUrl: '',
+    createdAt: new Date().toISOString(),
+    languageLabel: params.languageLabel || '',
+    styleLabel: params.styleLabel || '',
+    vocalLabel: params.vocalLabel || '',
+    lyricSnippet: params.lyricSnippet || '',
+  }))
+}
+
 function sanitizeHistoryItem(item: HistoryItem) {
   const playbackUrl = pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
 
@@ -547,6 +581,80 @@ function sanitizeHistoryItem(item: HistoryItem) {
     sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
     sourceDownloadUrl: item.sourceDownloadUrl || item.downloadUrl || '',
   }
+}
+
+function isReadyHistoryItem(item: HistoryItem) {
+  return String(item.rawStatus || item.status || '').trim().toLowerCase() === 'ready'
+}
+
+function isPendingHistoryItem(item: HistoryItem) {
+  return Boolean(item.jobId) && !isReadyHistoryItem(item) && !pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
+}
+
+function mergeMemberHistoryItems(currentItems: HistoryItem[], fetchedItems: HistoryItem[]) {
+  const sanitizedCurrent = currentItems.map(sanitizeHistoryItem)
+  const sanitizedFetched = fetchedItems.map(sanitizeHistoryItem)
+  const currentPendingByJob = new Map<string, HistoryItem[]>()
+
+  sanitizedCurrent.forEach((item) => {
+    const groupJobId = String(item.jobId || '').trim()
+    if (!groupJobId || !isPendingHistoryItem(item)) {
+      return
+    }
+
+    const group = currentPendingByJob.get(groupJobId) || []
+    group.push(item)
+    currentPendingByJob.set(groupJobId, group)
+  })
+
+  if (!currentPendingByJob.size) {
+    return sanitizedFetched.slice(0, 12)
+  }
+
+  const preservedPendingItems: HistoryItem[] = []
+  const preservedPendingIds = new Set<string>()
+  const preservedPendingJobIds = new Set<string>()
+
+  currentPendingByJob.forEach((pendingItems, jobId) => {
+    const expectedTrackCount = Math.max(...pendingItems.map((item) => item.trackCount || 0), pendingItems.length, 2)
+    const fetchedReadyItems = sanitizedFetched.filter((item) => (item.jobId || item.id) === jobId && isReadyHistoryItem(item))
+
+    if (fetchedReadyItems.length >= expectedTrackCount) {
+      return
+    }
+
+    pendingItems.forEach((item) => {
+      if (fetchedReadyItems.some((readyItem) => readyItem.id === item.id)) {
+        return
+      }
+
+      preservedPendingItems.push(item)
+      preservedPendingIds.add(item.id)
+      preservedPendingJobIds.add(jobId)
+    })
+  })
+
+  if (!preservedPendingItems.length) {
+    return sanitizedFetched.slice(0, 12)
+  }
+
+  const merged = [
+    ...preservedPendingItems,
+    ...sanitizedFetched.filter((item) => {
+      const groupJobId = item.jobId || item.id
+      if (!preservedPendingJobIds.has(groupJobId)) {
+        return !preservedPendingIds.has(item.id)
+      }
+
+      if (isReadyHistoryItem(item)) {
+        return !preservedPendingIds.has(item.id)
+      }
+
+      return preservedPendingIds.has(item.id)
+    }),
+  ]
+
+  return merged.slice(0, 12)
 }
 
 function buildFloatingTrackFromHistory(item: HistoryItem): FloatingPhoneTrack {
@@ -574,6 +682,45 @@ function buildFloatingTracksFromJob(job: SongJob, locale: Locale): FloatingPhone
     downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
     duration: track.duration,
   }))
+}
+
+function isGeneratingShowcaseSession(session: ShowcaseSessionContext | null) {
+  if (!session || session.mode !== 'job' || !session.jobId) {
+    return false
+  }
+
+  if (typeof session.isGenerating === 'boolean') {
+    return session.isGenerating
+  }
+
+  if ((session.generationProgress ?? 0) < 100) {
+    return true
+  }
+
+  return !(session.tracks && session.tracks.some((track) => track.audioUrl))
+}
+
+function normalizeShowcaseSession(context: ShowcaseSessionContext) {
+  if (context.mode !== 'job' || !context.jobId) {
+    return {
+      ...context,
+      isGenerating: context.isGenerating ?? false,
+    }
+  }
+
+  return {
+    ...context,
+    isGenerating: typeof context.isGenerating === 'boolean' ? context.isGenerating : isGeneratingShowcaseSession(context),
+  }
+}
+
+function getShowcaseEntryPath(locale: Locale) {
+  const currentSession = loadShowcaseSession()
+  if (currentSession?.mode === 'job' && currentSession.jobId && isGeneratingShowcaseSession(currentSession)) {
+    return withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(currentSession.jobId)}`)
+  }
+
+  return withLocale(locale, '/how-it-works')
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -962,7 +1109,7 @@ function withLocale(locale: Locale, path = '') {
   return path ? `/zh${path}` : '/zh'
 }
 
-function useIsMobileViewport(query = '(max-width: 720px)') {
+function useIsMobileViewport(query = '(max-width: 720px), ((pointer: coarse) and (hover: none) and (max-height: 560px))') {
   const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false))
 
   useEffect(() => {
@@ -991,7 +1138,7 @@ function saveShowcaseSession(context: ShowcaseSessionContext) {
     return
   }
 
-  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(context))
+  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(normalizeShowcaseSession(context)))
 }
 
 function loadShowcaseSession() {
@@ -1150,7 +1297,7 @@ function App() {
             },
           })
           // #endregion
-          setSongHistory(nextItems)
+          setSongHistory((current) => mergeMemberHistoryItems(current, nextItems))
         }
       } catch (error) {
         if (!disposed) {
@@ -1161,8 +1308,25 @@ function App() {
 
     void loadMemberSongs()
 
+    const handleRefresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      void loadMemberSongs()
+    }
+
+    const timer = window.setInterval(() => {
+      void loadMemberSongs()
+    }, 5000)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleRefresh)
+
     return () => {
       disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleRefresh)
     }
   }, [activeMemberEmail, activeMemberToken])
 
@@ -1226,6 +1390,61 @@ function App() {
       return
     }
 
+    let disposed = false
+
+    const syncActiveShowcaseSession = async () => {
+      const currentSession = loadShowcaseSession()
+      if (!isGeneratingShowcaseSession(currentSession) || !currentSession?.jobId) {
+        return
+      }
+
+      try {
+        const response = await fetch(apiUrl(`/api/jobs/${currentSession.jobId}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+        if (!response.ok) {
+          return
+        }
+
+        if (disposed) {
+          return
+        }
+
+        const nextSession = buildShowcaseSessionFromJob(result as SongJob, modalLocale, currentSession)
+        saveShowcaseSession(nextSession)
+      } catch {
+        // Keep the last known Showcase session until the next successful sync.
+      }
+    }
+
+    void syncActiveShowcaseSession()
+
+    const handleRefresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      void syncActiveShowcaseSession()
+    }
+
+    const timer = window.setInterval(() => {
+      void syncActiveShowcaseSession()
+    }, 5000)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleRefresh)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleRefresh)
+    }
+  }, [modalLocale])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
     if (!authSession) {
       window.localStorage.removeItem(AUTH_SESSION_KEY)
       return
@@ -1251,6 +1470,17 @@ function App() {
     setSongHistory((current) => {
       const next = [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 12)
       return next
+    })
+  }, [])
+
+  const addPendingMemberSongs = useCallback((items: HistoryItem[]) => {
+    if (!items.length) {
+      return
+    }
+
+    setSongHistory((current) => {
+      const existingIds = new Set(items.map((item) => item.id))
+      return [...items, ...current.filter((entry) => !existingIds.has(entry.id))].slice(0, 12)
     })
   }, [])
 
@@ -1413,6 +1643,7 @@ function App() {
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
               authSession={authSession}
+              onAddPendingMemberSongs={addPendingMemberSongs}
             />
           ))}
         />
@@ -1520,6 +1751,7 @@ function App() {
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
               authSession={authSession}
+              onAddPendingMemberSongs={addPendingMemberSongs}
             />
           }
         />
@@ -1960,7 +2192,7 @@ function SiteLayout({
     {
       key: 'how',
       label: copy(locale, { zh: '产品展示', en: 'Showcase' }),
-      to: withLocale(locale, '/how-it-works'),
+      to: getShowcaseEntryPath(locale),
     },
     {
       key: 'styles',
@@ -2040,7 +2272,9 @@ function SiteLayout({
               className="ghost-button locale-switch"
               onClick={() =>
                 navigate(
-                  locale === 'zh'
+                  active === 'how'
+                    ? getShowcaseEntryPath(locale === 'zh' ? 'en' : 'zh')
+                    : locale === 'zh'
                     ? withLocale('en', active === 'home' ? '' : activeToPath(active))
                     : withLocale('zh', active === 'home' ? '' : activeToPath(active)),
                 )
@@ -2111,7 +2345,7 @@ function SiteLayout({
                 <button
                   type="button"
                   className="home-showcase-float-button"
-                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  onClick={() => navigate(getShowcaseEntryPath(locale))}
                 >
                   <span className="home-showcase-float-button-text">
                     {copy(locale, { zh: '去看求婚成功的歌曲', en: 'See Successful Proposal Songs' })}
@@ -2241,7 +2475,7 @@ function HomeSocialLinksSection({ locale }: { locale: Locale }) {
   )
 }
 
-function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession }: HomePageProps) {
+function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession, onAddPendingMemberSongs }: HomePageProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -2348,6 +2582,15 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
       }
 
       if (isMobileViewport) {
+        onAddPendingMemberSongs(buildPendingHistoryItems({
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          languageLabel,
+          styleLabel,
+          vocalLabel,
+          lyricSnippet: initialLyrics,
+        }))
         saveShowcaseSession({
           mode: 'job',
           jobId: result.jobId,
@@ -2359,11 +2602,21 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
             en: 'Lyrics have entered the generation flow. Showcase will keep showing the lyrics and progress here.',
           }),
           generationProgress: 12,
+          isGenerating: true,
           tracks: [],
         })
         setShowMobileStoryPrompt(false)
         navigate(withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(result.jobId)}`))
       } else {
+        onAddPendingMemberSongs(buildPendingHistoryItems({
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          languageLabel,
+          styleLabel,
+          vocalLabel,
+          lyricSnippet: initialLyrics,
+        }))
         onUpsertFloatingPlayer({
           key: result.jobId,
           locale,
@@ -2443,7 +2696,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <button
                   type="button"
                   className="home-app-card-arrow"
-                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  onClick={() => navigate(getShowcaseEntryPath(locale))}
                   aria-label={copy(locale, { zh: '查看样片', en: 'View showcase' })}
                 >
                   ›
@@ -2824,6 +3077,46 @@ function computeGenerationProgress(job: SongJob | null, now = Date.now()) {
   return Math.min(96, (Math.max(0, now - safeStartedAt) / 120000) * 100)
 }
 
+function buildShowcaseSessionFromJob(job: SongJob, locale: Locale, currentSession: ShowcaseSessionContext | null) {
+  const nextLyrics = job.lyrics || currentSession?.lyrics || ''
+  const nextStatusText = job.error || getJobStatusLabel(locale, job.status, job.callbackEnabled)
+  const nextTracks: ShowcaseSessionTrack[] = job.status === 'ready'
+    ? (job.tracks ?? []).map((track, index) => ({
+        id: buildTrackHistoryId(job.id, index),
+        title: track.title || job.title || copy(locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` }),
+        meta: copy(locale, { zh: `生成版本 ${index + 1}`, en: `Generated version ${index + 1}` }),
+        blurb: summarizeStoryText(nextLyrics, copy(locale, {
+          zh: '歌曲已完成，点击即可播放。',
+          en: 'The song is ready. Tap to play.',
+        })),
+        audioUrl: getSongStreamUrl(buildTrackHistoryId(job.id, index)),
+        downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
+      }))
+    : [
+        {
+          id: job.id,
+          title: job.title || currentSession?.title || 'MelodyVow',
+          meta: currentSession?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+          blurb: nextStatusText,
+          audioUrl: '',
+          downloadUrl: '',
+        },
+      ]
+
+  return {
+    mode: 'job' as const,
+    jobId: job.id,
+    title: job.title || currentSession?.title || 'MelodyVow',
+    subtitle: currentSession?.subtitle || '',
+    lyrics: nextLyrics,
+    statusText: nextStatusText,
+    generationProgress: computeGenerationProgress(job),
+    isGenerating: job.status !== 'ready' && job.status !== 'error',
+    tracks: nextTracks,
+    activeTrackId: nextTracks[0]?.id || '',
+  }
+}
+
 function buildFloatingPlayerPayloadFromJob(job: SongJob, locale: Locale, draft: SongDraft, error = '', autoPlay = false): FloatingPhonePlayerPayload {
   const isGenerating = job.status !== 'ready' && job.status !== 'error'
   const subtitleParts = [
@@ -2946,13 +3239,14 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   useEffect(() => {
     const mode = searchParams.get('mode')
     const showcaseSession = loadShowcaseSession()
+    const shouldResumeGeneratingJob = !mode && isShowcaseMobile && isGeneratingShowcaseSession(showcaseSession)
 
-    if (!isShowcaseMobile || !mode) {
+    if (!isShowcaseMobile) {
       setDisplayMode('demo')
       return
     }
 
-    if (mode === 'job') {
+    if (mode === 'job' || shouldResumeGeneratingJob) {
       const jobId = searchParams.get('job') || showcaseSession?.jobId || ''
       const nextTracks = showcaseSession?.tracks?.length
         ? showcaseSession.tracks
@@ -2979,7 +3273,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
         en: 'Showcase is now carrying the lyrics and generation progress.',
       }))
       setShowcaseGenerationProgress(showcaseSession?.generationProgress ?? 12)
-      setShowcaseIsGenerating(true)
+      setShowcaseIsGenerating(showcaseSession?.isGenerating ?? true)
       return
     }
 
@@ -3025,30 +3319,9 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           return
         }
 
-        const nextLyrics = job.lyrics || loadShowcaseSession()?.lyrics || ''
-        const nextStatusText = job.error || getJobStatusLabel(locale, job.status, job.callbackEnabled)
-        const nextTracks: ShowcaseSessionTrack[] = job.status === 'ready'
-          ? (job.tracks ?? []).map((track, index) => ({
-              id: buildTrackHistoryId(job.id, index),
-              title: track.title || job.title || copy(locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` }),
-              meta: copy(locale, { zh: `生成版本 ${index + 1}`, en: `Generated version ${index + 1}` }),
-              blurb: summarizeStoryText(nextLyrics, copy(locale, {
-                zh: '歌曲已完成，点击即可播放。',
-                en: 'The song is ready. Tap to play.',
-              })),
-              audioUrl: getSongStreamUrl(buildTrackHistoryId(job.id, index)),
-              downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
-            }))
-          : [
-              {
-                id: job.id,
-                title: job.title || loadShowcaseSession()?.title || 'MelodyVow',
-                meta: loadShowcaseSession()?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
-                blurb: nextStatusText,
-                audioUrl: '',
-                downloadUrl: '',
-              },
-            ]
+        const currentSession = loadShowcaseSession()
+        const nextSession = buildShowcaseSessionFromJob(job, locale, currentSession)
+        const nextTracks = nextSession.tracks || []
 
         if (job.status === 'ready' && (allowAutoplay || showcaseLastJobStatusRef.current !== 'ready')) {
           showcaseShouldAutoplayRef.current = true
@@ -3075,23 +3348,13 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
 
         setDisplayTracks(nextTracks)
         setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
-        setShowcaseLyrics(nextLyrics)
-        setShowcaseStatusText(nextStatusText)
-        setShowcaseGenerationProgress(computeGenerationProgress(job))
-        setShowcaseIsGenerating(job.status !== 'ready' && job.status !== 'error')
+        setShowcaseLyrics(nextSession.lyrics || '')
+        setShowcaseStatusText(nextSession.statusText || '')
+        setShowcaseGenerationProgress(nextSession.generationProgress ?? 0)
+        setShowcaseIsGenerating(Boolean(nextSession.isGenerating))
         setError(job.status === 'error' ? (job.error || copy(locale, { zh: '生成失败，请稍后重试。', en: 'Generation failed. Please try again later.' })) : '')
 
-        saveShowcaseSession({
-          mode: 'job',
-          jobId,
-          title: job.title || loadShowcaseSession()?.title || 'MelodyVow',
-          subtitle: loadShowcaseSession()?.subtitle || '',
-          lyrics: nextLyrics,
-          statusText: nextStatusText,
-          generationProgress: computeGenerationProgress(job),
-          tracks: nextTracks,
-          activeTrackId: nextTracks[0]?.id || '',
-        })
+        saveShowcaseSession(nextSession)
         showcaseLastJobStatusRef.current = job.status
       } catch (loadError) {
         if (!disposed) {
@@ -4211,6 +4474,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
               en: 'This song is still generating. Showcase will keep showing progress and autoplay once it is ready.',
             }),
             generationProgress: 72,
+            isGenerating: true,
             tracks: [],
             activeTrackId: '',
           })
@@ -4256,6 +4520,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             en: 'Member songs now play inside Showcase, where the lyrics can stay visible.',
           }),
           generationProgress: 100,
+          isGenerating: false,
           activeTrackId: item.id,
           tracks: mobileTracks,
         })
