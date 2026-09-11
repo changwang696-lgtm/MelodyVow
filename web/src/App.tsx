@@ -438,6 +438,7 @@ type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
 const SHOWCASE_SESSION_KEY = 'melodyvow-showcase-context'
+const SHOWCASE_GENERATING_SESSION_KEY = 'melodyvow-showcase-generating-context'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const PUBLIC_SITE_CONFIG_KEY = 'melodyvow-public-site-config'
@@ -591,70 +592,75 @@ function isPendingHistoryItem(item: HistoryItem) {
   return Boolean(item.jobId) && !isReadyHistoryItem(item) && !pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
 }
 
+function getHistoryItemTimestamp(item: HistoryItem) {
+  const timestamp = item.createdAt ? new Date(item.createdAt).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function sortHistoryItemsByNewest(items: HistoryItem[]) {
+  return [...items].sort((left, right) => getHistoryItemTimestamp(right) - getHistoryItemTimestamp(left))
+}
+
+function sortHistoryItemsByTrack(items: HistoryItem[]) {
+  return [...items].sort((left, right) => {
+    const leftTrackIndex = typeof left.trackIndex === 'number' ? left.trackIndex : Number.MAX_SAFE_INTEGER
+    const rightTrackIndex = typeof right.trackIndex === 'number' ? right.trackIndex : Number.MAX_SAFE_INTEGER
+    if (leftTrackIndex !== rightTrackIndex) {
+      return leftTrackIndex - rightTrackIndex
+    }
+
+    return getHistoryItemTimestamp(right) - getHistoryItemTimestamp(left)
+  })
+}
+
+function buildPendingHistoryItemsFromSeed(item: HistoryItem) {
+  const jobId = String(item.jobId || item.id || '').trim()
+  if (!jobId) {
+    return [] as HistoryItem[]
+  }
+
+  return buildPendingHistoryItems({
+    jobId,
+    title: item.title,
+    subtitle: item.subtitle,
+    languageLabel: item.languageLabel,
+    styleLabel: item.styleLabel,
+    vocalLabel: item.vocalLabel,
+    lyricSnippet: item.lyricSnippet,
+  }).map((entry) => ({
+    ...entry,
+    createdAt: item.createdAt || entry.createdAt,
+  }))
+}
+
 function mergeMemberHistoryItems(currentItems: HistoryItem[], fetchedItems: HistoryItem[]) {
   const sanitizedCurrent = currentItems.map(sanitizeHistoryItem)
   const sanitizedFetched = fetchedItems.map(sanitizeHistoryItem)
-  const currentPendingByJob = new Map<string, HistoryItem[]>()
+  const allPendingItems = sortHistoryItemsByNewest([
+    ...sanitizedCurrent.filter(isPendingHistoryItem),
+    ...sanitizedFetched.filter(isPendingHistoryItem),
+  ])
+  const activePendingSeed = allPendingItems[0]
+  const activePendingJobId = String(activePendingSeed?.jobId || '').trim()
+  const readyItems = sortHistoryItemsByNewest(sanitizedFetched.filter(isReadyHistoryItem))
 
-  sanitizedCurrent.forEach((item) => {
-    const groupJobId = String(item.jobId || '').trim()
-    if (!groupJobId || !isPendingHistoryItem(item)) {
-      return
-    }
-
-    const group = currentPendingByJob.get(groupJobId) || []
-    group.push(item)
-    currentPendingByJob.set(groupJobId, group)
-  })
-
-  if (!currentPendingByJob.size) {
-    return sanitizedFetched.slice(0, 12)
+  if (!activePendingJobId) {
+    return readyItems
   }
 
-  const preservedPendingItems: HistoryItem[] = []
-  const preservedPendingIds = new Set<string>()
-  const preservedPendingJobIds = new Set<string>()
+  const readyItemsForActiveJob = readyItems.filter((item) => (item.jobId || item.id) === activePendingJobId)
+  const pendingSlots = sortHistoryItemsByNewest(
+    sanitizedCurrent.filter((item) => item.jobId === activePendingJobId && isPendingHistoryItem(item)),
+  )
+  const fallbackPendingSlots = pendingSlots.length ? pendingSlots : buildPendingHistoryItemsFromSeed(activePendingSeed)
+  const readyIdsForActiveJob = new Set(readyItemsForActiveJob.map((item) => item.id))
+  const activeJobItems = sortHistoryItemsByTrack([
+    ...readyItemsForActiveJob,
+    ...fallbackPendingSlots.filter((item) => !readyIdsForActiveJob.has(item.id)),
+  ]).slice(0, 2)
+  const otherReadyItems = readyItems.filter((item) => (item.jobId || item.id) !== activePendingJobId)
 
-  currentPendingByJob.forEach((pendingItems, jobId) => {
-    const expectedTrackCount = Math.max(...pendingItems.map((item) => item.trackCount || 0), pendingItems.length, 2)
-    const fetchedReadyItems = sanitizedFetched.filter((item) => (item.jobId || item.id) === jobId && isReadyHistoryItem(item))
-
-    if (fetchedReadyItems.length >= expectedTrackCount) {
-      return
-    }
-
-    pendingItems.forEach((item) => {
-      if (fetchedReadyItems.some((readyItem) => readyItem.id === item.id)) {
-        return
-      }
-
-      preservedPendingItems.push(item)
-      preservedPendingIds.add(item.id)
-      preservedPendingJobIds.add(jobId)
-    })
-  })
-
-  if (!preservedPendingItems.length) {
-    return sanitizedFetched.slice(0, 12)
-  }
-
-  const merged = [
-    ...preservedPendingItems,
-    ...sanitizedFetched.filter((item) => {
-      const groupJobId = item.jobId || item.id
-      if (!preservedPendingJobIds.has(groupJobId)) {
-        return !preservedPendingIds.has(item.id)
-      }
-
-      if (isReadyHistoryItem(item)) {
-        return !preservedPendingIds.has(item.id)
-      }
-
-      return preservedPendingIds.has(item.id)
-    }),
-  ]
-
-  return merged.slice(0, 12)
+  return [...activeJobItems, ...otherReadyItems]
 }
 
 function buildFloatingTrackFromHistory(item: HistoryItem): FloatingPhoneTrack {
@@ -715,7 +721,7 @@ function normalizeShowcaseSession(context: ShowcaseSessionContext) {
 }
 
 function getShowcaseEntryPath(locale: Locale) {
-  const currentSession = loadShowcaseSession()
+  const currentSession = loadGeneratingShowcaseSession()
   if (currentSession?.mode === 'job' && currentSession.jobId && isGeneratingShowcaseSession(currentSession)) {
     return withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(currentSession.jobId)}`)
   }
@@ -1138,7 +1144,12 @@ function saveShowcaseSession(context: ShowcaseSessionContext) {
     return
   }
 
-  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(normalizeShowcaseSession(context)))
+  const normalized = normalizeShowcaseSession(context)
+  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(normalized))
+
+  if (normalized.mode === 'job' && normalized.jobId) {
+    window.sessionStorage.setItem(SHOWCASE_GENERATING_SESSION_KEY, JSON.stringify(normalized))
+  }
 }
 
 function loadShowcaseSession() {
@@ -1153,6 +1164,37 @@ function loadShowcaseSession() {
     }
 
     return JSON.parse(raw) as ShowcaseSessionContext
+  } catch {
+    return null
+  }
+}
+
+function saveGeneratingShowcaseSession(context: ShowcaseSessionContext) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const normalized = normalizeShowcaseSession(context)
+  if (normalized.mode !== 'job' || !normalized.jobId) {
+    return
+  }
+
+  window.sessionStorage.setItem(SHOWCASE_GENERATING_SESSION_KEY, JSON.stringify(normalized))
+}
+
+function loadGeneratingShowcaseSession() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SHOWCASE_GENERATING_SESSION_KEY)
+    if (raw) {
+      return JSON.parse(raw) as ShowcaseSessionContext
+    }
+
+    const fallback = loadShowcaseSession()
+    return fallback?.mode === 'job' && fallback.jobId ? fallback : null
   } catch {
     return null
   }
@@ -1393,7 +1435,7 @@ function App() {
     let disposed = false
 
     const syncActiveShowcaseSession = async () => {
-      const currentSession = loadShowcaseSession()
+      const currentSession = loadGeneratingShowcaseSession()
       if (!isGeneratingShowcaseSession(currentSession) || !currentSession?.jobId) {
         return
       }
@@ -1410,7 +1452,12 @@ function App() {
         }
 
         const nextSession = buildShowcaseSessionFromJob(result as SongJob, modalLocale, currentSession)
-        saveShowcaseSession(nextSession)
+        saveGeneratingShowcaseSession(nextSession)
+
+        const currentPlaybackSession = loadShowcaseSession()
+        if (currentPlaybackSession?.mode === 'job' && currentPlaybackSession.jobId === nextSession.jobId) {
+          saveShowcaseSession(nextSession)
+        }
       } catch {
         // Keep the last known Showcase session until the next successful sync.
       }
@@ -1468,7 +1515,7 @@ function App() {
 
   const saveHistory = useCallback((item: HistoryItem) => {
     setSongHistory((current) => {
-      const next = [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 12)
+      const next = [item, ...current.filter((entry) => entry.id !== item.id)]
       return next
     })
   }, [])
@@ -1480,7 +1527,8 @@ function App() {
 
     setSongHistory((current) => {
       const existingIds = new Set(items.map((item) => item.id))
-      return [...items, ...current.filter((entry) => !existingIds.has(entry.id))].slice(0, 12)
+      const readyEntries = current.filter((entry) => !isPendingHistoryItem(entry))
+      return [...items, ...readyEntries.filter((entry) => !existingIds.has(entry.id))]
     })
   }, [])
 
@@ -3173,10 +3221,12 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     zh: '点击下方歌单，直接在这里试听 MelodyVow 的样片。',
     en: 'Tap the list below to preview MelodyVow samples here.',
   }))
+  const [pendingReadyNotice, setPendingReadyNotice] = useState('')
   const [showcaseLyrics, setShowcaseLyrics] = useState('')
   const showcaseAudioRef = useRef<HTMLAudioElement | null>(null)
   const showcaseShouldAutoplayRef = useRef(false)
   const showcaseLastJobStatusRef = useRef('')
+  const queuedReadyJobSessionRef = useRef<ShowcaseSessionContext | null>(null)
   const activeTrack = displayTracks.find((track) => track.id === activeTrackId) ?? displayTracks[0] ?? null
 
   function buildDemoTracks(items: ShowcaseTrack[]) {
@@ -3188,6 +3238,49 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       audioUrl: track.audioUrl,
       downloadUrl: track.audioUrl,
     }))
+  }
+
+  function applyShowcaseSession(session: ShowcaseSessionContext) {
+    if (session.mode === 'history' && session.tracks?.length) {
+      setDisplayMode('history')
+      setDisplayTracks(session.tracks)
+      setActiveTrackId(session.activeTrackId || session.tracks[0]?.id || '')
+      setShowcaseLyrics(session.lyrics || '')
+      setShowcaseStatusText(session.statusText || copy(locale, {
+        zh: '会员中心歌曲会统一在这里播放，并同时显示歌词。',
+        en: 'Member songs now play here with lyrics kept visible.',
+      }))
+      setShowcaseGenerationProgress(100)
+      setShowcaseIsGenerating(false)
+      return
+    }
+
+    const nextTracks = session.tracks?.length
+      ? session.tracks
+      : [
+          {
+            id: session.jobId || 'pending-job',
+            title: session.title || 'MelodyVow',
+            meta: session.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+            blurb: session.statusText || copy(locale, {
+              zh: '歌词与旋律已经进入生成流程，请稍候。',
+              en: 'Lyrics and melody are in the generation flow. Please wait.',
+            }),
+            audioUrl: '',
+            downloadUrl: '',
+          },
+        ]
+
+    setDisplayMode('job')
+    setDisplayTracks(nextTracks)
+    setActiveTrackId(session.activeTrackId || nextTracks[0]?.id || '')
+    setShowcaseLyrics(session.lyrics || '')
+    setShowcaseStatusText(session.statusText || copy(locale, {
+      zh: 'Showcase 正在承接歌词与生成进度。',
+      en: 'Showcase is now carrying the lyrics and generation progress.',
+    }))
+    setShowcaseGenerationProgress(session.generationProgress ?? 12)
+    setShowcaseIsGenerating(session.isGenerating ?? true)
   }
 
   useEffect(() => {
@@ -3239,7 +3332,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   useEffect(() => {
     const mode = searchParams.get('mode')
     const showcaseSession = loadShowcaseSession()
-    const shouldResumeGeneratingJob = !mode && isShowcaseMobile && isGeneratingShowcaseSession(showcaseSession)
+    const generatingSession = loadGeneratingShowcaseSession()
+    const shouldResumeGeneratingJob = !mode && isShowcaseMobile && isGeneratingShowcaseSession(generatingSession)
 
     if (!isShowcaseMobile) {
       setDisplayMode('demo')
@@ -3247,47 +3341,25 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     }
 
     if (mode === 'job' || shouldResumeGeneratingJob) {
-      const jobId = searchParams.get('job') || showcaseSession?.jobId || ''
-      const nextTracks = showcaseSession?.tracks?.length
-        ? showcaseSession.tracks
-        : [
-            {
-              id: jobId || 'pending-job',
-              title: showcaseSession?.title || 'MelodyVow',
-              meta: showcaseSession?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
-              blurb: showcaseSession?.statusText || copy(locale, {
-                zh: '歌词与旋律已经进入生成流程，请稍候。',
-                en: 'Lyrics and melody are in the generation flow. Please wait.',
-              }),
-              audioUrl: '',
-              downloadUrl: '',
-            },
-          ]
-
-      setDisplayMode('job')
-      setDisplayTracks(nextTracks)
-      setActiveTrackId(showcaseSession?.activeTrackId || nextTracks[0]?.id || '')
-      setShowcaseLyrics(showcaseSession?.lyrics || '')
-      setShowcaseStatusText(showcaseSession?.statusText || copy(locale, {
-        zh: 'Showcase 正在承接歌词与生成进度。',
-        en: 'Showcase is now carrying the lyrics and generation progress.',
-      }))
-      setShowcaseGenerationProgress(showcaseSession?.generationProgress ?? 12)
-      setShowcaseIsGenerating(showcaseSession?.isGenerating ?? true)
+      const nextSession = generatingSession || {
+        mode: 'job' as const,
+        jobId: searchParams.get('job') || showcaseSession?.jobId || '',
+        title: showcaseSession?.title || 'MelodyVow',
+        subtitle: showcaseSession?.subtitle || '',
+        lyrics: showcaseSession?.lyrics || '',
+        statusText: showcaseSession?.statusText || '',
+        generationProgress: showcaseSession?.generationProgress ?? 12,
+        isGenerating: showcaseSession?.isGenerating ?? true,
+        tracks: showcaseSession?.tracks || [],
+        activeTrackId: showcaseSession?.activeTrackId || '',
+      }
+      applyShowcaseSession(nextSession)
+      saveShowcaseSession(nextSession)
       return
     }
 
     if (mode === 'history' && showcaseSession?.mode === 'history' && showcaseSession.tracks?.length) {
-      setDisplayMode('history')
-      setDisplayTracks(showcaseSession.tracks)
-      setActiveTrackId(showcaseSession.activeTrackId || showcaseSession.tracks[0]?.id || '')
-      setShowcaseLyrics(showcaseSession.lyrics || '')
-      setShowcaseStatusText(showcaseSession.statusText || copy(locale, {
-        zh: '会员中心歌曲会统一在这里播放，并同时显示歌词。',
-        en: 'Member songs now play here with lyrics kept visible.',
-      }))
-      setShowcaseGenerationProgress(100)
-      setShowcaseIsGenerating(false)
+      applyShowcaseSession(showcaseSession)
       return
     }
 
@@ -3295,11 +3367,11 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   }, [isShowcaseMobile, locale, searchParams])
 
   useEffect(() => {
-    if (!isShowcaseMobile || displayMode !== 'job') {
+    if (!isShowcaseMobile) {
       return
     }
 
-    const jobId = searchParams.get('job') || loadShowcaseSession()?.jobId || ''
+    const jobId = searchParams.get('job') || loadGeneratingShowcaseSession()?.jobId || ''
     if (!jobId) {
       return
     }
@@ -3319,12 +3391,31 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           return
         }
 
-        const currentSession = loadShowcaseSession()
+        const currentSession = loadGeneratingShowcaseSession()
         const nextSession = buildShowcaseSessionFromJob(job, locale, currentSession)
         const nextTracks = nextSession.tracks || []
+        const audio = showcaseAudioRef.current
+        const currentPlaybackSession = loadShowcaseSession()
+        const isViewingSameJob = displayMode === 'job' && (currentPlaybackSession?.jobId === jobId || searchParams.get('job') === jobId)
+        const isPlayingAnotherTrack = Boolean(audio && !audio.paused && displayMode !== 'job')
 
         if (job.status === 'ready' && (allowAutoplay || showcaseLastJobStatusRef.current !== 'ready')) {
-          showcaseShouldAutoplayRef.current = true
+          if (!isPlayingAnotherTrack || isViewingSameJob) {
+            showcaseShouldAutoplayRef.current = true
+            queuedReadyJobSessionRef.current = null
+            setPendingReadyNotice('')
+            applyShowcaseSession(nextSession)
+            saveShowcaseSession(nextSession)
+          } else {
+            queuedReadyJobSessionRef.current = nextSession
+            setPendingReadyNotice(copy(locale, {
+              zh: '新生成的歌曲已完成，当前歌曲播放结束后会自动切换播放。',
+              en: 'Your generated song is ready and will start after the current track finishes.',
+            }))
+          }
+        } else if (isViewingSameJob) {
+          applyShowcaseSession(nextSession)
+          saveShowcaseSession(nextSession)
         }
 
         // #region debug-point B:showcase-job-sync
@@ -3346,15 +3437,8 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
         })
         // #endregion
 
-        setDisplayTracks(nextTracks)
-        setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
-        setShowcaseLyrics(nextSession.lyrics || '')
-        setShowcaseStatusText(nextSession.statusText || '')
-        setShowcaseGenerationProgress(nextSession.generationProgress ?? 0)
-        setShowcaseIsGenerating(Boolean(nextSession.isGenerating))
         setError(job.status === 'error' ? (job.error || copy(locale, { zh: '生成失败，请稍后重试。', en: 'Generation failed. Please try again later.' })) : '')
-
-        saveShowcaseSession(nextSession)
+        saveGeneratingShowcaseSession(nextSession)
         showcaseLastJobStatusRef.current = job.status
       } catch (loadError) {
         if (!disposed) {
@@ -3399,6 +3483,15 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     const handleEnded = () => {
       setShowcasePlaying(false)
       setShowcaseProgress(100)
+
+      const queuedSession = queuedReadyJobSessionRef.current
+      if (queuedSession?.mode === 'job' && queuedSession.tracks?.some((track) => track.audioUrl)) {
+        queuedReadyJobSessionRef.current = null
+        setPendingReadyNotice('')
+        showcaseShouldAutoplayRef.current = true
+        applyShowcaseSession(queuedSession)
+        saveShowcaseSession(queuedSession)
+      }
     }
 
     audio.addEventListener('timeupdate', handleTimeUpdate)
@@ -3622,6 +3715,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
               </div>
             </div>
           </div>
+          {pendingReadyNotice ? <p className="showcase-mobile-ready-notice">{pendingReadyNotice}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
           <article className="glass-card showcase-mobile-lyrics">
             <div className="showcase-mobile-lyrics-shell">
