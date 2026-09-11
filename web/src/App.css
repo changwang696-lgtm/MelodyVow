@@ -3109,6 +3109,34 @@
   margin: 0;
 }
 
+.account-member-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.account-mini-logout-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 123, 166, 0.96), rgba(255, 155, 92, 0.96));
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 22px rgba(255, 101, 151, 0.18);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.account-mini-logout-button:hover {
+  transform: translateY(-1px);
+}
+
 .account-member-email {
   margin: 8px 0 0;
 }
@@ -3882,6 +3910,17 @@
   .site-shell-account .account-welcome-card h3,
   .site-shell-account .account-song-title {
     color: rgba(20, 12, 24, 0.92);
+  }
+
+  .site-shell-account .account-member-card-head {
+    align-items: center;
+  }
+
+  .site-shell-account .account-mini-logout-button {
+    min-height: 27px;
+    padding: 0 9px;
+    font-size: 0.64rem;
+    box-shadow: 0 8px 16px rgba(255, 101, 151, 0.14);
   }
 
   .site-shell-account .account-member-email,

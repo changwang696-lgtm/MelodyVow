@@ -2,6 +2,7 @@ import 'dotenv/config'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { getDatabaseConnectionString, PostgresPersistence } from './postgres-persistence.mjs'
@@ -2340,6 +2341,7 @@ function buildSongFileName(song) {
 async function proxySongAudio(req, res, disposition = 'inline') {
   const songId = String(req.params.songId || '').trim()
   const { storedSong, sourceUrl } = resolveSongSource(songId)
+  const rangeHeader = String(req.headers.range || '').trim()
 
   // #region debug-point C:proxy-song-audio
   reportDebugEvent({
@@ -2357,6 +2359,7 @@ async function proxySongAudio(req, res, disposition = 'inline') {
       storedSongSourceDownloadUrl: storedSong?.sourceDownloadUrl || '',
       jobId: storedSong?.jobId || '',
       trackIndex: storedSong?.trackIndex ?? -1,
+      rangeHeader,
     },
   })
   // #endregion
@@ -2367,18 +2370,47 @@ async function proxySongAudio(req, res, disposition = 'inline') {
   }
 
   try {
-    const upstream = await fetch(sourceUrl)
+    const upstream = await fetch(sourceUrl, {
+      headers: rangeHeader ? { Range: rangeHeader } : undefined,
+    })
     if (!upstream.ok) {
       throw new Error(`upstream_${upstream.status}`)
     }
 
-    const audioBuffer = Buffer.from(await upstream.arrayBuffer())
     const fileName = buildSongFileName(storedSong)
+    const contentType = upstream.headers.get('content-type') || 'audio/mpeg'
+    const contentLength = upstream.headers.get('content-length')
+    const contentRange = upstream.headers.get('content-range')
+    const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes'
     res.setHeader('Cache-Control', 'no-store')
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'audio/mpeg')
-    res.setHeader('Content-Length', String(audioBuffer.length))
+    res.setHeader('Content-Type', contentType)
     res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`)
-    res.status(200).end(audioBuffer)
+    res.setHeader('Accept-Ranges', acceptRanges)
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength)
+    }
+    if (contentRange) {
+      res.setHeader('Content-Range', contentRange)
+    }
+
+    const upstreamBody = upstream.body ? Readable.fromWeb(upstream.body) : null
+    res.status(upstream.status)
+
+    if (!upstreamBody) {
+      res.end()
+      return
+    }
+
+    upstreamBody.on('error', (streamError) => {
+      if (!res.headersSent) {
+        res.status(502).json({ message: disposition === 'attachment' ? '下载歌曲失败，请稍后再试。' : '歌曲播放链接暂时不可用。' })
+        return
+      }
+
+      res.destroy(streamError)
+    })
+
+    upstreamBody.pipe(res)
   } catch (error) {
     // #region debug-point C:proxy-song-audio-error
     reportDebugEvent({
@@ -2389,6 +2421,7 @@ async function proxySongAudio(req, res, disposition = 'inline') {
         songId,
         disposition,
         sourceUrl,
+        rangeHeader,
         error: error instanceof Error ? error.message : 'unknown',
       },
     })

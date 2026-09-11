@@ -4841,7 +4841,16 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
       <section className="account-layout">
         <aside className="account-sidebar">
           <section className="glass-card account-member-card">
-            <h3>{displayName}</h3>
+            <div className="account-member-card-head">
+              <h3>{displayName}</h3>
+              <button
+                type="button"
+                className="account-mini-logout-button"
+                onClick={onLogout}
+              >
+                {copy(locale, { zh: '退出登录', en: 'Log out' })}
+              </button>
+            </div>
             <p className="account-member-email">{memberLabel}</p>
             <div className="tag-row">
               <span className="soft-pill accent">{currentPlanLabel} Member</span>
