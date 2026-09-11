@@ -3384,7 +3384,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   }, [isShowcaseMobile, locale, searchParams])
 
   useEffect(() => {
-    if (!isShowcaseMobile) {
+    if (!isShowcaseMobile || displayMode !== 'job') {
       return
     }
 
@@ -3706,7 +3706,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     }
 
     void tryPlay()
-  }, [activeTrack, locale])
+  }, [activeTrack?.id, activeTrack?.audioUrl, locale])
 
   useEffect(() => {
     const audio = showcaseAudioRef.current
