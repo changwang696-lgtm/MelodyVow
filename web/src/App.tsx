@@ -483,7 +483,7 @@ const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfi
 const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
-const DEBUG_SESSION_ID = 'song-playback-regression'
+const DEBUG_SESSION_ID = 'audio-stops-early'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
@@ -3241,6 +3241,23 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   }
 
   function applyShowcaseSession(session: ShowcaseSessionContext) {
+    // #region debug-point A:apply-showcase-session
+    reportDebugEvent({
+      hypothesisId: 'A',
+      location: 'web/src/App.tsx:ShowcasePage.applyShowcaseSession',
+      msg: '[DEBUG] Applying Showcase session into player state',
+      data: {
+        mode: session.mode,
+        jobId: session.jobId || '',
+        activeTrackId: session.activeTrackId || '',
+        trackCount: session.tracks?.length || 0,
+        firstTrackId: session.tracks?.[0]?.id || '',
+        firstTrackAudioUrl: session.tracks?.[0]?.audioUrl || '',
+        isGenerating: session.isGenerating ?? null,
+        generationProgress: session.generationProgress ?? null,
+      },
+    })
+    // #endregion
     if (session.mode === 'history' && session.tracks?.length) {
       setDisplayMode('history')
       setDisplayTracks(session.tracks)
@@ -3397,23 +3414,45 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
         const audio = showcaseAudioRef.current
         const currentPlaybackSession = loadShowcaseSession()
         const isViewingSameJob = displayMode === 'job' && (currentPlaybackSession?.jobId === jobId || searchParams.get('job') === jobId)
+        const canTakeOverVisiblePlayer = displayMode === 'job' && (isViewingSameJob || searchParams.get('mode') === 'job')
         const isPlayingAnotherTrack = Boolean(audio && !audio.paused && displayMode !== 'job')
 
+        // #region debug-point D:job-sync-branch
+        reportDebugEvent({
+          hypothesisId: 'D',
+          location: 'web/src/App.tsx:ShowcasePage.syncShowcaseJob:branch',
+          msg: '[DEBUG] Evaluated Showcase job sync branch',
+          data: {
+            jobId,
+            jobStatus: job.status,
+            displayMode,
+            currentPlaybackMode: currentPlaybackSession?.mode || '',
+            currentPlaybackJobId: currentPlaybackSession?.jobId || '',
+            isViewingSameJob,
+            canTakeOverVisiblePlayer,
+            isPlayingAnotherTrack,
+            audioPaused: audio ? audio.paused : null,
+            audioCurrentTime: audio ? Number(audio.currentTime || 0) : null,
+            audioSrc: audio?.currentSrc || audio?.src || '',
+          },
+        })
+        // #endregion
+
         if (job.status === 'ready' && (allowAutoplay || showcaseLastJobStatusRef.current !== 'ready')) {
-          if (!isPlayingAnotherTrack || isViewingSameJob) {
+          if (canTakeOverVisiblePlayer && (!isPlayingAnotherTrack || isViewingSameJob)) {
             showcaseShouldAutoplayRef.current = true
             queuedReadyJobSessionRef.current = null
             setPendingReadyNotice('')
             applyShowcaseSession(nextSession)
             saveShowcaseSession(nextSession)
-          } else {
+          } else if (isPlayingAnotherTrack) {
             queuedReadyJobSessionRef.current = nextSession
             setPendingReadyNotice(copy(locale, {
               zh: '新生成的歌曲已完成，当前歌曲播放结束后会自动切换播放。',
               en: 'Your generated song is ready and will start after the current track finishes.',
             }))
           }
-        } else if (isViewingSameJob) {
+        } else if (canTakeOverVisiblePlayer) {
           applyShowcaseSession(nextSession)
           saveShowcaseSession(nextSession)
         }
@@ -3473,14 +3512,59 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     }
 
     const handlePlay = () => {
+      // #region debug-point B:audio-play
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:play',
+        msg: '[DEBUG] Showcase audio play event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
       setShowcasePlaying(true)
     }
 
     const handlePause = () => {
+      // #region debug-point B:audio-pause
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:pause',
+        msg: '[DEBUG] Showcase audio pause event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          ended: audio.ended,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
       setShowcasePlaying(false)
     }
 
     const handleEnded = () => {
+      // #region debug-point C:audio-ended
+      reportDebugEvent({
+        hypothesisId: 'C',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:ended',
+        msg: '[DEBUG] Showcase audio ended event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          hasQueuedReadySession: Boolean(queuedReadyJobSessionRef.current?.jobId),
+          queuedReadyJobId: queuedReadyJobSessionRef.current?.jobId || '',
+        },
+      })
+      // #endregion
       setShowcasePlaying(false)
       setShowcaseProgress(100)
 
@@ -3494,18 +3578,65 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       }
     }
 
+    const handleAudioError = () => {
+      // #region debug-point B:audio-error
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:error',
+        msg: '[DEBUG] Showcase audio error event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          errorCode: audio.error?.code || null,
+          errorMessage: audio.error?.message || '',
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+    }
+
+    const handleAudioNetworkEvent = (eventName: string) => {
+      // #region debug-point B:audio-network
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: `web/src/App.tsx:ShowcasePage.audioEvents:${eventName}`,
+        msg: `[DEBUG] Showcase audio ${eventName} event fired`,
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          paused: audio.paused,
+          ended: audio.ended,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+    }
+
     audio.addEventListener('timeupdate', handleTimeUpdate)
     audio.addEventListener('play', handlePlay)
     audio.addEventListener('pause', handlePause)
     audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('error', handleAudioError)
+    audio.addEventListener('stalled', () => handleAudioNetworkEvent('stalled'))
+    audio.addEventListener('abort', () => handleAudioNetworkEvent('abort'))
+    audio.addEventListener('suspend', () => handleAudioNetworkEvent('suspend'))
+    audio.addEventListener('waiting', () => handleAudioNetworkEvent('waiting'))
+    audio.addEventListener('canplay', () => handleAudioNetworkEvent('canplay'))
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate)
       audio.removeEventListener('play', handlePlay)
       audio.removeEventListener('pause', handlePause)
       audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('error', handleAudioError)
     }
-  }, [])
+  }, [activeTrackId])
 
   useEffect(() => {
     const audio = showcaseAudioRef.current
@@ -3600,6 +3731,24 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       return
     }
 
+    // #region debug-point B:manual-play-click
+    reportDebugEvent({
+      hypothesisId: 'B',
+      location: 'web/src/App.tsx:ShowcasePage.handleMobileShowcasePlayback',
+      msg: '[DEBUG] User triggered Showcase mobile playback toggle',
+      data: {
+        activeTrackId: activeTrack.id,
+        activeTrackAudioUrl: activeTrack.audioUrl,
+        activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+        paused: audio.paused,
+        currentTime: Number(audio.currentTime || 0),
+        duration: Number(audio.duration || 0),
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        src: audio.currentSrc || audio.src || '',
+      },
+    })
+    // #endregion
     setError('')
 
     if (audio.paused) {
@@ -3620,6 +3769,21 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
   function handleSelectTrack(trackId: string) {
     const trackIndex = displayTracks.findIndex((track) => track.id === trackId)
     const nextTrack = displayTracks[trackIndex] ?? displayTracks[0]
+    // #region debug-point A:select-track
+    reportDebugEvent({
+      hypothesisId: 'A',
+      location: 'web/src/App.tsx:ShowcasePage.handleSelectTrack',
+      msg: '[DEBUG] User selected Showcase track',
+      data: {
+        requestedTrackId: trackId,
+        nextTrackId: nextTrack?.id || '',
+        nextTrackAudioUrl: nextTrack?.audioUrl || '',
+        displayMode,
+        displayTrackCount: displayTracks.length,
+        showcaseIsGenerating,
+      },
+    })
+    // #endregion
     setActiveTrackId(trackId)
     setError('')
 
