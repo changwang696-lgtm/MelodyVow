@@ -1229,6 +1229,7 @@ function ScrollManager() {
 
 function App() {
   const location = useLocation()
+  const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const [draft, setDraft] = useState<SongDraft>({
     groom: '',
@@ -1296,6 +1297,59 @@ function App() {
   useEffect(() => {
     document.documentElement.lang = modalLocale === 'en' ? 'en' : 'zh-CN'
   }, [modalLocale])
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search)
+    const googleStatus = String(searchParams.get('google') || '').trim()
+
+    if (!googleStatus) {
+      return
+    }
+
+    const callbackLocale: Locale = location.pathname.startsWith('/zh') ? 'zh' : 'en'
+    const redirectToAuth = () => {
+      navigate(withLocale(callbackLocale, '/auth'), { replace: true })
+    }
+
+    if (googleStatus === 'error') {
+      setModalMessage(searchParams.get('message') || copy(callbackLocale, {
+        zh: 'Google 登录失败，请稍后重试。',
+        en: 'Google sign-in failed. Please try again later.',
+      }))
+      redirectToAuth()
+      return
+    }
+
+    const token = String(searchParams.get('token') || '').trim()
+    const nextEmail = String(searchParams.get('email') || '').trim()
+
+    if (googleStatus !== 'success' || !token || !nextEmail) {
+      setModalMessage(copy(callbackLocale, {
+        zh: 'Google 登录返回的数据不完整，请重新尝试。',
+        en: 'Google sign-in returned incomplete data. Please try again.',
+      }))
+      redirectToAuth()
+      return
+    }
+
+    const mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login'
+    const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
+
+    setSongHistory([])
+    setAuthSession({
+      authToken: token,
+      email: nextEmail,
+      partnerName: String(searchParams.get('partnerName') || draft.bride || '').trim(),
+      plan: String(searchParams.get('plan') || selectedPlan || '').trim(),
+      heartBeansBalance: Number(searchParams.get('heartBeansBalance') || 0),
+      mode,
+      welcomeMessage: successMessage,
+      lastAuthAt: String(searchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+      avatarUrl: String(searchParams.get('avatarUrl') || '').trim(),
+    })
+    setModalMessage(successMessage)
+    navigate(withLocale(callbackLocale, '/account'), { replace: true })
+  }, [draft.bride, location.pathname, location.search, navigate, selectedPlan])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
