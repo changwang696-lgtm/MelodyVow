@@ -481,7 +481,8 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
   backgroundTheme: DEFAULT_BACKGROUND_THEME,
 }
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
-const HOME_FIREWORK_COLORS = ['#fffef7', '#fff4cc', '#ffe59a', '#f9cf62', '#d6a63a', '#fff8de']
+const HOME_FIREWORK_GOLD_COLORS = ['#fffbf0', '#fff1c2', '#ffe08a', '#f4c45d', '#d89b2f', '#9d6915']
+const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
@@ -747,51 +748,82 @@ function launchHomepageFireworks() {
   const end = Date.now() + duration
   const timeouts: number[] = []
   const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min
+  const randomFrom = (values: string[]) => values[Math.floor(Math.random() * values.length)] || values[0]
 
-  const fire = (particleRatio: number, options: Record<string, unknown>) => {
+  const fire = (particleRatio: number, options: Record<string, unknown>, colors = HOME_FIREWORK_GOLD_COLORS) => {
     confetti({
-      particleCount: Math.max(18, Math.floor(160 * particleRatio)),
-      colors: HOME_FIREWORK_COLORS,
+      particleCount: Math.max(10, Math.floor(150 * particleRatio)),
+      colors,
       disableForReducedMotion: true,
-      spread: 90,
-      startVelocity: 42,
-      ticks: 220,
-      gravity: 0.88,
-      scalar: 1.12,
-      drift: randomInRange(-0.16, 0.16),
+      spread: 92,
+      startVelocity: 46,
+      ticks: 240,
+      gravity: 0.86,
+      scalar: 1.1,
+      drift: randomInRange(-0.12, 0.12),
       zIndex: 25,
       ...options,
     })
   }
 
+  const sparkle = (particleRatio: number, options: Record<string, unknown>) => {
+    fire(
+      particleRatio,
+      {
+        spread: 360,
+        startVelocity: 26,
+        ticks: 170,
+        gravity: 0.7,
+        scalar: randomInRange(0.72, 0.92),
+        decay: 0.95,
+        drift: randomInRange(-0.08, 0.08),
+        shapes: ['circle'],
+        ...options,
+      },
+      HOME_FIREWORK_GLOW_COLORS,
+    )
+  }
+
   fire(0.28, {
     angle: 60,
-    spread: 72,
-    startVelocity: 60,
+    spread: 68,
+    startVelocity: 62,
+    scalar: 1.14,
     origin: { x: 0.02, y: 0.72 },
   })
   fire(0.28, {
     angle: 120,
-    spread: 72,
-    startVelocity: 60,
+    spread: 68,
+    startVelocity: 62,
+    scalar: 1.14,
     origin: { x: 0.98, y: 0.72 },
   })
-  fire(0.34, {
-    spread: 110,
-    startVelocity: 52,
-    origin: { x: 0.5, y: 0.26 },
+  fire(0.3, {
+    spread: 98,
+    startVelocity: 56,
+    scalar: 1.16,
+    origin: { x: 0.5, y: 0.24 },
+  })
+  sparkle(0.14, {
+    origin: { x: 0.5, y: 0.24 },
   })
 
   timeouts.push(
     window.setTimeout(() => {
-      fire(0.24, {
+      fire(0.22, {
         spread: 120,
-        startVelocity: 48,
+        startVelocity: 50,
         origin: { x: 0.22, y: 0.18 },
       })
-      fire(0.24, {
+      fire(0.22, {
         spread: 120,
-        startVelocity: 48,
+        startVelocity: 50,
+        origin: { x: 0.78, y: 0.18 },
+      })
+      sparkle(0.12, {
+        origin: { x: 0.22, y: 0.18 },
+      })
+      sparkle(0.12, {
         origin: { x: 0.78, y: 0.18 },
       })
     }, 280),
@@ -807,43 +839,52 @@ function launchHomepageFireworks() {
 
     const intensity = timeLeft / duration
 
-    fire(0.18 * intensity, {
+    fire(0.12 * intensity, {
       spread: 360,
-      startVelocity: 32,
-      decay: 0.94,
-      scalar: 0.96,
-      ticks: 180,
+      startVelocity: 28,
+      decay: 0.95,
+      scalar: 0.88,
+      ticks: 165,
       origin: {
         x: randomInRange(0.14, 0.34),
         y: randomInRange(0.02, 0.24),
       },
     })
 
-    fire(0.18 * intensity, {
+    fire(0.12 * intensity, {
       spread: 360,
-      startVelocity: 32,
-      decay: 0.94,
-      scalar: 0.96,
-      ticks: 180,
+      startVelocity: 28,
+      decay: 0.95,
+      scalar: 0.88,
+      ticks: 165,
       origin: {
         x: randomInRange(0.66, 0.86),
         y: randomInRange(0.02, 0.24),
       },
     })
 
-    fire(0.12 * intensity, {
+    sparkle(0.1 * intensity, {
+      particleCount: Math.max(8, Math.floor(52 * intensity)),
+      colors: [randomFrom(HOME_FIREWORK_GLOW_COLORS), '#ffffff'],
+      origin: {
+        x: randomInRange(0.18, 0.82),
+        y: randomInRange(0.08, 0.22),
+      },
+    })
+
+    fire(0.14 * intensity, {
       angle: 60,
-      spread: 62,
-      startVelocity: 54,
-      scalar: 1.06,
+      spread: 56,
+      startVelocity: 58,
+      scalar: 1.12,
       origin: { x: 0.08, y: 0.62 },
     })
 
-    fire(0.12 * intensity, {
+    fire(0.14 * intensity, {
       angle: 120,
-      spread: 62,
-      startVelocity: 54,
-      scalar: 1.06,
+      spread: 56,
+      startVelocity: 58,
+      scalar: 1.12,
       origin: { x: 0.92, y: 0.62 },
     })
   }, 260)
