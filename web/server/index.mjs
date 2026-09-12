@@ -1041,6 +1041,7 @@ function mapSongToMemberHistory(song) {
     vocalLabel: song.vocalLabel || '',
     variantLabel: song.variantLabel || '',
     lyricSnippet: song.lyricSnippet || '',
+    lyrics: song.lyrics || '',
   }
 }
 
