@@ -5077,6 +5077,7 @@ function AdminDashboardPage({
   const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
   const [metrics, setMetrics] = useState({
     totalSongs: 0,
     readySongs: 0,
@@ -5300,6 +5301,20 @@ function AdminDashboardPage({
     }
   }, [activeSession, navigate, onLogout])
 
+  useEffect(() => {
+    if (!saveMessage) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSaveMessage('')
+    }, 2200)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [saveMessage])
+
   if (!activeSession) {
     return <Navigate to="/admin/login" replace />
   }
@@ -5307,6 +5322,7 @@ function AdminDashboardPage({
   async function handleSaveConfig() {
     setSavingConfig(true)
     setError('')
+    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl('/api/admin/config'), {
@@ -5324,6 +5340,7 @@ function AdminDashboardPage({
       }
 
       setConfig(result as AdminConfig)
+      setSaveMessage('后台配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '配置保存失败。')
     } finally {
@@ -5370,6 +5387,9 @@ function AdminDashboardPage({
       return
     }
 
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl(`/api/admin/orders/${selectedOrder.id}`), {
         method: 'PATCH',
@@ -5387,6 +5407,7 @@ function AdminDashboardPage({
       const saved = result as AdminOrder
       setSelectedOrder(saved)
       setOrders((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+      setSaveMessage('订单修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '订单保存失败。')
     }
@@ -5396,6 +5417,9 @@ function AdminDashboardPage({
     if (!selectedMember) {
       return
     }
+
+    setError('')
+    setSaveMessage('')
 
     const topupAmount = Math.max(0, Number(manualTopupAmount || 0))
     const currentBalance = Number(selectedMember.heartBeansBalance ?? 0)
@@ -5431,12 +5455,16 @@ function AdminDashboardPage({
       setMembers((current) => current.map((item) => (item.email === saved.email ? { ...item, ...saved } : item)))
       setManualTopupAmount('0')
       setManualTopupNote('')
+      setSaveMessage('会员信息已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '会员信息保存失败。')
     }
   }
 
   async function handleSavePlans() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/plans'), {
         method: 'PUT',
@@ -5451,12 +5479,16 @@ function AdminDashboardPage({
         throw new Error(result.message || '套餐保存失败。')
       }
       setPlans(Array.isArray(result.items) ? result.items : plans)
+      setSaveMessage('套餐配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '套餐保存失败。')
     }
   }
 
   async function handleSaveShowcaseTracks() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/showcase-tracks'), {
         method: 'PUT',
@@ -5471,12 +5503,16 @@ function AdminDashboardPage({
         throw new Error(result.message || '样片保存失败。')
       }
       setShowcaseTracks(Array.isArray(result.items) ? result.items : showcaseTracks)
+      setSaveMessage('样片配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '样片保存失败。')
     }
   }
 
   async function handleSavePaymentMethods() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/payment-methods'), {
         method: 'PUT',
@@ -5491,6 +5527,7 @@ function AdminDashboardPage({
         throw new Error(result.message || '支付方式保存失败。')
       }
       setPaymentMethods(Array.isArray(result.items) ? result.items : paymentMethods)
+      setSaveMessage('支付方式已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '支付方式保存失败。')
     }
@@ -5500,6 +5537,9 @@ function AdminDashboardPage({
     if (!selectedSong) {
       return
     }
+
+    setError('')
+    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl(`/api/admin/songs/${selectedSong.id}`), {
@@ -5517,6 +5557,7 @@ function AdminDashboardPage({
       const saved = result as AdminSong
       setSelectedSong(saved)
       setSongs((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+      setSaveMessage('歌曲修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲更新失败。')
     }
@@ -5537,6 +5578,7 @@ function AdminDashboardPage({
 
       setSongs((current) => current.filter((item) => item.id !== songId))
       setSelectedSong((current) => (current?.id === songId ? null : current))
+      setSaveMessage('歌曲记录已删除。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲删除失败。')
     }
@@ -5614,6 +5656,7 @@ function AdminDashboardPage({
 
         <main className="admin-main">
           {error ? <p className="form-error">{error}</p> : null}
+          {saveMessage ? <p className="admin-save-feedback">{saveMessage}</p> : null}
           {loading ? <p className="empty-state">后台数据加载中...</p> : null}
 
           {!loading && tab === 'overview' ? (
