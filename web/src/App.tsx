@@ -485,11 +485,23 @@ const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfi
 const HOME_FIREWORK_GOLD_COLORS = ['#fffbf0', '#fff1c2', '#ffe08a', '#f4c45d', '#d89b2f', '#9d6915']
 const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const GOOGLE_LOGIN_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
+
+function buildMemberAuthSuccessMessage(locale: Locale, mode: 'login' | 'signup', email: string) {
+  return copy(locale, {
+    zh: mode === 'login'
+      ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
+      : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
+    en: mode === 'login'
+      ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
+      : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
+  })
 }
 
 function getMemberAuthHeaders(session: AuthSession | null | undefined) {
@@ -4385,6 +4397,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
 
 function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onLogout, authSession }: AuthPageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -4402,6 +4415,71 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   function refreshCaptcha() {
     setCaptchaChallenge(createCaptchaChallenge())
     setCaptchaInput('')
+  }
+
+  useEffect(() => {
+    const googleStatus = String(searchParams.get('google') || '').trim()
+    if (!googleStatus) {
+      return
+    }
+
+    if (googleStatus === 'error') {
+      setAuthError(searchParams.get('message') || copy(locale, {
+        zh: 'Google 登录失败，请稍后重试。',
+        en: 'Google sign-in failed. Please try again later.',
+      }))
+      refreshCaptcha()
+      navigate(withLocale(locale, '/auth'), { replace: true })
+      return
+    }
+
+    const token = String(searchParams.get('token') || '').trim()
+    const nextEmail = String(searchParams.get('email') || '').trim()
+
+    if (googleStatus !== 'success' || !token || !nextEmail) {
+      setAuthError(copy(locale, {
+        zh: 'Google 登录返回的数据不完整，请重新尝试。',
+        en: 'Google sign-in returned incomplete data. Please try again.',
+      }))
+      refreshCaptcha()
+      navigate(withLocale(locale, '/auth'), { replace: true })
+      return
+    }
+
+    const mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login'
+    const successMessage = buildMemberAuthSuccessMessage(locale, mode, nextEmail)
+
+    onAuthSuccess({
+      authToken: token,
+      email: nextEmail,
+      partnerName: String(searchParams.get('partnerName') || draft.bride || '').trim(),
+      plan: String(searchParams.get('plan') || selectedPlan || '').trim(),
+      heartBeansBalance: Number(searchParams.get('heartBeansBalance') || 0),
+      mode,
+      welcomeMessage: successMessage,
+      lastAuthAt: String(searchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+      avatarUrl: String(searchParams.get('avatarUrl') || '').trim(),
+    })
+
+    onOpenModal(successMessage)
+    refreshCaptcha()
+    navigate(withLocale(locale, '/account'), { replace: true })
+  }, [draft.bride, locale, navigate, onAuthSuccess, onOpenModal, searchParams, selectedPlan])
+
+  function handleGoogleAuthStart() {
+    setAuthError('')
+
+    if (!GOOGLE_LOGIN_ENABLED) {
+      onOpenModal(copy(locale, {
+        zh: 'Google 登录尚未在前端完成配置，请稍后再试。',
+        en: 'Google sign-in is not configured on the frontend yet.',
+      }))
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.assign(apiUrl(`/api/member/google/start?locale=${encodeURIComponent(locale)}`))
+    }
   }
 
   async function handleAuthSubmit() {
@@ -4447,14 +4525,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
       ? partnerName.trim()
       : draft.bride
 
-    const successMessage = copy(locale, {
-      zh: tab === 'login'
-        ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
-        : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
-      en: tab === 'login'
-        ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
-        : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
-    })
+    const successMessage = buildMemberAuthSuccessMessage(locale, tab, email.trim())
 
     setIsSubmitting(true)
 
@@ -4618,8 +4689,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
           </button>
 
           <div className="social-actions">
-            <button type="button" className="ghost-button compact">
-              Google
+            <button type="button" className="ghost-button compact" onClick={handleGoogleAuthStart}>
+              {copy(locale, { zh: '使用 Google 登录', en: 'Continue with Google' })}
             </button>
           </div>
         </article>

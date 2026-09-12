@@ -17,6 +17,11 @@ const SUNO_GENERATE_URL = process.env.SUNO_GENERATE_URL ?? 'https://api.wike.cc/
 const SUNO_FEED_URL = process.env.SUNO_FEED_URL ?? 'https://api.wike.cc/api/suno/feed'
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '')
+const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '').trim()
+const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || '').trim()
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
 const JOB_TTL_MS = 1000 * 60 * 60 * 6
 const POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS ?? 12000)
 const MAX_POLL_ATTEMPTS = Number(process.env.SUNO_POLL_MAX_ATTEMPTS ?? 40)
@@ -35,6 +40,7 @@ const adminSessions = new Map()
 const memberSessions = new Map()
 const lyricRequests = new Map()
 const sunoTasks = new Map()
+const googleOauthStates = new Map()
 
 const productShowcaseTracks = [
   {
@@ -602,6 +608,49 @@ function readMemberToken(req) {
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase()
+}
+
+function normalizeLocale(value) {
+  return String(value || '').trim().toLowerCase() === 'zh' ? 'zh' : 'en'
+}
+
+function getFrontendBaseUrl() {
+  return FRONTEND_ORIGIN || 'http://localhost:5173'
+}
+
+function getApiBaseUrl(req) {
+  if (PUBLIC_BASE_URL) {
+    return PUBLIC_BASE_URL
+  }
+
+  const host = String(req.get('host') || '').trim()
+  if (!host) {
+    return `http://127.0.0.1:${PORT}`
+  }
+
+  return `${req.protocol}://${host}`
+}
+
+function getGoogleRedirectUri(req) {
+  return `${getApiBaseUrl(req).replace(/\/$/, '')}/api/member/google/callback`
+}
+
+function buildFrontendAuthUrl(locale, params = {}) {
+  const target = new URL(`${getFrontendBaseUrl()}/${normalizeLocale(locale)}/auth`)
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      return
+    }
+
+    target.searchParams.set(key, String(value))
+  })
+
+  return target.toString()
+}
+
+function buildGoogleAuthErrorMessage(locale, fallbackEn, fallbackZh) {
+  return locale === 'zh' ? fallbackZh : fallbackEn
 }
 
 function findMemberByEmail(email) {
@@ -1517,6 +1566,16 @@ function cleanupJobs() {
 
 setInterval(cleanupJobs, 1000 * 60 * 30).unref()
 
+setInterval(() => {
+  const cutoff = Date.now() - 1000 * 60 * 15
+
+  for (const [state, createdAt] of googleOauthStates.entries()) {
+    if (createdAt < cutoff) {
+      googleOauthStates.delete(state)
+    }
+  }
+}, 1000 * 60 * 5).unref()
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -1674,6 +1733,150 @@ app.post('/api/member/logout', requireMemberAuth, (req, res) => {
   memberSessions.delete(readMemberToken(req))
   queuePersistenceSync('member session removed')
   res.json({ ok: true })
+})
+
+app.get('/api/member/google/start', (req, res) => {
+  const locale = normalizeLocale(req.query?.locale)
+
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'error',
+      message: buildGoogleAuthErrorMessage(locale, 'Google sign-in is not configured yet.', 'Google 登录暂未配置完成。'),
+    }))
+    return
+  }
+
+  const state = crypto.randomUUID()
+  googleOauthStates.set(state, Date.now())
+
+  const redirectUri = getGoogleRedirectUri(req)
+  const authUrl = new URL(GOOGLE_AUTH_URL)
+  authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID)
+  authUrl.searchParams.set('redirect_uri', redirectUri)
+  authUrl.searchParams.set('response_type', 'code')
+  authUrl.searchParams.set('scope', 'openid email profile')
+  authUrl.searchParams.set('access_type', 'online')
+  authUrl.searchParams.set('include_granted_scopes', 'true')
+  authUrl.searchParams.set('prompt', 'select_account')
+  authUrl.searchParams.set('state', `${locale}:${state}`)
+
+  res.redirect(authUrl.toString())
+})
+
+app.get('/api/member/google/callback', async (req, res) => {
+  const [localePart, stateToken] = String(req.query?.state || '').split(':')
+  const locale = normalizeLocale(localePart)
+  const savedStateAt = stateToken ? googleOauthStates.get(stateToken) : null
+
+  if (!stateToken || !savedStateAt || Date.now() - savedStateAt > 1000 * 60 * 15) {
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'error',
+      message: buildGoogleAuthErrorMessage(locale, 'Google sign-in session expired. Please try again.', 'Google 登录会话已过期，请重新尝试。'),
+    }))
+    return
+  }
+
+  googleOauthStates.delete(stateToken)
+
+  if (req.query?.error) {
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'error',
+      message: buildGoogleAuthErrorMessage(locale, 'Google authorization was cancelled.', '你已取消 Google 授权。'),
+    }))
+    return
+  }
+
+  const code = String(req.query?.code || '').trim()
+  if (!code) {
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'error',
+      message: buildGoogleAuthErrorMessage(locale, 'Google did not return an authorization code.', 'Google 没有返回授权码。'),
+    }))
+    return
+  }
+
+  try {
+    const redirectUri = getGoogleRedirectUri(req)
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      }),
+    })
+
+    const tokenResult = await tokenResponse.json().catch(() => ({}))
+    if (!tokenResponse.ok || !String(tokenResult.access_token || '').trim()) {
+      throw new Error(buildGoogleAuthErrorMessage(locale, 'Google token exchange failed.', 'Google 登录换取令牌失败。'))
+    }
+
+    const userResponse = await fetch(GOOGLE_USERINFO_URL, {
+      headers: {
+        Authorization: `Bearer ${tokenResult.access_token}`,
+      },
+    })
+    const userResult = await userResponse.json().catch(() => ({}))
+
+    const email = normalizeEmail(userResult.email)
+    const emailVerified = Boolean(userResult.email_verified)
+
+    if (!userResponse.ok || !email || !emailVerified) {
+      throw new Error(buildGoogleAuthErrorMessage(locale, 'Google account verification failed.', 'Google 账号验证失败。'))
+    }
+
+    const existing = findMemberByEmail(email)
+    if (!existing && !adminData.config.allowSignup) {
+      throw new Error(buildGoogleAuthErrorMessage(locale, 'Sign up is currently disabled.', '当前暂未开放会员注册。'))
+    }
+
+    if (existing?.disabled) {
+      throw new Error(buildGoogleAuthErrorMessage(locale, 'This member account has been disabled.', '该会员账号已被禁用。'))
+    }
+
+    const timestamp = nowIso()
+    const displayName = String(userResult.name || '').trim()
+    const partnerName = String(existing?.partnerName || displayName || email.split('@')[0] || '').trim()
+    const nextMember = {
+      ...existing,
+      email,
+      partnerName,
+      avatarUrl: String(userResult.picture || existing?.avatarUrl || '').trim(),
+      heartBeansBalance: normalizePositiveNumber(existing?.heartBeansBalance, 0),
+      createdAt: existing?.createdAt || timestamp,
+      updatedAt: timestamp,
+      lastAuthAt: timestamp,
+      disabled: false,
+    }
+
+    upsertMember(nextMember)
+    const session = createMemberSession(nextMember)
+    const mode = existing ? 'login' : 'signup'
+
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'success',
+      token: session.token,
+      email: session.profile.email,
+      partnerName: session.profile.partnerName,
+      plan: session.profile.plan,
+      heartBeansBalance: session.profile.heartBeansBalance,
+      lastAuthAt: session.profile.lastAuthAt,
+      avatarUrl: session.profile.avatarUrl,
+      mode,
+    }))
+  } catch (error) {
+    res.redirect(buildFrontendAuthUrl(locale, {
+      google: 'error',
+      message: error instanceof Error
+        ? error.message
+        : buildGoogleAuthErrorMessage(locale, 'Google sign-in failed. Please try again.', 'Google 登录失败，请稍后重试。'),
+    }))
+  }
 })
 
 app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
