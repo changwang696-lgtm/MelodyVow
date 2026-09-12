@@ -480,7 +480,7 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
   backgroundTheme: DEFAULT_BACKGROUND_THEME,
 }
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
-const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
+const HOME_FIREWORK_COLORS = ['#ffffff', '#f7f9fc', '#e9edf3', '#d8dee7', '#bcc4cf', '#949eaa']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
@@ -2210,6 +2210,7 @@ function SiteLayout({
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
   const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
   const memberAvatarUrl = currentAuthSession?.avatarUrl?.trim()
+  const showHeroEyebrow = Boolean(eyebrow) && !(active !== 'home' && eyebrow === 'MelodyVow')
 
   useEffect(() => {
     setMemberMenuOpen(false)
@@ -2383,7 +2384,7 @@ function SiteLayout({
         {!hideHero && active === 'home' && homePanel ? (
           <section className="home-hero-layout">
             <section className="hero-banner hero-banner-home">
-              <p className="eyebrow">{eyebrow}</p>
+              {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
               <div className="home-subtitle-wrap">
                 <p className="hero-subtitle">{subtitle}</p>
                 <div className="headline-stack">
@@ -2427,14 +2428,14 @@ function SiteLayout({
           </section>
         ) : useHomeMobileChrome && ['how', 'styles', 'pricing', 'account'].includes(active) ? (
           <section className="hero-banner hero-banner-home mobile-shared-hero">
-            <p className="eyebrow">MelodyVow</p>
+            {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <div className="home-subtitle-wrap">
               <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p>
             </div>
           </section>
         ) : !hideHero ? (
           <section className="hero-banner">
-            <p className="eyebrow">{eyebrow}</p>
+            {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <div className="headline-stack">
               <p className="brand-cn">{copy(locale, { zh: '旋律誓言', en: 'Turn love into melody' })}</p>
               {active === 'home' ? (
