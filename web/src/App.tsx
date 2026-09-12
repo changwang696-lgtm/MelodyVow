@@ -5126,59 +5126,156 @@ function AdminDashboardPage({
           'x-admin-token': activeSession!.token,
         }
 
-        const [overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes] = await Promise.all([
-          fetch(apiUrl('/api/admin/overview'), { headers }),
-          fetch(apiUrl('/api/admin/members'), { headers }),
-          fetch(apiUrl('/api/admin/songs'), { headers }),
-          fetch(apiUrl('/api/admin/showcase-tracks'), { headers }),
-          fetch(apiUrl('/api/admin/plans'), { headers }),
-          fetch(apiUrl('/api/admin/payment-methods'), { headers }),
-          fetch(apiUrl('/api/admin/orders'), { headers }),
-          fetch(apiUrl('/api/admin/config'), { headers }),
-        ])
+        const adminRequests = [
+          { key: 'overview', path: '/api/admin/overview', label: '总览' },
+          { key: 'members', path: '/api/admin/members', label: '会员' },
+          { key: 'songs', path: '/api/admin/songs', label: '歌曲' },
+          { key: 'showcase', path: '/api/admin/showcase-tracks', label: '样片' },
+          { key: 'plans', path: '/api/admin/plans', label: '套餐' },
+          { key: 'payments', path: '/api/admin/payment-methods', label: '支付方式' },
+          { key: 'orders', path: '/api/admin/orders', label: '订单' },
+          { key: 'config', path: '/api/admin/config', label: '配置' },
+        ] as const
 
-        const [overviewData, membersData, songsData, showcaseData, plansData, paymentsData, ordersData, configData] = await Promise.all([
-          readJsonSafe(overviewRes),
-          readJsonSafe(membersRes),
-          readJsonSafe(songsRes),
-          readJsonSafe(showcaseRes),
-          readJsonSafe(plansRes),
-          readJsonSafe(paymentsRes),
-          readJsonSafe(ordersRes),
-          readJsonSafe(configRes),
-        ])
+        const settled = await Promise.allSettled(
+          adminRequests.map(async (request) => {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-        if ([overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes].some((item) => !item.ok)) {
-          const message = overviewData.message
-            || membersData.message
-            || songsData.message
-            || showcaseData.message
-            || plansData.message
-            || paymentsData.message
-            || ordersData.message
-            || configData.message
-            || '后台数据加载失败。'
-          throw new Error(message)
+            try {
+              const response = await fetch(apiUrl(request.path), {
+                headers,
+                signal: controller.signal,
+              })
+              const data = await readJsonSafe(response)
+              return {
+                ...request,
+                response,
+                data,
+              }
+            } finally {
+              clearTimeout(timeoutId)
+            }
+          }),
+        )
+
+        if (disposed) {
+          return
         }
 
-        if (!disposed) {
-          setMetrics(overviewData.metrics)
-          const nextMembers = Array.isArray(membersData.items) ? membersData.items : []
-          const nextSongs = Array.isArray(songsData.items) ? songsData.items : []
-          const nextShowcase = Array.isArray(showcaseData.items) ? showcaseData.items : []
-          const nextPlans = Array.isArray(plansData.items) ? plansData.items : []
-          const nextPayments = Array.isArray(paymentsData.items) ? paymentsData.items : []
-          const nextOrders = Array.isArray(ordersData.items) ? ordersData.items : []
-          setMembers(nextMembers)
-          setSongs(nextSongs)
+        const failureMessages: string[] = []
+        let authExpired = false
+        let nextMembers: AdminMember[] | null = null
+        let nextSongs: AdminSong[] | null = null
+        let nextShowcase: ShowcaseTrack[] | null = null
+        let nextPlans: PlanItem[] | null = null
+        let nextPayments: PaymentMethodAdmin[] | null = null
+        let nextOrders: AdminOrder[] | null = null
+        let nextConfig: AdminConfig | null = null
+
+        settled.forEach((result) => {
+          if (result.status === 'rejected') {
+            failureMessages.push('部分后台数据请求超时，请刷新重试。')
+            return
+          }
+
+          const { key, label, response, data } = result.value
+
+          if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+              authExpired = true
+            }
+            failureMessages.push(data?.message || `${label}数据加载失败。`)
+            return
+          }
+
+          switch (key) {
+            case 'overview':
+              if (data?.metrics) {
+                setMetrics(data.metrics)
+              }
+              break
+            case 'members':
+              nextMembers = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'songs':
+              nextSongs = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'showcase':
+              nextShowcase = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'plans':
+              nextPlans = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'payments':
+              nextPayments = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'orders':
+              nextOrders = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'config':
+              nextConfig = data as AdminConfig
+              break
+          }
+        })
+
+        if (authExpired) {
+          onLogout()
+          navigate('/admin/login', { replace: true })
+          return
+        }
+
+        if (nextMembers) {
+          const membersData: AdminMember[] = nextMembers
+          setMembers(membersData)
+          setSelectedMember((current) => {
+            if (current) {
+              return membersData.find((item) => item.email === current.email) ?? membersData[0] ?? null
+            }
+            return membersData[0] ?? null
+          })
+        }
+
+        if (nextSongs) {
+          const songsData: AdminSong[] = nextSongs
+          setSongs(songsData)
+          setSelectedSong((current) => {
+            if (current) {
+              return songsData.find((item) => item.id === current.id) ?? songsData[0] ?? null
+            }
+            return songsData[0] ?? null
+          })
+        }
+
+        if (nextShowcase) {
           setShowcaseTracks(nextShowcase)
+        }
+
+        if (nextPlans) {
           setPlans(nextPlans)
+        }
+
+        if (nextPayments) {
           setPaymentMethods(nextPayments)
-          setOrders(nextOrders)
-          setSelectedMember(nextMembers[0] ?? null)
-          setSelectedSong(nextSongs[0] ?? null)
-          setSelectedOrder(nextOrders[0] ?? null)
-          setConfig(configData as AdminConfig)
+        }
+
+        if (nextOrders) {
+          const ordersData: AdminOrder[] = nextOrders
+          setOrders(ordersData)
+          setSelectedOrder((current) => {
+            if (current) {
+              return ordersData.find((item) => item.id === current.id) ?? ordersData[0] ?? null
+            }
+            return ordersData[0] ?? null
+          })
+        }
+
+        if (nextConfig) {
+          setConfig(nextConfig)
+        }
+
+        if (failureMessages.length) {
+          setError(failureMessages[0] || '部分后台数据加载失败。')
         }
       } catch (loadError) {
         if (!disposed) {
