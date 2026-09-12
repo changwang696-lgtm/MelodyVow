@@ -3926,36 +3926,6 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           </article>
         </article>
 
-        <article className="glass-panel floating-player-teaser">
-          <div className="phone-brand-block">
-            <h2>{copy(locale, { zh: '悬浮手机播放器', en: 'Floating Phone Player' })}</h2>
-            <p>{copy(locale, { zh: '所有样片和生成歌曲都会从这里统一播放。', en: 'All sample and generated songs now open here.' })}</p>
-          </div>
-          <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
-            <div className="floating-phone-disc-shell is-spinning">
-              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
-            </div>
-            <img className="phone-record-couple" src={coupleImage} alt="" />
-            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
-          </div>
-          <div className="status-banner is-ready">
-            {copy(locale, {
-              zh: '点击右侧任意样片，都会打开右下角悬浮播放器，不再使用旧播放器。',
-              en: 'Tap any sample on the right to open the docked floating player.',
-            })}
-          </div>
-          {activeTrack ? (
-            <div className="player-now-playing floating-player-meta">
-              <div>
-                <p className="mini-eyebrow">{copy(locale, { zh: '当前主推样片', en: 'Featured Sample' })}</p>
-                <h3>{activeTrack.title}</h3>
-                <p>{activeTrack.meta}</p>
-              </div>
-            </div>
-          ) : null}
-          {error ? <p className="form-error">{error}</p> : null}
-        </article>
-
         <aside className="showcase-sidebar">
           <article className="glass-card showcase-intro">
             <p className="mini-eyebrow">{copy(locale, { zh: '全球', en: 'Global' })}</p>
@@ -4737,6 +4707,31 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
     }
   }
 
+  async function handleCopyLyrics(item: HistoryItem) {
+    const lyricsText = String(item.lyricSnippet || '').trim()
+
+    if (!lyricsText) {
+      onOpenModal(copy(locale, {
+        zh: '这首歌暂时还没有可复制的歌词内容。',
+        en: 'This song does not have any lyrics available to copy yet.',
+      }))
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(lyricsText)
+      onOpenModal(copy(locale, {
+        zh: '歌词已复制。',
+        en: 'Lyrics copied.',
+      }))
+    } catch {
+      onOpenModal(`${copy(locale, {
+        zh: '歌词如下：',
+        en: 'Lyrics:',
+      })}\n${lyricsText}`)
+    }
+  }
+
   async function handleTogglePlay(item: HistoryItem) {
     try {
       const groupJobId = item.jobId || item.id
@@ -4939,6 +4934,14 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   disabled={!item.downloadUrl && !item.audioUrl}
                 >
                   {copy(locale, { zh: '分享链接', en: 'Share Link' })}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button compact"
+                  onClick={() => void handleCopyLyrics(item)}
+                  disabled={!String(item.lyricSnippet || '').trim()}
+                >
+                  {copy(locale, { zh: '复制歌词', en: 'Copy Lyrics' })}
                 </button>
                 <button
                   type="button"

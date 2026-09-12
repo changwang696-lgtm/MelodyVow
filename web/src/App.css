@@ -2544,6 +2544,111 @@
     font-size: 0.76rem;
     line-height: 1.54;
   }
+
+  .site-shell-showcase .showcase-layout {
+    width: min(980px, 100%);
+    margin: 8px auto 0;
+    gap: 14px;
+  }
+
+  .site-shell-showcase .showcase-sidebar {
+    position: static;
+    gap: 12px;
+  }
+
+  .site-shell-showcase .showcase-intro {
+    padding: 18px 18px 16px;
+    border-radius: 26px;
+  }
+
+  .site-shell-showcase .showcase-intro .mini-eyebrow {
+    margin-bottom: 6px;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+  }
+
+  .site-shell-showcase .showcase-intro h3 {
+    margin: 0;
+    font-family: var(--font-ui);
+    font-size: 1rem;
+    line-height: 1.26;
+    font-weight: 900;
+  }
+
+  .site-shell-showcase .showcase-mobile-intro-copy {
+    margin-top: 8px;
+    font-size: 0.72rem;
+    line-height: 1.55;
+  }
+
+  .site-shell-showcase .showcase-home-link {
+    margin-top: 12px;
+    min-height: 42px;
+    padding: 0 14px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    box-shadow: 0 16px 28px rgba(139, 83, 226, 0.18);
+  }
+
+  .site-shell-showcase .showcase-home-link-icon {
+    width: 28px;
+    height: 28px;
+    font-size: 0.86rem;
+  }
+
+  .site-shell-showcase .showcase-track-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .site-shell-showcase .showcase-track-card {
+    min-height: 116px;
+    align-items: start;
+    grid-template-columns: 34px minmax(0, 1fr) 30px;
+    gap: 10px;
+    padding: 12px 12px 11px;
+    border-radius: 22px;
+  }
+
+  .site-shell-showcase .showcase-track-card::before {
+    inset: 7px;
+    border-radius: 16px;
+  }
+
+  .site-shell-showcase .showcase-track-index {
+    width: 30px;
+    height: 30px;
+    font-size: 0.68rem;
+  }
+
+  .site-shell-showcase .showcase-track-copy {
+    display: grid;
+    gap: 4px;
+    align-content: start;
+  }
+
+  .site-shell-showcase .showcase-track-copy strong {
+    font-size: 0.76rem;
+    line-height: 1.24;
+  }
+
+  .site-shell-showcase .showcase-track-copy span {
+    font-size: 0.62rem;
+    line-height: 1.38;
+  }
+
+  .site-shell-showcase .showcase-track-copy small {
+    font-size: 0.54rem;
+    line-height: 1.42;
+  }
+
+  .site-shell-showcase .showcase-track-icon,
+  .site-shell-showcase .showcase-track-icon.is-playing {
+    width: 26px;
+    height: 26px;
+    font-size: 0.7rem;
+    align-self: center;
+  }
 }
 
 .phone-form-grid {
@@ -4857,7 +4962,7 @@
 
   .site-shell-account .account-song-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
   }
 
