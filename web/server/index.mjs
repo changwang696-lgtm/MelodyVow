@@ -636,7 +636,7 @@ function getGoogleRedirectUri(req) {
 }
 
 function buildFrontendAuthUrl(locale, params = {}) {
-  const target = new URL(`${getFrontendBaseUrl()}/${normalizeLocale(locale)}/auth`)
+  const target = new URL(`${getFrontendBaseUrl()}/${normalizeLocale(locale)}`)
 
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') {
