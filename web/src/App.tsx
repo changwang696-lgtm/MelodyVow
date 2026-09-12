@@ -2088,6 +2088,10 @@ function FloatingPhonePlayer({
       })
     : activeTrack?.subtitle || player.subtitle || copy(player.locale, { zh: '正在播放', en: 'Now Playing' })
   const miniProgress = player.isGenerating ? player.generationProgress : progress
+  const lyricsPreview = (player.error || '').trim() || (player.lyrics || '').trim() || player.statusText || player.generationLabel || copy(player.locale, {
+    zh: '歌词会在这里显示，播放时也能继续保留可见。',
+    en: 'Lyrics will appear here and stay visible while you listen.',
+  })
 
   return (
     <div className="floating-phone-backdrop" role="presentation">
@@ -2110,6 +2114,7 @@ function FloatingPhonePlayer({
           <div className="floating-phone-compact">
             <div className="floating-phone-drag-area floating-phone-mini-main">
               <div className="floating-phone-compact-copy">
+                <span className="floating-phone-mini-eyebrow">{player.eyebrow || 'MelodyVow'}</span>
                 <strong>{activeTrack?.title || player.title}</strong>
                 <span>{miniStatus}</span>
               </div>
@@ -2129,6 +2134,38 @@ function FloatingPhonePlayer({
             <div className="floating-phone-mini-progress" aria-hidden="true">
               <span className="floating-phone-mini-progress-bar" style={{ width: `${Math.max(0, Math.min(100, miniProgress))}%` }} />
             </div>
+            <div className="floating-phone-mini-meta">
+              <span className={`floating-phone-mini-badge ${player.error ? 'is-error' : player.isGenerating ? 'is-generating' : 'is-ready'}`}>
+                {player.error
+                  ? player.error
+                  : player.isGenerating
+                  ? player.generationLabel || copy(player.locale, { zh: '歌词与旋律生成中', en: 'Generating lyrics and melody' })
+                  : player.statusText || copy(player.locale, { zh: '悬浮播放器已准备好播放。', en: 'The floating player is ready to play.' })}
+              </span>
+              {tracks.length > 1 ? (
+                <div className="floating-phone-mini-track-tabs" role="tablist" aria-label={copy(player.locale, { zh: '版本切换', en: 'Track versions' })}>
+                  {tracks.map((track, index) => (
+                    <button
+                      key={track.id}
+                      type="button"
+                      className={`floating-phone-mini-track-tab ${safeActiveTrackIndex === index ? 'is-active' : ''}`}
+                      onClick={() => setActiveTrackIndex(index)}
+                    >
+                      {track.subtitle || copy(player.locale, { zh: `版本 ${index + 1}`, en: `Version ${index + 1}` })}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <section className="floating-phone-mini-lyrics" aria-label={copy(player.locale, { zh: '歌词小窗口', en: 'Mini lyrics panel' })}>
+              <div className="floating-phone-mini-lyrics-head">
+                <strong>{copy(player.locale, { zh: 'Lyrics', en: 'Lyrics' })}</strong>
+                <span>{copy(player.locale, { zh: 'DeepSeek / Suno', en: 'DeepSeek / Suno' })}</span>
+              </div>
+              <div className="floating-phone-mini-lyrics-body">
+                <p>{lyricsPreview}</p>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -4756,8 +4793,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         generationProgress: 100,
         generationLabel: '',
         statusText: copy(locale, {
-          zh: '会员中心的歌曲会统一在这个悬浮播放器中播放。',
-          en: 'Songs from your member center now play in this floating player.',
+          zh: '会员中心的歌曲会统一在这个悬浮播放器中播放，下方会保留歌词小窗口。',
+          en: 'Songs from your member center now play in this floating player with lyrics kept below.',
         }),
         lyrics: item.lyricSnippet || '',
         error: '',
