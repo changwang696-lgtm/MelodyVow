@@ -1253,6 +1253,8 @@ function App() {
   const [siteConfigReady, setSiteConfigReady] = useState(false)
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
+  const rootSearchParams = new URLSearchParams(location.search)
+  const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
   const activeMemberToken = authSession?.authToken?.trim() || ''
   const activeMemberEmail = authSession?.email?.trim() || ''
   const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
@@ -1299,20 +1301,23 @@ function App() {
   }, [modalLocale])
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(location.search)
-    const googleStatus = String(searchParams.get('google') || '').trim()
+    const googleStatus = pendingGoogleStatus
 
     if (!googleStatus) {
       return
     }
 
-    const callbackLocale: Locale = location.pathname.startsWith('/zh') ? 'zh' : 'en'
+    const callbackLocale: Locale = rootSearchParams.get('authLocale') === 'zh'
+      ? 'zh'
+      : location.pathname.startsWith('/zh')
+        ? 'zh'
+        : 'en'
     const redirectToAuth = () => {
       navigate(withLocale(callbackLocale, '/auth'), { replace: true })
     }
 
     if (googleStatus === 'error') {
-      setModalMessage(searchParams.get('message') || copy(callbackLocale, {
+      setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
         zh: 'Google 登录失败，请稍后重试。',
         en: 'Google sign-in failed. Please try again later.',
       }))
@@ -1320,8 +1325,8 @@ function App() {
       return
     }
 
-    const token = String(searchParams.get('token') || '').trim()
-    const nextEmail = String(searchParams.get('email') || '').trim()
+    const token = String(rootSearchParams.get('token') || '').trim()
+    const nextEmail = String(rootSearchParams.get('email') || '').trim()
 
     if (googleStatus !== 'success' || !token || !nextEmail) {
       setModalMessage(copy(callbackLocale, {
@@ -1332,24 +1337,28 @@ function App() {
       return
     }
 
-    const mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login'
+    const mode = rootSearchParams.get('mode') === 'signup' ? 'signup' : 'login'
     const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
 
     setSongHistory([])
     setAuthSession({
       authToken: token,
       email: nextEmail,
-      partnerName: String(searchParams.get('partnerName') || draft.bride || '').trim(),
-      plan: String(searchParams.get('plan') || selectedPlan || '').trim(),
-      heartBeansBalance: Number(searchParams.get('heartBeansBalance') || 0),
+      partnerName: String(rootSearchParams.get('partnerName') || draft.bride || '').trim(),
+      plan: String(rootSearchParams.get('plan') || selectedPlan || '').trim(),
+      heartBeansBalance: Number(rootSearchParams.get('heartBeansBalance') || 0),
       mode,
       welcomeMessage: successMessage,
-      lastAuthAt: String(searchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
-      avatarUrl: String(searchParams.get('avatarUrl') || '').trim(),
+      lastAuthAt: String(rootSearchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+      avatarUrl: String(rootSearchParams.get('avatarUrl') || '').trim(),
     })
     setModalMessage(successMessage)
     navigate(withLocale(callbackLocale, '/account'), { replace: true })
-  }, [draft.bride, location.pathname, location.search, navigate, selectedPlan])
+  }, [draft.bride, location.pathname, navigate, pendingGoogleStatus, rootSearchParams, selectedPlan])
+
+  if (location.pathname === '/' && pendingGoogleStatus) {
+    return <div className="app-loading-shell">Signing you in with Google...</div>
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') {
