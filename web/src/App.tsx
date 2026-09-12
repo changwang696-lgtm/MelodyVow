@@ -123,6 +123,7 @@ type HistoryItem = {
   styleLabel?: string
   vocalLabel?: string
   lyricSnippet?: string
+  lyrics?: string
 }
 
 type AuthSession = {
@@ -549,6 +550,7 @@ function buildPendingHistoryItems(params: {
   styleLabel?: string
   vocalLabel?: string
   lyricSnippet?: string
+  lyrics?: string
 }) {
   return Array.from({ length: 2 }, (_, index) => ({
     id: buildTrackHistoryId(params.jobId, index),
@@ -570,6 +572,7 @@ function buildPendingHistoryItems(params: {
     styleLabel: params.styleLabel || '',
     vocalLabel: params.vocalLabel || '',
     lyricSnippet: params.lyricSnippet || '',
+    lyrics: params.lyrics || params.lyricSnippet || '',
   }))
 }
 
@@ -583,6 +586,7 @@ function sanitizeHistoryItem(item: HistoryItem) {
     downloadUrl: item.downloadUrl || playbackUrl,
     sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
     sourceDownloadUrl: item.sourceDownloadUrl || item.downloadUrl || '',
+    lyrics: item.lyrics || item.lyricSnippet || '',
   }
 }
 
@@ -629,6 +633,7 @@ function buildPendingHistoryItemsFromSeed(item: HistoryItem) {
     styleLabel: item.styleLabel,
     vocalLabel: item.vocalLabel,
     lyricSnippet: item.lyricSnippet,
+    lyrics: item.lyrics,
   }).map((entry) => ({
     ...entry,
     createdAt: item.createdAt || entry.createdAt,
@@ -2665,6 +2670,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           styleLabel,
           vocalLabel,
           lyricSnippet: initialLyrics,
+          lyrics: initialLyrics,
         }))
         saveShowcaseSession({
           mode: 'job',
@@ -2691,6 +2697,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           styleLabel,
           vocalLabel,
           lyricSnippet: initialLyrics,
+          lyrics: initialLyrics,
         }))
         onUpsertFloatingPlayer({
           key: result.jobId,
@@ -4708,7 +4715,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
   }
 
   async function handleCopyLyrics(item: HistoryItem) {
-    const lyricsText = String(item.lyricSnippet || '').trim()
+    const lyricsText = String(item.lyrics || item.lyricSnippet || '').trim()
 
     if (!lyricsText) {
       onOpenModal(copy(locale, {
@@ -4735,6 +4742,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
   async function handleTogglePlay(item: HistoryItem) {
     try {
       const groupJobId = item.jobId || item.id
+      const itemLyrics = String(item.lyrics || item.lyricSnippet || '').trim()
       const relatedReadyTracks = history.filter((candidate) => {
         const candidateJobId = candidate.jobId || candidate.id
         return candidateJobId === groupJobId && candidate.rawStatus === 'ready' && Boolean(candidate.audioUrl || candidate.downloadUrl)
@@ -4748,7 +4756,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             jobId: groupJobId,
             title: item.title || 'MelodyVow',
             subtitle: item.subtitle,
-            lyrics: item.lyricSnippet || '',
+            lyrics: itemLyrics,
             statusText: copy(locale, {
               zh: '这首歌还在生成中，Showcase 会继续显示进度，完成后自动播放。',
               en: 'This song is still generating. Showcase will keep showing progress and autoplay once it is ready.',
@@ -4766,10 +4774,13 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           id: track.id,
           title: track.title || 'MelodyVow',
           meta: track.variantLabel || track.subtitle,
-          blurb: track.lyricSnippet || copy(locale, {
-            zh: '点击播放按钮即可直接试听这首歌曲。',
-            en: 'Tap play to listen to this song here.',
-          }),
+          blurb: summarizeStoryText(
+            String(track.lyrics || track.lyricSnippet || '').trim(),
+            copy(locale, {
+              zh: '点击播放按钮即可直接试听这首歌曲。',
+              en: 'Tap play to listen to this song here.',
+            }),
+          ),
           audioUrl: getSongStreamUrl(track.id),
           downloadUrl: getSongDownloadUrl(track.id),
         }))
@@ -4786,7 +4797,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             title: item.title || '',
             audioUrl: item.audioUrl || '',
             downloadUrl: item.downloadUrl || '',
-            lyricSnippetLength: (item.lyricSnippet || '').length,
+            lyricTextLength: itemLyrics.length,
           },
         })
         // #endregion
@@ -4794,7 +4805,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           mode: 'history',
           title: item.title || 'MelodyVow',
           subtitle: item.subtitle,
-          lyrics: item.lyricSnippet || '',
+          lyrics: itemLyrics,
           statusText: copy(locale, {
             zh: '会员中心歌曲已切换到 Showcase 页面播放，这里可以同时查看歌词。',
             en: 'Member songs now play inside Showcase, where the lyrics can stay visible.',
@@ -4832,7 +4843,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           zh: '会员中心的歌曲会统一在这个悬浮播放器中播放，下方会保留歌词小窗口。',
           en: 'Songs from your member center now play in this floating player with lyrics kept below.',
         }),
-        lyrics: item.lyricSnippet || '',
+        lyrics: itemLyrics,
         error: '',
         autoPlay: true,
       })
@@ -4939,7 +4950,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   type="button"
                   className="ghost-button compact"
                   onClick={() => void handleCopyLyrics(item)}
-                  disabled={!String(item.lyricSnippet || '').trim()}
+                  disabled={!String(item.lyrics || item.lyricSnippet || '').trim()}
                 >
                   {copy(locale, { zh: '复制歌词', en: 'Copy Lyrics' })}
                 </button>
