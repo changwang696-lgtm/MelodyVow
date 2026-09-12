@@ -373,6 +373,7 @@ type ShowcasePageProps = {
 }
 
 type LegalPageKey =
+  | 'legal'
   | 'delivery'
   | 'privacy'
   | 'terms'
@@ -480,7 +481,7 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
   backgroundTheme: DEFAULT_BACKGROUND_THEME,
 }
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
-const HOME_FIREWORK_COLORS = ['#ffffff', '#f7f9fc', '#e9edf3', '#d8dee7', '#bcc4cf', '#949eaa']
+const HOME_FIREWORK_COLORS = ['#fffef7', '#fff4cc', '#ffe59a', '#f9cf62', '#d6a63a', '#fff8de']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
@@ -900,73 +901,20 @@ function copy(locale: Locale, content: Copy) {
 }
 
 function getLegalLinks(locale: Locale) {
-  return [
-    {
-      key: 'delivery',
-      label: copy(locale, { zh: '交付与履约', en: 'Delivery & Fulfillment' }),
-      to: withLocale(locale, '/delivery-fulfillment'),
-    },
-    {
-      key: 'privacy',
-      label: copy(locale, { zh: '隐私政策', en: 'Privacy Policy' }),
-      to: withLocale(locale, '/privacy-policy'),
-    },
-    {
-      key: 'terms',
-      label: copy(locale, { zh: '服务条款', en: 'Terms of Service' }),
-      to: withLocale(locale, '/terms-of-service'),
-    },
-    {
-      key: 'refund',
-      label: copy(locale, { zh: '退款政策', en: 'Refund Policy' }),
-      to: withLocale(locale, '/refund-policy'),
-    },
-    {
-      key: 'cancellation',
-      label: copy(locale, { zh: '取消政策', en: 'Cancellation Policy' }),
-      to: withLocale(locale, '/cancellation-policy'),
-    },
-    {
+  return {
+    primary: [
+      {
+        key: 'legal',
+        label: copy(locale, { zh: 'Policies & Support', en: 'Policies & Support' }),
+        to: withLocale(locale, '/legal'),
+      },
+    ],
+    order: {
       key: 'find-order',
-      label: copy(locale, { zh: '查找订单', en: 'Find My Order' }),
+      label: copy(locale, { zh: 'Find My Order', en: 'Find My Order' }),
       to: withLocale(locale, '/find-my-order'),
     },
-  ]
-}
-
-function getServiceHubItems(locale: Locale) {
-  const links = getLegalLinks(locale)
-  const descriptions: Record<LegalPageKey, Copy> = {
-    delivery: {
-      zh: '了解订阅服务如何交付、生效和记录。',
-      en: 'See how the subscription service is fulfilled and activated.',
-    },
-    privacy: {
-      zh: '查看账户、订单与生成记录如何被保护。',
-      en: 'Learn how account, order, and generation data are protected.',
-    },
-    terms: {
-      zh: '查看使用网站、付款与生成服务的规则。',
-      en: 'Review the rules for using the site, payments, and song generation.',
-    },
-    refund: {
-      zh: '明确退款范围、失败补偿与服务回退规则。',
-      en: 'Review refunds, failure compensation, and entitlement reversals.',
-    },
-    cancellation: {
-      zh: '查看取消、退款及订阅服务状态变更处理方式。',
-      en: 'See how cancellations, refunds, and service status changes are handled.',
-    },
-    'find-order': {
-      zh: '通过邮箱与订单号快速查询你的订阅订单。',
-      en: 'Look up your subscription order with email and order ID.',
-    },
   }
-
-  return links.map((item) => ({
-    ...item,
-    description: copy(locale, descriptions[item.key as LegalPageKey]),
-  }))
 }
 
 function getPublicOrderStatusLabel(locale: Locale, status: string) {
@@ -1721,11 +1669,12 @@ function App() {
             />
           ))}
         />
-        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="delivery" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="privacy" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="terms" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="refund" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="cancellation" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
         <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />)} />
         <Route
           path="/zh/checkout"
@@ -1829,11 +1778,12 @@ function App() {
             />
           }
         />
-        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="delivery" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="privacy" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="terms" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="refund" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="cancellation" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
         <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={authSession} onLogout={handleLogout} />} />
         <Route
           path="/en/checkout"
@@ -2386,11 +2336,11 @@ function SiteLayout({
             <section className="hero-banner hero-banner-home">
               {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
               <div className="home-subtitle-wrap">
-                <p className="hero-subtitle">{subtitle}</p>
                 <div className="headline-stack">
                   <h1 className="visually-hidden">{title}</h1>
                   <img className="hero-title-art" src={heroTitleImage} alt="" />
                 </div>
+                <p className="hero-subtitle">{subtitle}</p>
                 <button
                   type="button"
                   className="home-showcase-float-button"
@@ -2470,16 +2420,14 @@ function SiteLayout({
 }
 
 function ServiceHubSection({ locale, title, className = '' }: { locale: Locale, title: string, className?: string }) {
-  const items = getServiceHubItems(locale)
+  const { primary, order } = getLegalLinks(locale)
 
   return (
     <section className={`service-hub-section ${className}`.trim()}>
-      <div className="glass-card service-hub-ribbon">
-        <div className="service-hub-ribbon-copy">
-          <span className="service-hub-kicker">{title}</span>
-        </div>
+      <div className="service-hub-ribbon">
+        <p className="service-hub-kicker">{title}</p>
         <nav className="service-hub-inline-links" aria-label={copy(locale, { zh: '订阅服务支持链接', en: 'Subscription support links' })}>
-          {items.map((item, index) => (
+          {primary.map((item, index) => (
             <Fragment key={item.key}>
               {index > 0 ? <span className="service-hub-divider" aria-hidden="true">/</span> : null}
               <NavLink to={item.to} className="service-hub-inline-link">
@@ -2487,6 +2435,11 @@ function ServiceHubSection({ locale, title, className = '' }: { locale: Locale, 
               </NavLink>
             </Fragment>
           ))}
+        </nav>
+        <nav className="service-hub-inline-links service-hub-inline-links-order" aria-label={copy(locale, { zh: '订单查询链接', en: 'Order lookup link' })}>
+          <NavLink to={order.to} className="service-hub-inline-link">
+            {order.label}
+          </NavLink>
         </nav>
       </div>
     </section>
@@ -2539,12 +2492,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   useEffect(() => launchHomepageFireworks(), [])
 
   function handleCreateSongEntry() {
-    if (isMobileViewport) {
-      setShowMobileStoryPrompt(true)
-      return
-    }
-
-    void handleGenerateSong()
+    setShowMobileStoryPrompt(true)
   }
 
   async function handleGenerateSong() {
@@ -3042,7 +2990,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               <button
                 type="button"
                 className="primary-button wide home-phone-submit"
-                onClick={() => void handleGenerateSong()}
+                onClick={handleCreateSongEntry}
                 disabled={isSubmitting}
               >
                 {isSubmitting
@@ -6410,178 +6358,64 @@ function LegalPage({ locale, policy, authSession, onLogout }: LegalPageProps) {
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupError, setLookupError] = useState('')
 
-  const policyContent: Record<LegalPageKey, { active: string, title: Copy, subtitle: Copy, sections: Array<{ heading: Copy, paragraphs: Copy[] }> }> = {
-    delivery: {
-      active: 'legal_delivery',
-      title: { zh: '交付与履约', en: 'Delivery & Fulfillment' },
+  const policyContent: Record<'legal' | 'find-order', { active: string, title: Copy, subtitle: Copy, sections: Array<{ heading: Copy, paragraphs: Copy[] }> }> = {
+    legal: {
+      active: 'legal',
+      title: { zh: '服务说明与政策', en: 'Policies & Support' },
       subtitle: {
-        zh: '说明 MelodyVow 如何交付订阅服务、何时生效以及会员如何使用服务额度。',
-        en: 'This page explains how MelodyVow fulfills subscription services, when access becomes active, and how members use their service quota.',
+        zh: '集中说明 MelodyVow 的交付方式、隐私保护、使用规则、退款范围与取消处理。',
+        en: 'A consolidated overview of MelodyVow fulfillment, privacy, usage terms, refund scope, and cancellation handling.',
       },
       sections: [
         {
-          heading: { zh: '数字服务交付方式', en: 'Digital Delivery Method' },
+          heading: { zh: '交付与履约', en: 'Delivery & Fulfillment' },
           paragraphs: [
             {
-              zh: 'MelodyVow 销售的是订阅式数字婚礼歌曲服务，不涉及实体商品发货。用户完成付款后，订单会在网站内记录，管理员确认付款成功后，对应订阅套餐会把服务额度开通到会员账户。',
-              en: 'MelodyVow sells a subscription-based digital wedding song service and does not ship physical goods. After payment, the order is recorded on-site, and once payment is confirmed, the selected plan activates service credits in the member account.',
+              zh: 'MelodyVow 提供的是订阅式数字婚礼歌曲服务，不涉及实体商品发货。订单创建并确认付款后，系统会把对应服务额度开通到会员账户，并在会员中心记录歌曲、订单与下载内容。',
+              en: 'MelodyVow provides a subscription-based digital wedding song service and does not ship physical goods. Once payment is confirmed, the corresponding service quota is activated in the member account, and the related song, order, and download records appear in the account center.',
             },
             {
-              zh: '会员在首页点击“开始生成婚礼歌”时，会按当前服务配置扣除相应数量的服务额度，并在会员中心查看歌曲记录、订单状态与可下载内容。',
-              en: 'When a member clicks "Create My Song" on the homepage, the configured amount of service quota is consumed and the generated song, order status, and downloadable files become available in the member account.',
+              zh: '歌曲生成属于数字内容交付，完成时间取决于外部 AI 服务、网络状况与排队负载。若系统侧生成失败，已扣除的服务额度会自动退回。',
+              en: 'Song generation is a digital-content delivery process, and completion time depends on external AI services, network conditions, and queue load. If the generation fails on the system side, the consumed service quota is automatically returned.',
             },
           ],
         },
         {
-          heading: { zh: '履约时间', en: 'Fulfillment Timing' },
+          heading: { zh: '隐私与数据保护', en: 'Privacy & Data Protection' },
           paragraphs: [
             {
-              zh: '会员权益通常在付款确认后生效。若使用第三方支付链接，实际到账时间以支付平台记录和网站后台确认时间为准。',
-              en: 'Member entitlements generally become active after payment confirmation. For third-party payment links, the effective time depends on the payment record and website order confirmation.',
+              zh: '当你注册会员、购买套餐或生成歌曲时，网站会收集完成服务所必需的信息，例如邮箱、伴侣姓名、订单信息、生成参数与歌曲记录。这些信息仅用于会员认证、订单处理、服务开通、歌曲生成和必要的客服支持。',
+              en: 'When you register, purchase a plan, or generate a song, the site collects only the information required to fulfill the service, such as email, partner name, order data, generation inputs, and song records. This information is used only for authentication, order handling, service activation, song generation, and essential customer support.',
             },
             {
-              zh: '歌曲生成属于数字内容服务，完成时间取决于外部 AI 服务、网络状况和排队负载。若生成失败，本次扣除的服务额度会自动退回。',
-              en: 'Song generation is a digital content service, and completion time depends on external AI services, network conditions, and queue load. If generation fails, the consumed service quota is automatically returned.',
-            },
-          ],
-        },
-      ],
-    },
-    privacy: {
-      active: 'legal_privacy',
-      title: { zh: '隐私政策', en: 'Privacy Policy' },
-      subtitle: {
-        zh: '说明网站收集哪些信息、如何使用以及如何保护会员数据。',
-        en: 'This page explains what information the website collects, how it is used, and how member data is protected.',
-      },
-      sections: [
-        {
-          heading: { zh: '我们收集的信息', en: 'Information We Collect' },
-          paragraphs: [
-            {
-              zh: '当你注册会员、购买订阅套餐或生成歌曲时，我们可能会收集邮箱、伴侣姓名、订单信息、生成参数、歌曲记录和账户状态等与服务交付直接相关的数据。',
-              en: 'When you register, purchase a subscription plan, or generate a song, we may collect information directly related to service delivery, including email address, partner name, order data, generation inputs, song records, and account status.',
-            },
-            {
-              zh: '我们不会在 MelodyVow 网站内存储支付密码、银行卡密码或 PayPal 账户密码。支付环节由第三方支付平台处理。',
-              en: 'We do not store payment passwords, card passwords, or PayPal account passwords inside MelodyVow. Payment steps are handled by third-party payment platforms.',
+              zh: '网站不会在前端保存支付密码、银行卡密码或第三方支付账户密码。管理员凭据、API 密钥和其他敏感配置必须通过服务器环境变量管理，并按最小权限原则保护。',
+              en: 'The site does not store payment passwords, bank-card passwords, or third-party payment account passwords on the frontend. Administrator credentials, API keys, and other sensitive settings must be managed through server environment variables and protected under a least-privilege approach.',
             },
           ],
         },
         {
-          heading: { zh: '信息使用与保护', en: 'How Information Is Used and Protected' },
+          heading: { zh: '服务条款与用户责任', en: 'Terms of Service & User Responsibilities' },
           paragraphs: [
             {
-              zh: '这些信息仅用于会员认证、订单处理、订阅服务开通、歌曲生成、记录展示和必要的客服支持。管理员凭据、API 密钥及其他敏感配置必须通过服务器环境变量管理，不会在前端公开。',
-              en: 'This information is used only for member authentication, order handling, subscription activation, song generation, record display, and necessary customer support. Admin credentials, API keys, and other sensitive settings must be managed through server environment variables and are not exposed on the frontend.',
+              zh: 'MelodyVow 提供婚礼歌曲生成、会员账户、套餐购买、歌曲记录查看和订单管理等数字服务。所有生成结果都依赖第三方 AI 服务与网络环境，因此实际完成时间、音频风格和交付速度可能存在差异。',
+              en: 'MelodyVow provides digital services including wedding-song generation, member accounts, plan purchases, song-history review, and order administration. All generated results depend on third-party AI services and network conditions, so actual completion time, audio style, and delivery speed may vary.',
             },
             {
-              zh: '如后续接入正式数据库与备份系统，我们会继续按最小权限原则保护会员和订单数据。',
-              en: 'As the site moves to a production database and backup system, member and order data will continue to be handled under a least-privilege approach.',
-            },
-          ],
-        },
-      ],
-    },
-    terms: {
-      active: 'legal_terms',
-      title: { zh: '服务条款', en: 'Terms of Service' },
-      subtitle: {
-        zh: '说明会员使用网站、购买套餐和生成歌曲时需遵守的规则。',
-        en: 'This page explains the rules that apply when members use the site, purchase plans, and generate songs.',
-      },
-      sections: [
-        {
-          heading: { zh: '服务范围', en: 'Scope of Service' },
-          paragraphs: [
-            {
-              zh: 'MelodyVow 提供订阅式婚礼歌曲生成与会员账户服务，包括注册登录、套餐购买、服务额度开通、生成记录查看和后台订单管理。',
-              en: 'MelodyVow provides subscription-based wedding song generation and member account services, including registration, login, plan purchases, service-credit activation, song history, and order administration.',
-            },
-            {
-              zh: '所有生成结果都依赖第三方 AI 服务和网络环境，因此实际生成时间、音频风格和交付速度可能存在差异。',
-              en: 'All generated results depend on third-party AI services and network conditions, so actual completion time, audio style, and fulfillment speed may vary.',
+              zh: '会员需确保提交的信息真实、合法，并妥善保管自己的登录邮箱与密码。不得利用本服务从事违法、侵权、欺诈或滥用支付流程的行为。若账户或订单存在异常，网站有权进行人工复核并暂时限制相关权益。',
+              en: 'Members must provide lawful information and keep their login email and password secure. The service may not be used for illegal, infringing, fraudulent, or payment-abusive activity. If an account or order appears abnormal, the site may place the related entitlement under manual review and temporary restriction.',
             },
           ],
         },
         {
-          heading: { zh: '用户责任', en: 'User Responsibilities' },
+          heading: { zh: '退款与取消', en: 'Refunds & Cancellations' },
           paragraphs: [
             {
-              zh: '会员应确保提交的信息真实、合法，并妥善保管自己的登录邮箱与密码。不得使用本服务从事违法、侵权、欺诈或滥用支付流程的行为。',
-              en: 'Members must provide lawful information and keep their login email and password secure. The service may not be used for illegal, infringing, fraudulent, or abusive payment-related activity.',
+              zh: '若用户已付款但网站未正确开通对应服务，或支付记录存在重复扣款、明显异常，经核实后管理员可处理退款或服务补发。若歌曲生成在系统侧失败，服务额度会自动退回，这属于站内服务回退。',
+              en: 'If payment is completed but the purchased service is not activated correctly, or if duplicate or clearly abnormal charges are verified, an administrator may issue a refund or restore the missing service. If song generation fails on the system side, the consumed service quota is automatically returned as an on-site service reversal.',
             },
             {
-              zh: '如果网站发现账户被滥用、支付存在异常或订单存在高风险，管理员有权暂时冻结相关权益并进行人工复核。',
-              en: 'If the site detects account abuse, suspicious payment behavior, or high-risk orders, the administrator may temporarily hold related entitlements for manual review.',
-            },
-          ],
-        },
-      ],
-    },
-    refund: {
-      active: 'legal_refund',
-      title: { zh: '退款政策', en: 'Refund Policy' },
-      subtitle: {
-        zh: '说明订阅服务、服务额度与歌曲生成相关的退款处理原则。',
-        en: 'This page explains the refund rules for subscription services, service credits, and song generation requests.',
-      },
-      sections: [
-        {
-          heading: { zh: '可退款场景', en: 'Refund Scenarios' },
-          paragraphs: [
-            {
-              zh: '若用户已付款但网站未按订单向会员账户开通对应订阅服务额度，或支付记录存在重复扣款、明显异常，经核实后可由管理员处理退款或服务补发。',
-              en: 'If payment is completed but the purchased subscription service credits are not activated correctly, or if duplicate or clearly abnormal charges are verified, the administrator may issue a refund or restore the missing service entitlement.',
-            },
-            {
-              zh: '若歌曲生成流程在系统侧失败，本次扣除的服务额度会自动退回会员账户，这属于站内服务回退，不需要用户重复申请。',
-              en: 'If song generation fails on the system side, the consumed service credits are automatically returned to the member account. This is handled as an on-site service reversal and does not require a separate request.',
-            },
-          ],
-        },
-        {
-          heading: { zh: '不适用场景', en: 'Non-Refundable Cases' },
-          paragraphs: [
-            {
-              zh: '对于已经成功交付并可正常使用的订阅服务、已成功生成并可访问的歌曲内容，原则上不支持因个人主观偏好发起退款。',
-              en: 'For subscription services that have already been delivered and used normally, or songs that have been successfully generated and accessed, refunds are generally not available based on personal preference alone.',
-            },
-            {
-              zh: '如订单已经触发退款或取消流程，网站会同步回收该订单已开通的服务额度；若账户余额不足以回收，订单可能被暂时锁定，等待人工处理。',
-              en: 'If an order enters a refund or cancellation flow, the service credits activated by that order will be reclaimed. If the current balance is insufficient for reclamation, the order may be temporarily held for manual handling.',
-            },
-          ],
-        },
-      ],
-    },
-    cancellation: {
-      active: 'legal_cancellation',
-      title: { zh: '取消政策', en: 'Cancellation Policy' },
-      subtitle: {
-        zh: '说明下单后取消、支付未完成以及会员权益回收的处理方式。',
-        en: 'This page explains how cancellations, unpaid orders, and entitlement reversals are handled.',
-      },
-      sections: [
-        {
-          heading: { zh: '订单取消', en: 'Order Cancellation' },
-          paragraphs: [
-            {
-              zh: '如果订单尚未完成付款确认，管理员可将订单维持为 pending、processing 或直接标记为 cancelled，未生效订单不会为会员开通服务额度。',
-              en: 'If payment has not been confirmed, an order may remain pending, stay in processing, or be marked cancelled. Orders that never become effective do not activate service credits.',
-            },
-            {
-              zh: '如果订单已经被确认为 paid，但后续发生取消或退款，网站会按订单记录回收此前开通的服务额度，以保持会员权益与订单状态一致。',
-              en: 'If an order was already marked paid and is later cancelled or refunded, the site reclaims the service credits granted by that order to keep account entitlements aligned with order status.',
-            },
-          ],
-        },
-        {
-          heading: { zh: '会员取消与后续购买', en: 'Account Cancellation and Future Purchases' },
-          paragraphs: [
-            {
-              zh: '当前网站的会员模式以订阅套餐和站内服务额度消耗为主，不属于钱包储值。若后续增加自动续费功能，取消方式会在订阅页和本页同步更新。',
-              en: 'The current membership model focuses on subscription plans and on-site service-credit usage rather than a stored-value wallet. If auto-renewing plans are added later, the cancellation steps will be updated on both the pricing page and this page.',
+              zh: '对于已经成功交付并可正常使用的订阅服务或已成功生成并可访问的歌曲内容，原则上不支持基于个人主观偏好的退款。若订单后续被取消或退款，系统会同步回收该订单开通的相关权益，以保持账户状态与订单状态一致。',
+              en: 'For subscription services that have already been delivered and used normally, or songs that have been successfully generated and accessed, refunds are generally not available based on personal preference alone. If an order is later cancelled or refunded, the related entitlements granted by that order are reclaimed to keep the account state aligned with the order state.',
             },
           ],
         },
@@ -6621,7 +6455,7 @@ function LegalPage({ locale, policy, authSession, onLogout }: LegalPageProps) {
     },
   }
 
-  const current = policyContent[policy]
+  const current = policy === 'find-order' ? policyContent['find-order'] : policyContent.legal
   const orderLookupEnabled = policy === 'find-order'
 
   async function handleLookupOrder() {
@@ -6734,16 +6568,18 @@ function activeToPath(active: string) {
       return '/pricing'
     case 'account':
       return '/auth'
+    case 'legal':
+      return '/legal'
     case 'legal_delivery':
-      return '/delivery-fulfillment'
+      return '/legal'
     case 'legal_privacy':
-      return '/privacy-policy'
+      return '/legal'
     case 'legal_terms':
-      return '/terms-of-service'
+      return '/legal'
     case 'legal_refund':
-      return '/refund-policy'
+      return '/legal'
     case 'legal_cancellation':
-      return '/cancellation-policy'
+      return '/legal'
     case 'legal_find_order':
       return '/find-my-order'
     default:
