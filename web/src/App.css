@@ -1097,9 +1097,9 @@
   }
 
   .site-shell-home .hero-banner-home .hero-title-art {
-    width: min(100%, 538px);
+    width: min(100%, 646px);
     margin: 0;
-    transform: translateX(30px);
+    transform: translate(30px, -60px);
     filter: drop-shadow(0 14px 28px rgba(87, 30, 121, 0.16));
   }
 
@@ -1172,7 +1172,7 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.96),
       0 10px 24px rgba(0, 0, 0, 0.06);
-    overflow: visible;
+    overflow: hidden;
   }
 
   .site-shell-home .home-phone-legacy {
@@ -1223,9 +1223,21 @@
     display: grid;
     grid-auto-rows: 34px;
     width: 100%;
+    min-width: 0;
     box-sizing: border-box;
     gap: 4px;
     padding: 2px 8px 0;
+  }
+
+  .site-shell-home .home-app-field {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    min-height: 34px;
+    box-sizing: border-box;
+    flex: 0 0 34px;
   }
 
   .site-shell-home .home-app-field,
@@ -1238,6 +1250,10 @@
 
   .site-shell-home .home-app-field input,
   .site-shell-home .home-app-field select {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     padding: 0 10px;
     border-radius: 999px;
     border: 1px solid rgba(16, 10, 24, 0.16);
@@ -1251,6 +1267,11 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.72),
       0 6px 14px rgba(0, 0, 0, 0.04);
+  }
+
+  .site-shell-home .home-app-field select {
+    appearance: none;
+    padding-right: 20px;
   }
 
   .site-shell-home .home-app-field input::placeholder {
@@ -1291,18 +1312,29 @@
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
+    width: 100%;
+    min-width: 0;
     padding: 2px 2px 0;
+    box-sizing: border-box;
   }
 
   .site-shell-home .home-app-voice-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
     min-height: 21px;
     padding: 0 4px;
     border-radius: 999px;
     border: 0;
     font-family: var(--font-ui);
-    font-size: 0.62rem;
+    font-size: 0.58rem;
     font-weight: 900;
     line-height: 1.05;
+    text-align: center;
+    white-space: nowrap;
+    box-sizing: border-box;
     color: rgba(20, 12, 24, 0.86);
     background: linear-gradient(90deg, rgba(255, 233, 238, 0.96), rgba(255, 207, 220, 0.94));
     box-shadow:
@@ -1332,7 +1364,7 @@
 
   .site-shell-home .home-app-shortcuts {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     width: 304px;
     margin: 0;

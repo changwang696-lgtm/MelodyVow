@@ -2534,9 +2534,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   const fallbackLanguage = songLanguages.find((item) => item.code === fallbackLanguageCode) ?? songLanguages[0]
   const fallbackStyle = weddingStyleOptions[0]
   const fallbackVocal = vocalOptions.find((item) => item.code === 'female') ?? vocalOptions[0]
-  const accountShortcut = memberEmail
-    ? { key: 'account', badge: 4, title: 'Account', to: withLocale(locale, '/account') }
-    : { key: 'login', badge: 4, title: 'Login', to: withLocale(locale, '/auth') }
 
   useEffect(() => launchHomepageFireworks(), [])
 
@@ -3059,7 +3056,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               { key: 'signup', badge: 1, title: 'Sign up', to: withLocale(locale, '/auth') },
               { key: 'pricing', badge: 2, title: 'Pricing', to: withLocale(locale, '/pricing') },
               { key: 'styles', badge: 3, title: 'Music Styles', to: withLocale(locale, '/styles') },
-              accountShortcut,
             ].map((item) => (
               <button
                 key={item.key}
