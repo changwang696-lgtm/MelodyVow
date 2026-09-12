@@ -2085,7 +2085,7 @@ function FloatingPhonePlayer({
     }
 
     const target = event.target
-    if (target instanceof HTMLElement && target.closest('button, input, a, textarea, select, label')) {
+    if (target instanceof HTMLElement && target.closest('button, input, a, textarea, select, label, [data-no-drag]')) {
       return
     }
 
@@ -2201,9 +2201,8 @@ function FloatingPhonePlayer({
             <section className="floating-phone-mini-lyrics" aria-label={copy(player.locale, { zh: '歌词小窗口', en: 'Mini lyrics panel' })}>
               <div className="floating-phone-mini-lyrics-head">
                 <strong>{copy(player.locale, { zh: 'Lyrics', en: 'Lyrics' })}</strong>
-                <span>{copy(player.locale, { zh: 'DeepSeek / Suno', en: 'DeepSeek / Suno' })}</span>
               </div>
-              <div className="floating-phone-mini-lyrics-body">
+              <div className="floating-phone-mini-lyrics-body" data-no-drag="true">
                 <p>{lyricsPreview}</p>
               </div>
             </section>
@@ -2229,6 +2228,7 @@ function SiteLayout({
   children,
 }: LayoutProps) {
   const siteConfig = useSiteConfig()
+  const isMobileViewport = useIsMobileViewport()
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
@@ -2437,7 +2437,7 @@ function SiteLayout({
                   </span>
                 </button>
               </div>
-              <p className="hero-subtitle home-hero-subtitle-detached">{subtitle}</p>
+              {isMobileViewport ? <p className="hero-subtitle home-hero-subtitle-detached">{subtitle}</p> : null}
               <div className="hero-illustration" aria-hidden="true">
                 <img className="hero-ribbon hero-ribbon-right" src={purpleRibbonImage} alt="" />
                 <img className="hero-ribbon hero-ribbon-bottom" src={goldRibbonImage} alt="" />
@@ -2458,7 +2458,7 @@ function SiteLayout({
           <section className="hero-banner hero-banner-home mobile-shared-hero">
             {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <div className="home-subtitle-wrap">
-              <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p>
+              {isMobileViewport ? <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p> : null}
             </div>
           </section>
         ) : !hideHero ? (
