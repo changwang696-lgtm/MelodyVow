@@ -1100,10 +1100,8 @@
   }
 
   .site-shell-home .home-subtitle-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
+    display: block;
+    position: relative;
   }
 
   .site-shell-home .hero-banner-home .hero-title-art {
@@ -1113,10 +1111,10 @@
     filter: drop-shadow(0 14px 28px rgba(87, 30, 121, 0.16));
   }
 
-  .site-shell-home .hero-banner-home .hero-subtitle {
+  .site-shell-home .hero-banner-home .hero-subtitle,
+  .site-shell-home .hero-banner-home .home-hero-subtitle-detached {
     margin-top: 0;
     max-width: 420px;
-    padding-left: 34px;
     font-size: 0.64rem;
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -1124,6 +1122,11 @@
     text-align: left;
     text-shadow: none;
     color: rgba(255, 255, 255, 0.98);
+  }
+
+  .site-shell-home .hero-banner-home .home-hero-subtitle-detached {
+    margin: -46px 0 0 74px;
+    padding-left: 0;
   }
 
   .site-shell-home .home-phone-column {
@@ -1229,6 +1232,68 @@
     font-size: 0.74rem;
     font-weight: 900;
     color: rgba(20, 12, 24, 0.92);
+  }
+
+  .home-story-prompt-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at top, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 46%),
+      rgba(18, 10, 26, 0.18);
+    backdrop-filter: blur(18px);
+  }
+
+  .home-story-prompt-shell.is-desktop {
+    width: min(100%, 418px);
+    position: relative;
+    overflow: hidden;
+    padding: 14px;
+    border-radius: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.14)) padding-box,
+      linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.68)) border-box;
+    box-shadow:
+      0 30px 70px rgba(0, 0, 0, 0.18),
+      0 0 0 1px rgba(255, 255, 255, 0.14),
+      0 0 54px rgba(255, 255, 255, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    backdrop-filter: blur(22px);
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-card {
+    gap: 14px;
+    padding: 18px 18px 16px;
+    border-radius: 22px;
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-head p {
+    font-size: 0.96rem;
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-label,
+  .home-story-prompt-shell.is-desktop .home-story-prompt-field span {
+    font-size: 0.72rem;
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-chip {
+    min-height: 40px;
+    font-size: 0.86rem;
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-field textarea {
+    min-height: 136px;
+    border-radius: 20px;
+    font-size: 16px;
+  }
+
+  .home-story-prompt-shell.is-desktop .home-story-prompt-submit {
+    min-height: 42px;
+    font-size: 0.92rem;
   }
 
   .site-shell-home .home-app-form {

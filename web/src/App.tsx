@@ -2340,7 +2340,6 @@ function SiteLayout({
                   <h1 className="visually-hidden">{title}</h1>
                   <img className="hero-title-art" src={heroTitleImage} alt="" />
                 </div>
-                <p className="hero-subtitle">{subtitle}</p>
                 <button
                   type="button"
                   className="home-showcase-float-button"
@@ -2360,6 +2359,7 @@ function SiteLayout({
                   </span>
                 </button>
               </div>
+              <p className="hero-subtitle home-hero-subtitle-detached">{subtitle}</p>
               <div className="hero-illustration" aria-hidden="true">
                 <img className="hero-ribbon hero-ribbon-right" src={purpleRibbonImage} alt="" />
                 <img className="hero-ribbon hero-ribbon-bottom" src={goldRibbonImage} alt="" />
@@ -2784,70 +2784,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 })}
               </div>
 
-              {showMobileStoryPrompt ? (
-                <div className="home-story-prompt-backdrop" role="presentation" onClick={() => setShowMobileStoryPrompt(false)}>
-                  <div
-                    className="home-story-prompt-shell"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={copy(locale, { zh: '歌曲生成信息', en: 'Song creation details' })}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <div className="home-story-prompt-card">
-                      <div className="home-story-prompt-head">
-                        <p>MelodyVow</p>
-                        <button
-                          type="button"
-                          className="home-story-prompt-close"
-                          onClick={() => setShowMobileStoryPrompt(false)}
-                          aria-label={copy(locale, { zh: '关闭', en: 'Close' })}
-                        >
-                          ×
-                        </button>
-                      </div>
-
-                      <div className="home-story-prompt-section">
-                        <span className="home-story-prompt-label">Occasion</span>
-                        <div className="home-story-prompt-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
-                          {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
-                            const active = draft.occasion === occasion
-                            return (
-                              <button
-                                key={occasion}
-                                type="button"
-                                className={`home-story-prompt-chip ${active ? 'is-active' : ''}`}
-                                onClick={() => setDraft((current) => ({ ...current, occasion }))}
-                              >
-                                {getOccasionLabel(locale, occasion)}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      </div>
-
-                      <label className="home-story-prompt-field">
-                        <span>Love Story</span>
-                        <textarea
-                          value={draft.loveStory}
-                          onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
-                          placeholder="Add a short story to make the lyrics feel personal"
-                          rows={4}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        className="home-story-prompt-submit"
-                        onClick={() => void handleGenerateSong()}
-                        disabled={isSubmitting}
-                      >
-                        {isSubmitting ? copy(locale, { zh: '提交中...', en: 'Submitting...' }) : 'Create My Song'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
             </div>
 
             <div className="home-phone-legacy">
@@ -3018,6 +2954,70 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               </button>
             ))}
           </section>
+
+          {showMobileStoryPrompt ? (
+            <div className="home-story-prompt-backdrop" role="presentation" onClick={() => setShowMobileStoryPrompt(false)}>
+              <div
+                className={`home-story-prompt-shell ${isMobileViewport ? '' : 'is-desktop'}`.trim()}
+                role="dialog"
+                aria-modal="true"
+                aria-label={copy(locale, { zh: '歌曲生成信息', en: 'Song creation details' })}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="home-story-prompt-card">
+                  <div className="home-story-prompt-head">
+                    <p>MelodyVow</p>
+                    <button
+                      type="button"
+                      className="home-story-prompt-close"
+                      onClick={() => setShowMobileStoryPrompt(false)}
+                      aria-label={copy(locale, { zh: '关闭', en: 'Close' })}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="home-story-prompt-section">
+                    <span className="home-story-prompt-label">Occasion</span>
+                    <div className="home-story-prompt-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
+                      {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
+                        const active = draft.occasion === occasion
+                        return (
+                          <button
+                            key={occasion}
+                            type="button"
+                            className={`home-story-prompt-chip ${active ? 'is-active' : ''}`}
+                            onClick={() => setDraft((current) => ({ ...current, occasion }))}
+                          >
+                            {getOccasionLabel(locale, occasion)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <label className="home-story-prompt-field">
+                    <span>Love Story</span>
+                    <textarea
+                      value={draft.loveStory}
+                      onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
+                      placeholder="Add a short story to make the lyrics feel personal"
+                      rows={4}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    className="home-story-prompt-submit"
+                    onClick={() => void handleGenerateSong()}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? copy(locale, { zh: '提交中...', en: 'Submitting...' }) : 'Create My Song'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
         </>
       )}
