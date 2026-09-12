@@ -2427,13 +2427,16 @@
 }
 
 .floating-phone-mini-lyrics-body {
-  max-height: 188px;
-  overflow: auto;
-  padding-right: 4px;
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 6px;
   touch-action: pan-y;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   user-select: text;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(183, 108, 149, 0.9) rgba(244, 228, 238, 0.88);
 }
 
 .floating-phone-mini-lyrics-body p {
@@ -2444,6 +2447,27 @@
   font-weight: 700;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.floating-phone-mini-lyrics-body::-webkit-scrollbar,
+.site-shell-showcase .showcase-mobile-lyrics-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.floating-phone-mini-lyrics-body::-webkit-scrollbar-track,
+.site-shell-showcase .showcase-mobile-lyrics-body::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(244, 228, 238, 0.88);
+}
+
+.floating-phone-mini-lyrics-body::-webkit-scrollbar-thumb,
+.site-shell-showcase .showcase-mobile-lyrics-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: linear-gradient(180deg, rgba(255, 126, 173, 0.94), rgba(151, 92, 214, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 4px 10px rgba(139, 83, 226, 0.16);
 }
 
 .floating-player-controls {
@@ -2537,7 +2561,7 @@
   }
 
   .floating-phone-mini-lyrics-body {
-    max-height: 206px;
+    max-height: 228px;
   }
 
   .floating-phone-mini-lyrics-body p {
@@ -5451,9 +5475,10 @@
   }
 
   .site-shell-showcase .showcase-mobile-lyrics-body {
-    max-height: 188px;
+    max-height: 236px;
+    overflow-x: hidden;
     overflow-y: auto;
-    padding-right: 2px;
+    padding-right: 6px;
     color: rgba(20, 12, 24, 0.84);
     font-family: var(--font-ui);
     font-size: 0.6rem;
@@ -5461,6 +5486,11 @@
     font-weight: 700;
     white-space: pre-wrap;
     word-break: break-word;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(183, 108, 149, 0.9) rgba(244, 228, 238, 0.88);
   }
 
   .site-shell-showcase .floating-player-teaser,
