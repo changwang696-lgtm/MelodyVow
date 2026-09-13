@@ -484,7 +484,38 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
 const HOME_FIREWORK_GOLD_COLORS = ['#fffbf0', '#fff1c2', '#ffe08a', '#f4c45d', '#d89b2f', '#9d6915']
 const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const PRIMARY_SITE_HOST = 'melodyvowai.com'
+
+function getProductionApiBaseUrl() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const hostname = String(window.location.hostname || '').trim().toLowerCase()
+  if (hostname === PRIMARY_SITE_HOST || hostname === `www.${PRIMARY_SITE_HOST}`) {
+    return 'https://api.melodyvowai.com'
+  }
+
+  return ''
+}
+
+function redirectToPrimarySiteHost() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const hostname = String(window.location.hostname || '').trim().toLowerCase()
+  if (hostname !== `www.${PRIMARY_SITE_HOST}`) {
+    return
+  }
+
+  window.location.replace(`https://${PRIMARY_SITE_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`)
+}
+
+redirectToPrimarySiteHost()
+
+// Keep production auth working even if the frontend env misses the API base.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || getProductionApiBaseUrl()).replace(/\/$/, '')
 const GOOGLE_LOGIN_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
