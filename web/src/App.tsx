@@ -1276,7 +1276,9 @@ function App() {
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
   const effectiveAuthSession = authSession ?? loadAuthSession()
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
-  const rootSearchParams = new URLSearchParams(location.search)
+  const rootSearchParams = new URLSearchParams(
+    typeof window !== 'undefined' && window.location.search ? window.location.search : location.search,
+  )
   const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
   const activeMemberToken = effectiveAuthSession?.authToken?.trim() || ''
   const activeMemberEmail = effectiveAuthSession?.email?.trim() || ''
