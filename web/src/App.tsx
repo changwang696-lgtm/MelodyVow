@@ -132,6 +132,14 @@ type AuthSession = {
   partnerName: string
   plan: string
   heartBeansBalance?: number
+  topupHeartBeansBalance?: number
+  subscriptionHeartBeansBalance?: number
+  subscriptionStatus?: string
+  subscriptionPlanId?: string
+  subscriptionCurrentPeriodEnd?: string
+  stripeCustomerId?: string
+  paypalSubscriptionId?: string
+  subscriptionProvider?: 'stripe' | 'paypal' | ''
   mode: 'login' | 'signup'
   welcomeMessage: string
   lastAuthAt: string
@@ -143,6 +151,14 @@ type MemberProfile = {
   partnerName: string
   plan: string
   heartBeansBalance?: number
+  topupHeartBeansBalance?: number
+  subscriptionHeartBeansBalance?: number
+  subscriptionStatus?: string
+  subscriptionPlanId?: string
+  subscriptionCurrentPeriodEnd?: string
+  stripeCustomerId?: string
+  paypalSubscriptionId?: string
+  subscriptionProvider?: 'stripe' | 'paypal' | ''
   lastAuthAt: string
   avatarUrl?: string
 }
@@ -193,13 +209,28 @@ type AdminSong = {
 type AdminOrder = {
   id: string
   couple: string
+  planId?: string
   plan: string
+  planType?: 'subscription' | 'credit_pack'
   amount: number
   heartBeans?: number
+  creditsBalanceType?: 'subscription' | 'topup'
   heartBeansGrantedAt?: string
   status: string
   createdAt: string
   email?: string
+  paymentMethod?: string
+  source?: string
+  mode?: string
+  stripeCheckoutSessionId?: string
+  stripeCustomerId?: string
+  stripePaymentIntentId?: string
+  stripeInvoiceId?: string
+  stripeSubscriptionId?: string
+  paypalOrderId?: string
+  paypalCaptureId?: string
+  paypalSubscriptionId?: string
+  subscriptionCurrentPeriodEnd?: string
   note?: string
 }
 
@@ -223,6 +254,10 @@ type PublicSiteConfig = {
 type PlanItem = {
   id: string
   name: string
+  type?: 'subscription' | 'credit_pack'
+  billingInterval?: 'month' | 'year' | ''
+  stripePriceId?: string
+  paypalPlanId?: string
   price: number
   heartBeans?: number
   currency?: string
@@ -234,6 +269,8 @@ type PaymentMethod = {
   id: string
   name: string
   description?: string
+  provider?: 'stripe_checkout' | 'paypal' | 'alipay'
+  supportedPlanTypes?: Array<'subscription' | 'credit_pack'>
 }
 
 type ShowcaseSessionTrack = {
@@ -262,7 +299,9 @@ type PaymentMethodAdmin = {
   id: string
   name: string
   enabled: boolean
+  provider?: 'stripe_checkout' | 'paypal' | 'alipay'
   envKey: string
+  supportedPlanTypes?: Array<'subscription' | 'credit_pack'>
   description?: string
 }
 
@@ -270,6 +309,11 @@ type AdminMember = {
   email: string
   plan?: string
   heartBeansBalance?: number
+  topupHeartBeansBalance?: number
+  subscriptionHeartBeansBalance?: number
+  subscriptionStatus?: string
+  subscriptionPlanId?: string
+  subscriptionCurrentPeriodEnd?: string
   disabled?: boolean
   lastAuthAt?: string
   songs?: number
@@ -1197,12 +1241,42 @@ function loadGeneratingShowcaseSession() {
 function normalizePricingPlan(plan: PlanItem): PlanItem {
   return {
     ...plan,
+    type: plan.type === 'credit_pack' ? 'credit_pack' : 'subscription',
+    billingInterval: plan.billingInterval === 'year' ? 'year' : plan.billingInterval === 'month' ? 'month' : '',
+    stripePriceId: String(plan.stripePriceId || '').trim(),
+    paypalPlanId: String(plan.paypalPlanId || '').trim(),
     currency: 'USD',
   }
 }
 
 function formatPlanPrice(plan: Pick<PlanItem, 'price'>) {
   return `$${plan.price}`
+}
+
+function getPlanActionLabel(locale: Locale, planType: PlanItem['type']) {
+  return planType === 'credit_pack'
+    ? copy(locale, { zh: '立即充值', en: 'Top Up Now' })
+    : copy(locale, { zh: '立即订阅', en: 'Subscribe Now' })
+}
+
+function getPlanTypeLabel(locale: Locale, planType: PlanItem['type']) {
+  return planType === 'credit_pack'
+    ? copy(locale, { zh: '充值包', en: 'Top Up Pack' })
+    : copy(locale, { zh: '月订阅', en: 'Monthly Subscription' })
+}
+
+function formatPlanCreditsText(locale: Locale, plan: PlanItem) {
+  if ((plan.type || 'subscription') === 'credit_pack') {
+    return copy(locale, {
+      zh: `立即到账 ${plan.heartBeans || 0} 点充值额度`,
+      en: `${plan.heartBeans || 0} top-up credits delivered instantly`,
+    })
+  }
+
+  return copy(locale, {
+    zh: `每月发放 ${plan.heartBeans || 0} 点订阅额度`,
+    en: `${plan.heartBeans || 0} subscription credits every month`,
+  })
 }
 
 function ScrollManager() {
@@ -1231,7 +1305,7 @@ function App() {
     meetingStory: '',
     vowKeywords: '',
   })
-  const [selectedPlan, setSelectedPlan] = useState('Pro')
+  const [selectedPlan, setSelectedPlan] = useState('Pro Monthly')
   const [modalMessage, setModalMessage] = useState('')
   const [songHistory, setSongHistory] = useState<HistoryItem[]>(() => loadSongHistory())
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => loadAuthSession())
@@ -1402,6 +1476,14 @@ function App() {
               partnerName: data.partnerName || current.partnerName,
               plan: data.plan || current.plan,
               heartBeansBalance: typeof data.heartBeansBalance === 'number' ? data.heartBeansBalance : current.heartBeansBalance,
+              topupHeartBeansBalance: typeof data.topupHeartBeansBalance === 'number' ? data.topupHeartBeansBalance : current.topupHeartBeansBalance,
+              subscriptionHeartBeansBalance: typeof data.subscriptionHeartBeansBalance === 'number' ? data.subscriptionHeartBeansBalance : current.subscriptionHeartBeansBalance,
+              subscriptionStatus: data.subscriptionStatus || current.subscriptionStatus,
+              subscriptionPlanId: data.subscriptionPlanId || current.subscriptionPlanId,
+              subscriptionCurrentPeriodEnd: data.subscriptionCurrentPeriodEnd || current.subscriptionCurrentPeriodEnd,
+              stripeCustomerId: data.stripeCustomerId || current.stripeCustomerId,
+              paypalSubscriptionId: data.paypalSubscriptionId || current.paypalSubscriptionId,
+              subscriptionProvider: data.subscriptionProvider || current.subscriptionProvider,
               lastAuthAt: data.lastAuthAt || current.lastAuthAt,
               avatarUrl: data.avatarUrl || current.avatarUrl,
             }
@@ -4121,14 +4203,20 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
 
     const fallbackPlans: PlanItem[] = locale === 'zh'
       ? [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'] },
+          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 5 点订阅额度', 'AI 歌词生成', 'MP3 下载'] },
+          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['每月自动续费', '每月发放 15 点订阅额度', '完整歌词', '高清音频'] },
+          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音'] },
+          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 5 点充值额度', '适合低频用户'] },
+          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '热门', features: ['一次性购买', '立即到账 15 点充值额度', '适合婚礼筹备期集中使用'] },
+          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 40 点充值额度', '适合高频用户'] },
         ]
       : [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 service credits', 'AI lyrics', 'Names in song', 'MP3 download'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['15 service credits', 'Full lyrics', 'Wedding version', 'HD audio'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 service credits', 'Real singer', 'Custom arrangement', 'Dual mix'] },
+          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['Auto-renews monthly', '5 subscription credits every month', 'AI lyrics', 'MP3 download'] },
+          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['Auto-renews monthly', '15 subscription credits every month', 'Full lyrics', 'HD audio'] },
+          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['Auto-renews monthly', '40 subscription credits every month', 'Real singer', 'Dual mix'] },
+          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['One-time payment', '5 top-up credits instantly', 'Ideal for occasional orders'] },
+          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: 'Popular', features: ['One-time payment', '15 top-up credits instantly', 'Ideal for wedding production bursts'] },
+          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['One-time payment', '40 top-up credits instantly', 'Ideal for studios and heavy usage'] },
         ]
 
     async function loadPlans() {
@@ -4161,6 +4249,9 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
     }
   }, [locale])
 
+  const subscriptionPlans = plans.filter((plan) => (plan.type || 'subscription') === 'subscription')
+  const topupPlans = plans.filter((plan) => (plan.type || 'subscription') === 'credit_pack')
+
   return (
     <SiteLayout
       locale={locale}
@@ -4173,39 +4264,69 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
       authSession={authSession}
       hideHero
     >
-      <section className="pricing-grid pricing-page-grid">
-        {plans.map((plan) => (
-          <article
-            key={plan.name}
-            className={`glass-card pricing-card ${selectedPlan === plan.name ? 'selected' : ''}`}
-          >
-            {plan.badge ? <span className="corner-badge">{plan.badge}</span> : null}
-            <div className="step-badge">{plan.name.slice(0, 1)}</div>
-            <h3>{plan.name}</h3>
-            <div className="price-tag">{formatPlanPrice(plan)}</div>
-            <p>{copy(locale, { zh: `包含 ${plan.heartBeans || 0} 点订阅服务额度`, en: `${plan.heartBeans || 0} service credits included` })}</p>
-            <ul>
-              {(plan.features || []).map((item) => (
-                <li key={item}>{item}</li>
+      <section className="pricing-page-stack">
+        {[
+          {
+            key: 'subscription',
+            title: copy(locale, { zh: '月订阅', en: 'Monthly Subscription' }),
+            subtitle: copy(locale, {
+              zh: '适合持续创作的用户，每月自动扣款并发放订阅额度。',
+              en: 'Best for ongoing creation with monthly auto-renewal and recurring credits.',
+            }),
+            items: subscriptionPlans,
+          },
+          {
+            key: 'topup',
+            title: copy(locale, { zh: '充值包', en: 'Top Up Packs' }),
+            subtitle: copy(locale, {
+              zh: '一次性购买，额度立即到账，不自动续费。',
+              en: 'One-time purchase with instant credits and no auto-renewal.',
+            }),
+            items: topupPlans,
+          },
+        ].map((group) => (
+          <section key={group.key} className="pricing-group-section">
+            <div className="pricing-group-head">
+              <p className="mini-eyebrow">{group.title}</p>
+              <h2>{group.subtitle}</h2>
+            </div>
+            <div className="pricing-grid pricing-page-grid">
+              {group.items.map((plan) => (
+                <article
+                  key={plan.name}
+                  className={`glass-card pricing-card ${selectedPlan === plan.name ? 'selected' : ''}`}
+                >
+                  {plan.badge ? <span className="corner-badge">{plan.badge}</span> : null}
+                  <div className="step-badge">{plan.name.slice(0, 1)}</div>
+                  <p className="mini-eyebrow">{getPlanTypeLabel(locale, plan.type)}</p>
+                  <h3>{plan.name}</h3>
+                  <div className="price-tag">{formatPlanPrice(plan)}</div>
+                  <p>{formatPlanCreditsText(locale, plan)}</p>
+                  <ul>
+                    {(plan.features || []).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    className="primary-button compact pricing-action-button"
+                    onClick={() => {
+                      setSelectedPlan(plan.name)
+                      navigate(withLocale(locale, `/checkout?planId=${encodeURIComponent(plan.id)}`))
+                    }}
+                  >
+                    {getPlanActionLabel(locale, plan.type)}
+                  </button>
+                </article>
               ))}
-            </ul>
-            <button
-              type="button"
-              className="primary-button compact pricing-action-button"
-              onClick={() => {
-                setSelectedPlan(plan.name)
-                navigate(withLocale(locale, `/checkout?planId=${encodeURIComponent(plan.id)}`))
-              }}
-            >
-              {copy(locale, { zh: '选择此套餐', en: 'Choose This Plan' })}
-            </button>
-          </article>
+            </div>
+          </section>
         ))}
       </section>
       <ServiceHubSection
         locale={locale}
         title={copy(locale, {
-          zh: '订阅购买前请先阅读服务政策',
+          zh: '购买前请先阅读服务政策',
           en: 'Review service policies before purchase',
         })}
         className="pricing-service-hub"
@@ -4228,9 +4349,12 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
     let disposed = false
 
     const fallbackPlans: PlanItem[] = [
-      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [] },
-      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [] },
-      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [] },
+      { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [] },
+      { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [] },
+      { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [] },
+      { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: [] },
+      { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '', features: [] },
+      { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: [] },
     ]
 
     async function loadCheckoutData() {
@@ -4272,6 +4396,8 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
   const selectedById = plans.find((plan) => plan.id === requestedPlanId)
   const selectedByName = plans.find((plan) => plan.name === selectedPlan)
   const activePlan = selectedById || selectedByName || plans[0] || null
+  const visibleMethods = methods.filter((method) => !activePlan || (method.supportedPlanTypes || ['credit_pack']).includes((activePlan.type || 'subscription')))
+  const actionLabel = getPlanActionLabel(locale, activePlan?.type)
 
   useEffect(() => {
     if (!activePlan) {
@@ -4307,9 +4433,10 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
         body: JSON.stringify({
           planId: activePlan.id,
           methodId: method.id,
+          locale,
         }),
       })
-      const result = (await response.json()) as { checkoutUrl?: string; message?: string }
+      const result = (await readJsonSafe(response)) as { checkoutUrl?: string; message?: string }
       if (!response.ok) {
         throw new Error(result.message || '创建订单失败。')
       }
@@ -4317,7 +4444,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
         throw new Error('收款链接为空。')
       }
 
-      window.open(result.checkoutUrl, '_blank', 'noopener,noreferrer')
+      window.location.assign(result.checkoutUrl)
     } catch (payError) {
       setError(payError instanceof Error ? payError.message : '创建订单失败。')
     } finally {
@@ -4346,8 +4473,9 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
           {loading ? <p className="empty-state">{copy(locale, { zh: '加载中...', en: 'Loading...' })}</p> : null}
           {!loading && activePlan ? (
             <>
+              <p className="mini-eyebrow">{getPlanTypeLabel(locale, activePlan.type)}</p>
               <div className="price-tag">{formatPlanPrice(activePlan)}</div>
-              <p>{copy(locale, { zh: `开通 ${activePlan.heartBeans || 0} 点订阅服务额度`, en: `${activePlan.heartBeans || 0} service credits will be activated` })}</p>
+              <p>{formatPlanCreditsText(locale, activePlan)}</p>
               <button type="button" className="primary-button compact pricing-action-button" onClick={() => navigate(withLocale(locale, '/pricing'))}>
                 {copy(locale, { zh: '返回选择套餐', en: 'Back to Pricing' })}
               </button>
@@ -4361,11 +4489,11 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
             <span>{methods.length ? `${methods.length}` : '-'}</span>
           </div>
           {error ? <p className="form-error">{error}</p> : null}
-          {!loading && !methods.length ? (
+          {!loading && !visibleMethods.length ? (
             <p className="empty-state">{copy(locale, { zh: '暂无可用支付方式，请联系管理员在后台启用。', en: 'No payment methods available. Please contact the admin to enable one.' })}</p>
           ) : null}
           <div className="admin-detail-stack">
-            {methods.map((method) => (
+            {visibleMethods.map((method) => (
               <button
                 key={method.id}
                 type="button"
@@ -4373,7 +4501,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
                 disabled={submitting || loading}
                 onClick={() => void handleStartPayment(method)}
               >
-                {method.name}
+                {actionLabel} · {method.name}
               </button>
             ))}
           </div>
@@ -4487,6 +4615,14 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
         partnerName: result.profile.partnerName || normalizedPartnerName,
         plan: result.profile.plan || selectedPlan,
         heartBeansBalance: typeof result.profile.heartBeansBalance === 'number' ? result.profile.heartBeansBalance : 0,
+        topupHeartBeansBalance: typeof result.profile.topupHeartBeansBalance === 'number' ? result.profile.topupHeartBeansBalance : 0,
+        subscriptionHeartBeansBalance: typeof result.profile.subscriptionHeartBeansBalance === 'number' ? result.profile.subscriptionHeartBeansBalance : 0,
+        subscriptionStatus: result.profile.subscriptionStatus || '',
+        subscriptionPlanId: result.profile.subscriptionPlanId || '',
+        subscriptionCurrentPeriodEnd: result.profile.subscriptionCurrentPeriodEnd || '',
+        stripeCustomerId: result.profile.stripeCustomerId || '',
+        paypalSubscriptionId: result.profile.paypalSubscriptionId || '',
+        subscriptionProvider: result.profile.subscriptionProvider || '',
         mode: tab,
         welcomeMessage: successMessage,
         lastAuthAt: result.profile.lastAuthAt || new Date().toISOString(),
@@ -4630,7 +4766,9 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
 
 function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer }: AccountPageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const isMobileViewport = useIsMobileViewport()
+  const [openingPortal, setOpeningPortal] = useState(false)
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
@@ -4639,6 +4777,13 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
   const memberLabel = authSession?.email ?? copy(locale, { zh: '未登录访客', en: 'Guest User' })
   const currentPlanLabel = authSession?.plan?.trim() || selectedPlan
   const heartBeansBalance = Number(authSession?.heartBeansBalance || 0)
+  const topupHeartBeansBalance = Number(authSession?.topupHeartBeansBalance || 0)
+  const subscriptionHeartBeansBalance = Number(authSession?.subscriptionHeartBeansBalance || 0)
+  const subscriptionStatus = String(authSession?.subscriptionStatus || '').trim()
+  const subscriptionPlanId = String(authSession?.subscriptionPlanId || '').trim()
+  const subscriptionCurrentPeriodEnd = String(authSession?.subscriptionCurrentPeriodEnd || '').trim()
+  const subscriptionProvider = String(authSession?.subscriptionProvider || '').trim()
+  const canManageStripeSubscription = subscriptionProvider === 'stripe' && Boolean(String(authSession?.stripeCustomerId || '').trim())
   const welcomeTitle = copy(locale, {
     zh: authSession?.mode === 'signup' ? '欢迎加入 MelodyVow 会员' : '欢迎回来',
     en: authSession?.mode === 'signup' ? 'Welcome to MelodyVow' : 'Welcome Back',
@@ -4655,6 +4800,40 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         minute: '2-digit',
       })
     : null
+  const nextBillingTime = subscriptionCurrentPeriodEnd
+    ? new Date(subscriptionCurrentPeriodEnd).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US', {
+        month: 'short',
+        day: 'numeric',
+      })
+    : ''
+
+  useEffect(() => {
+    const checkoutState = String(searchParams.get('checkout') || '').trim()
+    const portalState = String(searchParams.get('portal') || '').trim()
+
+    if (!checkoutState && !portalState) {
+      return
+    }
+
+    if (checkoutState === 'success') {
+      onOpenModal(copy(locale, {
+        zh: '支付已提交成功。我们会在 Stripe 回调确认后自动发放额度并刷新订阅状态。',
+        en: 'Payment submitted successfully. Credits and subscription status will refresh automatically after Stripe confirms the checkout.',
+      }))
+    } else if (checkoutState === 'cancel') {
+      onOpenModal(copy(locale, {
+        zh: '你已取消本次支付，套餐仍然可以稍后继续购买。',
+        en: 'This checkout was cancelled. You can return and purchase the plan later.',
+      }))
+    } else if (portalState === 'returned') {
+      onOpenModal(copy(locale, {
+        zh: '已返回订阅管理页，最新订阅状态会自动同步到账户中心。',
+        en: 'Returned from the billing portal. Your latest subscription status will sync into the account center automatically.',
+      }))
+    }
+
+    navigate(withLocale(locale, '/account'), { replace: true })
+  }, [locale, navigate, onOpenModal, searchParams])
 
   function buildSongFileName(item: HistoryItem) {
     const raw = `${item.title}${item.variantLabel ? ` ${item.variantLabel}` : ''}`
@@ -4736,6 +4915,38 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         zh: '歌词如下：',
         en: 'Lyrics:',
       })}\n${lyricsText}`)
+    }
+  }
+
+  async function handleOpenBillingPortal() {
+    setOpeningPortal(true)
+
+    try {
+      const response = await fetch(apiUrl('/api/stripe/create-billing-portal'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getMemberAuthHeaders(authSession),
+        },
+        body: JSON.stringify({ locale }),
+      })
+      const result = (await readJsonSafe(response)) as { url?: string; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || copy(locale, { zh: '创建订阅管理入口失败。', en: 'Failed to open billing portal.' }))
+      }
+
+      if (!result.url) {
+        throw new Error(copy(locale, { zh: '订阅管理链接为空。', en: 'Billing portal URL is empty.' }))
+      }
+
+      window.location.assign(result.url)
+    } catch (error) {
+      onOpenModal(error instanceof Error ? error.message : copy(locale, {
+        zh: '创建订阅管理入口失败。',
+        en: 'Failed to open billing portal.',
+      }))
+    } finally {
+      setOpeningPortal(false)
     }
   }
 
@@ -4886,12 +5097,29 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             </div>
             <p className="account-member-email">{memberLabel}</p>
             <div className="tag-row">
-              <span className="soft-pill accent">{currentPlanLabel} Member</span>
+              <span className="soft-pill accent">{currentPlanLabel}</span>
               <span className="soft-pill">{copy(locale, { zh: `${heartBeansBalance} 点服务额度`, en: `${heartBeansBalance} service credits` })}</span>
+              <span className="soft-pill">{copy(locale, { zh: `订阅额度 ${subscriptionHeartBeansBalance}`, en: `Subscription ${subscriptionHeartBeansBalance}` })}</span>
+              <span className="soft-pill">{copy(locale, { zh: `充值额度 ${topupHeartBeansBalance}`, en: `Top-up ${topupHeartBeansBalance}` })}</span>
+              {subscriptionStatus ? (
+                <span className="soft-pill">{copy(locale, { zh: `订阅状态 ${subscriptionStatus}`, en: `Subscription ${subscriptionStatus}` })}</span>
+              ) : null}
               {authTime ? (
                 <span className="soft-pill">{copy(locale, { zh: `最近验证 ${authTime}`, en: `Verified ${authTime}` })}</span>
               ) : null}
             </div>
+            {canManageStripeSubscription ? (
+              <button
+                type="button"
+                className="ghost-button compact"
+                disabled={openingPortal}
+                onClick={() => void handleOpenBillingPortal()}
+              >
+                {openingPortal
+                  ? copy(locale, { zh: '打开中...', en: 'Opening...' })
+                  : copy(locale, { zh: '管理订阅', en: 'Manage Subscription' })}
+              </button>
+            ) : null}
           </section>
 
           <section className="glass-card account-welcome-card">
@@ -4911,7 +5139,30 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                 <strong>{heartBeansBalance}</strong>
                 <span>{copy(locale, { zh: '剩余服务额度', en: 'Service Credits' })}</span>
               </div>
+              <div className="account-metric">
+                <strong>{subscriptionHeartBeansBalance}</strong>
+                <span>{copy(locale, { zh: '订阅额度', en: 'Subscription Credits' })}</span>
+              </div>
+              <div className="account-metric">
+                <strong>{topupHeartBeansBalance}</strong>
+                <span>{copy(locale, { zh: '充值额度', en: 'Top-up Credits' })}</span>
+              </div>
             </div>
+            {subscriptionPlanId ? (
+              <p className="account-subscription-note">
+                {copy(locale, {
+                  zh: `当前订阅：${subscriptionPlanId}${nextBillingTime ? `，下次账期至 ${nextBillingTime}` : ''}${subscriptionProvider ? `，通道 ${subscriptionProvider}` : ''}`,
+                  en: `Subscription: ${subscriptionPlanId}${nextBillingTime ? `, current period through ${nextBillingTime}` : ''}${subscriptionProvider ? `, via ${subscriptionProvider}` : ''}`,
+                })}
+              </p>
+            ) : (
+              <p className="account-subscription-note">
+                {copy(locale, {
+                  zh: '你当前没有激活中的月订阅，可以在套餐页直接立即订阅。',
+                  en: 'No active monthly subscription yet. You can subscribe directly from the pricing page.',
+                })}
+              </p>
+            )}
           </section>
         </aside>
 
@@ -5398,11 +5649,14 @@ function AdminDashboardPage({
     }
 
     const topupAmount = Math.max(0, Number(manualTopupAmount || 0))
-    const currentBalance = Number(selectedMember.heartBeansBalance ?? 0)
+    const currentTopupBalance = Number(selectedMember.topupHeartBeansBalance ?? selectedMember.heartBeansBalance ?? 0)
+    const currentSubscriptionBalance = Number(selectedMember.subscriptionHeartBeansBalance ?? 0)
     const manualNote = manualTopupNote.trim()
     const nextMemberPayload: AdminMember = {
       ...selectedMember,
-      heartBeansBalance: currentBalance + topupAmount,
+      topupHeartBeansBalance: currentTopupBalance + topupAmount,
+      subscriptionHeartBeansBalance: currentSubscriptionBalance,
+      heartBeansBalance: currentTopupBalance + topupAmount + currentSubscriptionBalance,
     }
 
     if (topupAmount > 0 || manualNote) {
@@ -5670,6 +5924,7 @@ function AdminDashboardPage({
                       </div>
                       <div className="admin-member-row-meta">
                         <span className="soft-pill">{item.heartBeansBalance ?? 0} 点</span>
+                        <span className="soft-pill">{`订阅 ${item.subscriptionHeartBeansBalance ?? 0} / 充值 ${item.topupHeartBeansBalance ?? 0}`}</span>
                         <span className="soft-pill">{typeof item.songs === 'number' ? `${item.songs} 首` : '0 首'}</span>
                         <span className={`soft-pill ${item.disabled ? '' : 'accent'}`}>{item.disabled ? '禁用' : '正常'}</span>
                       </div>
@@ -5691,8 +5946,16 @@ function AdminDashboardPage({
                         <strong>{selectedMember.plan || '未设置'}</strong>
                       </article>
                       <article className="admin-mini-card">
-                        <span>服务额度余额</span>
+                        <span>总服务额度</span>
                         <strong>{selectedMember.heartBeansBalance ?? 0}</strong>
+                      </article>
+                      <article className="admin-mini-card">
+                        <span>订阅额度</span>
+                        <strong>{selectedMember.subscriptionHeartBeansBalance ?? 0}</strong>
+                      </article>
+                      <article className="admin-mini-card">
+                        <span>充值额度</span>
+                        <strong>{selectedMember.topupHeartBeansBalance ?? 0}</strong>
                       </article>
                       <article className="admin-mini-card">
                         <span>生成成功</span>
@@ -5724,11 +5987,31 @@ function AdminDashboardPage({
                         </select>
                       </label>
                       <label className="field">
-                        <span>服务额度余额</span>
+                        <span>充值额度余额</span>
                         <input
                           type="number"
-                          value={selectedMember.heartBeansBalance ?? 0}
-                          onChange={(event) => setSelectedMember((current) => current ? { ...current, heartBeansBalance: Number(event.target.value) } : current)}
+                          value={selectedMember.topupHeartBeansBalance ?? selectedMember.heartBeansBalance ?? 0}
+                          onChange={(event) => setSelectedMember((current) => current
+                            ? {
+                                ...current,
+                                topupHeartBeansBalance: Number(event.target.value),
+                                heartBeansBalance: Number(event.target.value) + Number(current.subscriptionHeartBeansBalance ?? 0),
+                              }
+                            : current)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>订阅额度余额</span>
+                        <input
+                          type="number"
+                          value={selectedMember.subscriptionHeartBeansBalance ?? 0}
+                          onChange={(event) => setSelectedMember((current) => current
+                            ? {
+                                ...current,
+                                subscriptionHeartBeansBalance: Number(event.target.value),
+                                heartBeansBalance: Number(event.target.value) + Number(current.topupHeartBeansBalance ?? current.heartBeansBalance ?? 0),
+                              }
+                            : current)}
                         />
                       </label>
                       <label className="field">
@@ -5747,6 +6030,22 @@ function AdminDashboardPage({
                           onChange={(event) => setManualTopupNote(event.target.value)}
                           rows={3}
                           placeholder="例如：售后补发、人工赠送、测试补偿"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>订阅状态</span>
+                        <input
+                          value={selectedMember.subscriptionStatus || ''}
+                          onChange={(event) => setSelectedMember((current) => current ? { ...current, subscriptionStatus: event.target.value } : current)}
+                          placeholder="active / past_due / cancelled"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>订阅计划 ID</span>
+                        <input
+                          value={selectedMember.subscriptionPlanId || ''}
+                          onChange={(event) => setSelectedMember((current) => current ? { ...current, subscriptionPlanId: event.target.value } : current)}
+                          placeholder="pro-monthly"
                         />
                       </label>
                     </section>
@@ -6084,7 +6383,7 @@ function AdminDashboardPage({
           {!loading && tab === 'plans' ? (
             <section className="glass-card admin-config-card">
               <div className="admin-table-head">
-                <strong>订阅套餐</strong>
+                <strong>套餐管理</strong>
                 <span>{plans.length} 条</span>
               </div>
               <div className="form-grid">
@@ -6115,13 +6414,62 @@ function AdminDashboardPage({
                         />
                       </label>
                       <label className="field">
-                        <span>订阅服务额度</span>
+                        <span>套餐类型</span>
+                        <select
+                          value={plan.type || 'subscription'}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, type: event.target.value as PlanItem['type'] } : item)))
+                          }
+                        >
+                          <option value="subscription">月订阅</option>
+                          <option value="credit_pack">充值包</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>账期</span>
+                        <select
+                          value={plan.billingInterval || ''}
+                          onChange={(event) =>
+                            setPlans((current) =>
+                              current.map((item, i) =>
+                                i === index ? { ...item, billingInterval: event.target.value as PlanItem['billingInterval'] } : item,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">无</option>
+                          <option value="month">month</option>
+                          <option value="year">year</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>服务额度</span>
                         <input
                           type="number"
                           value={plan.heartBeans ?? 0}
                           onChange={(event) =>
                             setPlans((current) => current.map((item, i) => (i === index ? { ...item, heartBeans: Number(event.target.value) } : item)))
                           }
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>Stripe Price ID</span>
+                        <input
+                          value={plan.stripePriceId || ''}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, stripePriceId: event.target.value } : item)))
+                          }
+                          placeholder="price_xxx"
+                        />
+                      </label>
+                      <label className="field form-span-2">
+                        <span>PayPal Plan ID</span>
+                        <input
+                          value={plan.paypalPlanId || ''}
+                          onChange={(event) =>
+                            setPlans((current) => current.map((item, i) => (i === index ? { ...item, paypalPlanId: event.target.value } : item)))
+                          }
+                          placeholder="P-xxxxxx"
                         />
                       </label>
                       <label className="field">
@@ -6160,9 +6508,13 @@ function AdminDashboardPage({
                     {
                       id: `plan-${crypto.randomUUID()}`,
                       name: 'New Plan',
+                      type: 'credit_pack',
+                      billingInterval: '',
+                      stripePriceId: '',
+                      paypalPlanId: '',
                       price: 0,
                       heartBeans: 0,
-                      currency: 'CNY',
+                      currency: 'USD',
                       badge: '',
                       features: [],
                     },
@@ -6210,6 +6562,21 @@ function AdminDashboardPage({
                         />
                       </label>
                       <label className="field">
+                        <span>Provider</span>
+                        <select
+                          value={method.provider || 'paypal'}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) => (i === index ? { ...item, provider: event.target.value as PaymentMethodAdmin['provider'] } : item)),
+                            )
+                          }
+                        >
+                          <option value="stripe_checkout">stripe_checkout</option>
+                          <option value="paypal">paypal</option>
+                          <option value="alipay">alipay</option>
+                        </select>
+                      </label>
+                      <label className="field">
                         <span>环境变量名</span>
                         <input
                           value={method.envKey}
@@ -6232,6 +6599,28 @@ function AdminDashboardPage({
                           }
                         />
                         <span>启用</span>
+                      </label>
+                      <label className="field form-span-2">
+                        <span>支持套餐类型(逗号分隔)</span>
+                        <input
+                          value={(method.supportedPlanTypes || []).join(', ')}
+                          onChange={(event) =>
+                            setPaymentMethods((current) =>
+                              current.map((item, i) =>
+                                i === index
+                                  ? {
+                                      ...item,
+                                      supportedPlanTypes: event.target.value
+                                        .split(',')
+                                        .map((value) => value.trim())
+                                        .filter(Boolean) as PaymentMethodAdmin['supportedPlanTypes'],
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          placeholder="subscription, credit_pack"
+                        />
                       </label>
                       <label className="field form-span-2">
                         <span>说明</span>
@@ -6266,7 +6655,9 @@ function AdminDashboardPage({
                       id: `method-${crypto.randomUUID()}`,
                       name: 'New Method',
                       enabled: false,
+                      provider: 'paypal',
                       envKey: '',
+                      supportedPlanTypes: ['credit_pack'],
                       description: '',
                     },
                   ])
