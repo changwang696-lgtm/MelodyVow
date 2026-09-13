@@ -1052,6 +1052,19 @@ function loadAuthSession() {
   }
 }
 
+function persistAuthSession(session: AuthSession | null) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (!session) {
+    window.localStorage.removeItem(AUTH_SESSION_KEY)
+    return
+  }
+
+  window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session))
+}
+
 function loadAdminSession() {
   if (typeof window === 'undefined') {
     return null as AdminSession | null
@@ -1301,10 +1314,13 @@ function App() {
   }, [modalLocale])
 
   useEffect(() => {
+    let disposed = false
     const googleStatus = pendingGoogleStatus
 
     if (!googleStatus) {
-      return
+      return () => {
+        disposed = true
+      }
     }
 
     const callbackLocale: Locale = rootSearchParams.get('authLocale') === 'zh'
@@ -1315,45 +1331,107 @@ function App() {
     const redirectToAuth = () => {
       navigate(withLocale(callbackLocale, '/auth'), { replace: true })
     }
+    const finalizeGoogleAuth = async () => {
+      if (googleStatus === 'error') {
+        if (!disposed) {
+          setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
+            zh: 'Google 登录失败，请稍后重试。',
+            en: 'Google sign-in failed. Please try again later.',
+          }))
+          redirectToAuth()
+        }
+        return
+      }
 
-    if (googleStatus === 'error') {
-      setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
-        zh: 'Google 登录失败，请稍后重试。',
-        en: 'Google sign-in failed. Please try again later.',
-      }))
-      redirectToAuth()
-      return
+      const token = String(rootSearchParams.get('token') || '').trim()
+      const nextEmail = String(rootSearchParams.get('email') || '').trim()
+
+      if (googleStatus !== 'success' || !token || !nextEmail) {
+        if (!disposed) {
+          setModalMessage(copy(callbackLocale, {
+            zh: 'Google 登录返回的数据不完整，请重新尝试。',
+            en: 'Google sign-in returned incomplete data. Please try again.',
+          }))
+          redirectToAuth()
+        }
+        return
+      }
+
+      const mode = rootSearchParams.get('mode') === 'signup' ? 'signup' : 'login'
+      const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
+      const nextSession: AuthSession = {
+        authToken: token,
+        email: nextEmail,
+        partnerName: String(rootSearchParams.get('partnerName') || draft.bride || '').trim(),
+        plan: String(rootSearchParams.get('plan') || selectedPlan || '').trim(),
+        heartBeansBalance: Number(rootSearchParams.get('heartBeansBalance') || 0),
+        mode,
+        welcomeMessage: successMessage,
+        lastAuthAt: String(rootSearchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+        avatarUrl: String(rootSearchParams.get('avatarUrl') || '').trim(),
+      }
+
+      // Persist immediately so the member UI does not briefly fall back to guest state.
+      persistAuthSession(nextSession)
+      if (!disposed) {
+        setSongHistory([])
+        setAuthSession(nextSession)
+      }
+
+      try {
+        const response = await fetch(apiUrl('/api/member/session'), {
+          headers: {
+            'x-member-token': token,
+          },
+        })
+        const data = (await readJsonSafe(response)) as Partial<MemberProfile> & { message?: string }
+
+        if (!response.ok || !String(data.email || '').trim()) {
+          throw new Error(data.message || copy(callbackLocale, {
+            zh: 'Google 登录状态校验失败，请重新尝试。',
+            en: 'Google sign-in session validation failed. Please try again.',
+          }))
+        }
+
+        const verifiedSession: AuthSession = {
+          ...nextSession,
+          email: String(data.email || nextSession.email).trim(),
+          partnerName: String(data.partnerName || nextSession.partnerName).trim(),
+          plan: String(data.plan || nextSession.plan).trim(),
+          heartBeansBalance: typeof data.heartBeansBalance === 'number' ? data.heartBeansBalance : nextSession.heartBeansBalance,
+          lastAuthAt: String(data.lastAuthAt || nextSession.lastAuthAt).trim(),
+          avatarUrl: String(data.avatarUrl || nextSession.avatarUrl || '').trim(),
+        }
+
+        if (disposed) {
+          return
+        }
+
+        persistAuthSession(verifiedSession)
+        setAuthSession(verifiedSession)
+        setModalMessage(successMessage)
+        navigate(withLocale(callbackLocale, '/account'), { replace: true })
+      } catch (error) {
+        if (disposed) {
+          return
+        }
+
+        persistAuthSession(null)
+        setAuthSession(null)
+        setSongHistory([])
+        setModalMessage(error instanceof Error ? error.message : copy(callbackLocale, {
+          zh: 'Google 登录失败，请稍后重试。',
+          en: 'Google sign-in failed. Please try again later.',
+        }))
+        redirectToAuth()
+      }
     }
 
-    const token = String(rootSearchParams.get('token') || '').trim()
-    const nextEmail = String(rootSearchParams.get('email') || '').trim()
+    void finalizeGoogleAuth()
 
-    if (googleStatus !== 'success' || !token || !nextEmail) {
-      setModalMessage(copy(callbackLocale, {
-        zh: 'Google 登录返回的数据不完整，请重新尝试。',
-        en: 'Google sign-in returned incomplete data. Please try again.',
-      }))
-      redirectToAuth()
-      return
+    return () => {
+      disposed = true
     }
-
-    const mode = rootSearchParams.get('mode') === 'signup' ? 'signup' : 'login'
-    const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
-
-    setSongHistory([])
-    setAuthSession({
-      authToken: token,
-      email: nextEmail,
-      partnerName: String(rootSearchParams.get('partnerName') || draft.bride || '').trim(),
-      plan: String(rootSearchParams.get('plan') || selectedPlan || '').trim(),
-      heartBeansBalance: Number(rootSearchParams.get('heartBeansBalance') || 0),
-      mode,
-      welcomeMessage: successMessage,
-      lastAuthAt: String(rootSearchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
-      avatarUrl: String(rootSearchParams.get('avatarUrl') || '').trim(),
-    })
-    setModalMessage(successMessage)
-    navigate(withLocale(callbackLocale, '/account'), { replace: true })
   }, [draft.bride, location.pathname, navigate, pendingGoogleStatus, rootSearchParams, selectedPlan])
 
   if (location.pathname === '/' && pendingGoogleStatus) {
@@ -1561,12 +1639,7 @@ function App() {
       return
     }
 
-    if (!authSession) {
-      window.localStorage.removeItem(AUTH_SESSION_KEY)
-      return
-    }
-
-    window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(authSession))
+    persistAuthSession(authSession)
   }, [authSession])
 
   useEffect(() => {
@@ -1603,6 +1676,7 @@ function App() {
 
   function handleAuthSuccess(session: AuthSession) {
     setSongHistory([])
+    persistAuthSession(session)
     setAuthSession(session)
   }
 
@@ -1615,6 +1689,7 @@ function App() {
       }).catch(() => {})
     }
 
+    persistAuthSession(null)
     setAuthSession(null)
     setSongHistory([])
   }
