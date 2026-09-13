@@ -1,11 +1,11 @@
 import 'dotenv/config'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import Stripe from 'stripe'
 import { getDatabaseConnectionString, PostgresPersistence } from './postgres-persistence.mjs'
 
 const app = express()
@@ -40,9 +40,9 @@ const PAYMENT_PROVIDERS = new Set(['stripe_checkout', 'paypal', 'alipay'])
 const CREDIT_BALANCE_TYPES = new Set(['subscription', 'topup'])
 const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
 const CREDIT_LEDGER_LIMIT = 20000
-const stripe = STRIPE_SECRET_KEY
-  ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2025-08-27.basil' })
-  : null
+const require = createRequire(import.meta.url)
+let StripeModule = null
+let stripe = null
 let paypalAccessTokenCache = {
   token: '',
   expiresAt: 0,
@@ -685,10 +685,24 @@ function getPaymentCheckoutUrl(method) {
 }
 
 function getStripeClient() {
-  if (!stripe) {
+  if (!STRIPE_SECRET_KEY) {
     throw new Error('缺少 STRIPE_SECRET_KEY。')
   }
 
+  if (stripe) {
+    return stripe
+  }
+
+  if (!StripeModule) {
+    try {
+      StripeModule = require('stripe')
+    } catch {
+      throw new Error('Stripe SDK 未安装，暂时无法启用 Stripe 支付。')
+    }
+  }
+
+  const StripeCtor = StripeModule?.default || StripeModule
+  stripe = new StripeCtor(STRIPE_SECRET_KEY, { apiVersion: '2025-08-27.basil' })
   return stripe
 }
 
