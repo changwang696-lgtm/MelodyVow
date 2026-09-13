@@ -108,7 +108,11 @@ type HistoryItem = {
   title: string
   subtitle: string
   status: string
+  rawStatus?: string
   action: string
+  jobId?: string
+  trackCount?: number
+  trackIndex?: number
   variantLabel?: string
   audioUrl?: string
   downloadUrl?: string
@@ -119,6 +123,7 @@ type HistoryItem = {
   styleLabel?: string
   vocalLabel?: string
   lyricSnippet?: string
+  lyrics?: string
 }
 
 type AuthSession = {
@@ -231,6 +236,28 @@ type PaymentMethod = {
   description?: string
 }
 
+type ShowcaseSessionTrack = {
+  id: string
+  title: string
+  meta: string
+  blurb: string
+  audioUrl: string
+  downloadUrl?: string
+}
+
+type ShowcaseSessionContext = {
+  mode: 'job' | 'history'
+  jobId?: string
+  title?: string
+  subtitle?: string
+  lyrics?: string
+  statusText?: string
+  generationProgress?: number
+  isGenerating?: boolean
+  tracks?: ShowcaseSessionTrack[]
+  activeTrackId?: string
+}
+
 type PaymentMethodAdmin = {
   id: string
   name: string
@@ -276,6 +303,7 @@ type HomePageProps = {
   onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
   onLogout: () => void
   authSession: AuthSession | null
+  onAddPendingMemberSongs: (items: HistoryItem[]) => void
 }
 
 type StylesPageProps = {
@@ -346,6 +374,7 @@ type ShowcasePageProps = {
 }
 
 type LegalPageKey =
+  | 'legal'
   | 'delivery'
   | 'privacy'
   | 'terms'
@@ -410,6 +439,8 @@ type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
 }
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
+const SHOWCASE_SESSION_KEY = 'melodyvow-showcase-context'
+const SHOWCASE_GENERATING_SESSION_KEY = 'melodyvow-showcase-generating-context'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
 const ADMIN_SESSION_KEY = 'melodyvow-admin-session'
 const PUBLIC_SITE_CONFIG_KEY = 'melodyvow-public-site-config'
@@ -451,13 +482,37 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
   backgroundTheme: DEFAULT_BACKGROUND_THEME,
 }
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
-const HOME_FIREWORK_COLORS = ['#ff4e88', '#ffb657', '#fff07c', '#73f2ff', '#9c7bff', '#ffffff']
+const HOME_FIREWORK_GOLD_COLORS = ['#fffbf0', '#fff1c2', '#ffe08a', '#f4c45d', '#d89b2f', '#9d6915']
+const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+const GOOGLE_LOGIN_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
-const DEBUG_SESSION_ID = 'suno-expired-url'
+const DEBUG_SESSION_ID = 'audio-stops-early'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
+}
+
+function stripSearchParamsFromUrl() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const hash = String(window.location.hash || '')
+  const hashWithoutQuery = hash ? hash.split('?')[0] || '' : ''
+  const nextUrl = `${window.location.origin}${window.location.pathname}${hashWithoutQuery}`
+  window.history.replaceState(null, '', nextUrl)
+}
+
+function buildMemberAuthSuccessMessage(locale: Locale, mode: 'login' | 'signup', email: string) {
+  return copy(locale, {
+    zh: mode === 'login'
+      ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
+      : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
+    en: mode === 'login'
+      ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
+      : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
+  })
 }
 
 function getMemberAuthHeaders(session: AuthSession | null | undefined) {
@@ -510,16 +565,132 @@ function buildTrackHistoryId(jobId: string, index: number) {
   return `${jobId}__track_${index + 1}`
 }
 
+function buildPendingHistoryItems(params: {
+  jobId: string
+  title: string
+  subtitle: string
+  languageLabel?: string
+  styleLabel?: string
+  vocalLabel?: string
+  lyricSnippet?: string
+  lyrics?: string
+}) {
+  return Array.from({ length: 2 }, (_, index) => ({
+    id: buildTrackHistoryId(params.jobId, index),
+    jobId: params.jobId,
+    trackCount: 2,
+    trackIndex: index,
+    title: params.title,
+    subtitle: params.subtitle,
+    status: 'generating_song',
+    rawStatus: 'generating_song',
+    action: '下载音频',
+    variantLabel: `Version ${index + 1}`,
+    audioUrl: '',
+    downloadUrl: '',
+    sourceAudioUrl: '',
+    sourceDownloadUrl: '',
+    createdAt: new Date().toISOString(),
+    languageLabel: params.languageLabel || '',
+    styleLabel: params.styleLabel || '',
+    vocalLabel: params.vocalLabel || '',
+    lyricSnippet: params.lyricSnippet || '',
+    lyrics: params.lyrics || params.lyricSnippet || '',
+  }))
+}
+
 function sanitizeHistoryItem(item: HistoryItem) {
   const playbackUrl = pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
 
   return {
     ...item,
+    rawStatus: item.rawStatus || item.status,
     audioUrl: playbackUrl,
     downloadUrl: item.downloadUrl || playbackUrl,
     sourceAudioUrl: item.sourceAudioUrl || item.audioUrl || '',
     sourceDownloadUrl: item.sourceDownloadUrl || item.downloadUrl || '',
+    lyrics: item.lyrics || item.lyricSnippet || '',
   }
+}
+
+function isReadyHistoryItem(item: HistoryItem) {
+  return String(item.rawStatus || item.status || '').trim().toLowerCase() === 'ready'
+}
+
+function isPendingHistoryItem(item: HistoryItem) {
+  return Boolean(item.jobId) && !isReadyHistoryItem(item) && !pickPreferredPlayableUrl(item.audioUrl, item.downloadUrl)
+}
+
+function getHistoryItemTimestamp(item: HistoryItem) {
+  const timestamp = item.createdAt ? new Date(item.createdAt).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function sortHistoryItemsByNewest(items: HistoryItem[]) {
+  return [...items].sort((left, right) => getHistoryItemTimestamp(right) - getHistoryItemTimestamp(left))
+}
+
+function sortHistoryItemsByTrack(items: HistoryItem[]) {
+  return [...items].sort((left, right) => {
+    const leftTrackIndex = typeof left.trackIndex === 'number' ? left.trackIndex : Number.MAX_SAFE_INTEGER
+    const rightTrackIndex = typeof right.trackIndex === 'number' ? right.trackIndex : Number.MAX_SAFE_INTEGER
+    if (leftTrackIndex !== rightTrackIndex) {
+      return leftTrackIndex - rightTrackIndex
+    }
+
+    return getHistoryItemTimestamp(right) - getHistoryItemTimestamp(left)
+  })
+}
+
+function buildPendingHistoryItemsFromSeed(item: HistoryItem) {
+  const jobId = String(item.jobId || item.id || '').trim()
+  if (!jobId) {
+    return [] as HistoryItem[]
+  }
+
+  return buildPendingHistoryItems({
+    jobId,
+    title: item.title,
+    subtitle: item.subtitle,
+    languageLabel: item.languageLabel,
+    styleLabel: item.styleLabel,
+    vocalLabel: item.vocalLabel,
+    lyricSnippet: item.lyricSnippet,
+    lyrics: item.lyrics,
+  }).map((entry) => ({
+    ...entry,
+    createdAt: item.createdAt || entry.createdAt,
+  }))
+}
+
+function mergeMemberHistoryItems(currentItems: HistoryItem[], fetchedItems: HistoryItem[]) {
+  const sanitizedCurrent = currentItems.map(sanitizeHistoryItem)
+  const sanitizedFetched = fetchedItems.map(sanitizeHistoryItem)
+  const allPendingItems = sortHistoryItemsByNewest([
+    ...sanitizedCurrent.filter(isPendingHistoryItem),
+    ...sanitizedFetched.filter(isPendingHistoryItem),
+  ])
+  const activePendingSeed = allPendingItems[0]
+  const activePendingJobId = String(activePendingSeed?.jobId || '').trim()
+  const readyItems = sortHistoryItemsByNewest(sanitizedFetched.filter(isReadyHistoryItem))
+
+  if (!activePendingJobId) {
+    return readyItems
+  }
+
+  const readyItemsForActiveJob = readyItems.filter((item) => (item.jobId || item.id) === activePendingJobId)
+  const pendingSlots = sortHistoryItemsByNewest(
+    sanitizedCurrent.filter((item) => item.jobId === activePendingJobId && isPendingHistoryItem(item)),
+  )
+  const fallbackPendingSlots = pendingSlots.length ? pendingSlots : buildPendingHistoryItemsFromSeed(activePendingSeed)
+  const readyIdsForActiveJob = new Set(readyItemsForActiveJob.map((item) => item.id))
+  const activeJobItems = sortHistoryItemsByTrack([
+    ...readyItemsForActiveJob,
+    ...fallbackPendingSlots.filter((item) => !readyIdsForActiveJob.has(item.id)),
+  ]).slice(0, 2)
+  const otherReadyItems = readyItems.filter((item) => (item.jobId || item.id) !== activePendingJobId)
+
+  return [...activeJobItems, ...otherReadyItems]
 }
 
 function buildFloatingTrackFromHistory(item: HistoryItem): FloatingPhoneTrack {
@@ -549,6 +720,45 @@ function buildFloatingTracksFromJob(job: SongJob, locale: Locale): FloatingPhone
   }))
 }
 
+function isGeneratingShowcaseSession(session: ShowcaseSessionContext | null) {
+  if (!session || session.mode !== 'job' || !session.jobId) {
+    return false
+  }
+
+  if (typeof session.isGenerating === 'boolean') {
+    return session.isGenerating
+  }
+
+  if ((session.generationProgress ?? 0) < 100) {
+    return true
+  }
+
+  return !(session.tracks && session.tracks.some((track) => track.audioUrl))
+}
+
+function normalizeShowcaseSession(context: ShowcaseSessionContext) {
+  if (context.mode !== 'job' || !context.jobId) {
+    return {
+      ...context,
+      isGenerating: context.isGenerating ?? false,
+    }
+  }
+
+  return {
+    ...context,
+    isGenerating: typeof context.isGenerating === 'boolean' ? context.isGenerating : isGeneratingShowcaseSession(context),
+  }
+}
+
+function getShowcaseEntryPath(locale: Locale) {
+  const currentSession = loadGeneratingShowcaseSession()
+  if (currentSession?.mode === 'job' && currentSession.jobId && isGeneratingShowcaseSession(currentSession)) {
+    return withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(currentSession.jobId)}`)
+  }
+
+  return withLocale(locale, '/how-it-works')
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
@@ -566,51 +776,82 @@ function launchHomepageFireworks() {
   const end = Date.now() + duration
   const timeouts: number[] = []
   const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min
+  const randomFrom = (values: string[]) => values[Math.floor(Math.random() * values.length)] || values[0]
 
-  const fire = (particleRatio: number, options: Record<string, unknown>) => {
+  const fire = (particleRatio: number, options: Record<string, unknown>, colors = HOME_FIREWORK_GOLD_COLORS) => {
     confetti({
-      particleCount: Math.max(18, Math.floor(160 * particleRatio)),
-      colors: HOME_FIREWORK_COLORS,
+      particleCount: Math.max(10, Math.floor(150 * particleRatio)),
+      colors,
       disableForReducedMotion: true,
-      spread: 90,
-      startVelocity: 42,
-      ticks: 220,
-      gravity: 0.88,
-      scalar: 1.12,
-      drift: randomInRange(-0.16, 0.16),
+      spread: 92,
+      startVelocity: 46,
+      ticks: 240,
+      gravity: 0.86,
+      scalar: 1.1,
+      drift: randomInRange(-0.12, 0.12),
       zIndex: 25,
       ...options,
     })
   }
 
+  const sparkle = (particleRatio: number, options: Record<string, unknown>) => {
+    fire(
+      particleRatio,
+      {
+        spread: 360,
+        startVelocity: 26,
+        ticks: 170,
+        gravity: 0.7,
+        scalar: randomInRange(0.72, 0.92),
+        decay: 0.95,
+        drift: randomInRange(-0.08, 0.08),
+        shapes: ['circle'],
+        ...options,
+      },
+      HOME_FIREWORK_GLOW_COLORS,
+    )
+  }
+
   fire(0.28, {
     angle: 60,
-    spread: 72,
-    startVelocity: 60,
+    spread: 68,
+    startVelocity: 62,
+    scalar: 1.14,
     origin: { x: 0.02, y: 0.72 },
   })
   fire(0.28, {
     angle: 120,
-    spread: 72,
-    startVelocity: 60,
+    spread: 68,
+    startVelocity: 62,
+    scalar: 1.14,
     origin: { x: 0.98, y: 0.72 },
   })
-  fire(0.34, {
-    spread: 110,
-    startVelocity: 52,
-    origin: { x: 0.5, y: 0.26 },
+  fire(0.3, {
+    spread: 98,
+    startVelocity: 56,
+    scalar: 1.16,
+    origin: { x: 0.5, y: 0.24 },
+  })
+  sparkle(0.14, {
+    origin: { x: 0.5, y: 0.24 },
   })
 
   timeouts.push(
     window.setTimeout(() => {
-      fire(0.24, {
+      fire(0.22, {
         spread: 120,
-        startVelocity: 48,
+        startVelocity: 50,
         origin: { x: 0.22, y: 0.18 },
       })
-      fire(0.24, {
+      fire(0.22, {
         spread: 120,
-        startVelocity: 48,
+        startVelocity: 50,
+        origin: { x: 0.78, y: 0.18 },
+      })
+      sparkle(0.12, {
+        origin: { x: 0.22, y: 0.18 },
+      })
+      sparkle(0.12, {
         origin: { x: 0.78, y: 0.18 },
       })
     }, 280),
@@ -626,43 +867,52 @@ function launchHomepageFireworks() {
 
     const intensity = timeLeft / duration
 
-    fire(0.18 * intensity, {
+    fire(0.12 * intensity, {
       spread: 360,
-      startVelocity: 32,
-      decay: 0.94,
-      scalar: 0.96,
-      ticks: 180,
+      startVelocity: 28,
+      decay: 0.95,
+      scalar: 0.88,
+      ticks: 165,
       origin: {
         x: randomInRange(0.14, 0.34),
         y: randomInRange(0.02, 0.24),
       },
     })
 
-    fire(0.18 * intensity, {
+    fire(0.12 * intensity, {
       spread: 360,
-      startVelocity: 32,
-      decay: 0.94,
-      scalar: 0.96,
-      ticks: 180,
+      startVelocity: 28,
+      decay: 0.95,
+      scalar: 0.88,
+      ticks: 165,
       origin: {
         x: randomInRange(0.66, 0.86),
         y: randomInRange(0.02, 0.24),
       },
     })
 
-    fire(0.12 * intensity, {
+    sparkle(0.1 * intensity, {
+      particleCount: Math.max(8, Math.floor(52 * intensity)),
+      colors: [randomFrom(HOME_FIREWORK_GLOW_COLORS), '#ffffff'],
+      origin: {
+        x: randomInRange(0.18, 0.82),
+        y: randomInRange(0.08, 0.22),
+      },
+    })
+
+    fire(0.14 * intensity, {
       angle: 60,
-      spread: 62,
-      startVelocity: 54,
-      scalar: 1.06,
+      spread: 56,
+      startVelocity: 58,
+      scalar: 1.12,
       origin: { x: 0.08, y: 0.62 },
     })
 
-    fire(0.12 * intensity, {
+    fire(0.14 * intensity, {
       angle: 120,
-      spread: 62,
-      startVelocity: 54,
-      scalar: 1.06,
+      spread: 56,
+      startVelocity: 58,
+      scalar: 1.12,
       origin: { x: 0.92, y: 0.62 },
     })
   }, 260)
@@ -720,73 +970,20 @@ function copy(locale: Locale, content: Copy) {
 }
 
 function getLegalLinks(locale: Locale) {
-  return [
-    {
-      key: 'delivery',
-      label: copy(locale, { zh: '交付与履约', en: 'Delivery & Fulfillment' }),
-      to: withLocale(locale, '/delivery-fulfillment'),
-    },
-    {
-      key: 'privacy',
-      label: copy(locale, { zh: '隐私政策', en: 'Privacy Policy' }),
-      to: withLocale(locale, '/privacy-policy'),
-    },
-    {
-      key: 'terms',
-      label: copy(locale, { zh: '服务条款', en: 'Terms of Service' }),
-      to: withLocale(locale, '/terms-of-service'),
-    },
-    {
-      key: 'refund',
-      label: copy(locale, { zh: '退款政策', en: 'Refund Policy' }),
-      to: withLocale(locale, '/refund-policy'),
-    },
-    {
-      key: 'cancellation',
-      label: copy(locale, { zh: '取消政策', en: 'Cancellation Policy' }),
-      to: withLocale(locale, '/cancellation-policy'),
-    },
-    {
+  return {
+    primary: [
+      {
+        key: 'legal',
+        label: copy(locale, { zh: 'Policies & Support', en: 'Policies & Support' }),
+        to: withLocale(locale, '/legal'),
+      },
+    ],
+    order: {
       key: 'find-order',
-      label: copy(locale, { zh: '查找订单', en: 'Find My Order' }),
+      label: copy(locale, { zh: 'Find My Order', en: 'Find My Order' }),
       to: withLocale(locale, '/find-my-order'),
     },
-  ]
-}
-
-function getServiceHubItems(locale: Locale) {
-  const links = getLegalLinks(locale)
-  const descriptions: Record<LegalPageKey, Copy> = {
-    delivery: {
-      zh: '了解订阅服务如何交付、生效和记录。',
-      en: 'See how the subscription service is fulfilled and activated.',
-    },
-    privacy: {
-      zh: '查看账户、订单与生成记录如何被保护。',
-      en: 'Learn how account, order, and generation data are protected.',
-    },
-    terms: {
-      zh: '查看使用网站、付款与生成服务的规则。',
-      en: 'Review the rules for using the site, payments, and song generation.',
-    },
-    refund: {
-      zh: '明确退款范围、失败补偿与服务回退规则。',
-      en: 'Review refunds, failure compensation, and entitlement reversals.',
-    },
-    cancellation: {
-      zh: '查看取消、退款及订阅服务状态变更处理方式。',
-      en: 'See how cancellations, refunds, and service status changes are handled.',
-    },
-    'find-order': {
-      zh: '通过邮箱与订单号快速查询你的订阅订单。',
-      en: 'Look up your subscription order with email and order ID.',
-    },
   }
-
-  return links.map((item) => ({
-    ...item,
-    description: copy(locale, descriptions[item.key as LegalPageKey]),
-  }))
 }
 
 function getPublicOrderStatusLabel(locale: Locale, status: string) {
@@ -866,6 +1063,19 @@ function loadAuthSession() {
   }
 }
 
+function persistAuthSession(session: AuthSession | null) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (!session) {
+    window.localStorage.removeItem(AUTH_SESSION_KEY)
+    return
+  }
+
+  window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session))
+}
+
 function loadAdminSession() {
   if (typeof window === 'undefined') {
     return null as AdminSession | null
@@ -935,6 +1145,102 @@ function withLocale(locale: Locale, path = '') {
   return path ? `/zh${path}` : '/zh'
 }
 
+function useIsMobileViewport(query = '(max-width: 720px), ((pointer: coarse) and (hover: none) and (max-height: 560px))') {
+  const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia(query)
+    const syncViewport = () => setMatches(mediaQuery.matches)
+    syncViewport()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport)
+      return () => mediaQuery.removeEventListener('change', syncViewport)
+    }
+
+    mediaQuery.addListener(syncViewport)
+    return () => mediaQuery.removeListener(syncViewport)
+  }, [query])
+
+  return matches
+}
+
+function saveShowcaseSession(context: ShowcaseSessionContext) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const normalized = normalizeShowcaseSession(context)
+  window.sessionStorage.setItem(SHOWCASE_SESSION_KEY, JSON.stringify(normalized))
+
+  if (normalized.mode === 'job' && normalized.jobId) {
+    window.sessionStorage.setItem(SHOWCASE_GENERATING_SESSION_KEY, JSON.stringify(normalized))
+  }
+}
+
+function loadShowcaseSession() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SHOWCASE_SESSION_KEY)
+    if (!raw) {
+      return null
+    }
+
+    return JSON.parse(raw) as ShowcaseSessionContext
+  } catch {
+    return null
+  }
+}
+
+function saveGeneratingShowcaseSession(context: ShowcaseSessionContext) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const normalized = normalizeShowcaseSession(context)
+  if (normalized.mode !== 'job' || !normalized.jobId) {
+    return
+  }
+
+  window.sessionStorage.setItem(SHOWCASE_GENERATING_SESSION_KEY, JSON.stringify(normalized))
+}
+
+function loadGeneratingShowcaseSession() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SHOWCASE_GENERATING_SESSION_KEY)
+    if (raw) {
+      return JSON.parse(raw) as ShowcaseSessionContext
+    }
+
+    const fallback = loadShowcaseSession()
+    return fallback?.mode === 'job' && fallback.jobId ? fallback : null
+  } catch {
+    return null
+  }
+}
+
+function normalizePricingPlan(plan: PlanItem): PlanItem {
+  return {
+    ...plan,
+    currency: 'USD',
+  }
+}
+
+function formatPlanPrice(plan: Pick<PlanItem, 'price'>) {
+  return `$${plan.price}`
+}
+
 function ScrollManager() {
   const location = useLocation()
 
@@ -947,6 +1253,8 @@ function ScrollManager() {
 
 function App() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const isMobileViewport = useIsMobileViewport()
   const [draft, setDraft] = useState<SongDraft>({
     groom: '',
     bride: '',
@@ -968,9 +1276,31 @@ function App() {
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(() => loadPublicSiteConfig())
   const [siteConfigReady, setSiteConfigReady] = useState(false)
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
+  const effectiveAuthSession = authSession ?? loadAuthSession()
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
-  const activeMemberToken = authSession?.authToken?.trim() || ''
-  const activeMemberEmail = authSession?.email?.trim() || ''
+  const rootSearchRaw = (() => {
+    if (typeof window === 'undefined') {
+      return location.search
+    }
+
+    const rawSearch = String(window.location.search || '')
+    if (rawSearch) {
+      return rawSearch
+    }
+
+    const rawHash = String(window.location.hash || '')
+    const hashQueryIndex = rawHash.indexOf('?')
+    if (hashQueryIndex >= 0) {
+      return rawHash.slice(hashQueryIndex + 1)
+    }
+
+    return location.search
+  })()
+  const rootSearchParams = new URLSearchParams(rootSearchRaw)
+  const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
+  const activeMemberToken = effectiveAuthSession?.authToken?.trim() || ''
+  const activeMemberEmail = effectiveAuthSession?.email?.trim() || ''
+  const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
 
   useEffect(() => {
     let disposed = false
@@ -1012,6 +1342,133 @@ function App() {
   useEffect(() => {
     document.documentElement.lang = modalLocale === 'en' ? 'en' : 'zh-CN'
   }, [modalLocale])
+
+  useEffect(() => {
+    let disposed = false
+    const googleStatus = pendingGoogleStatus
+
+    if (!googleStatus) {
+      return () => {
+        disposed = true
+      }
+    }
+
+    const callbackLocale: Locale = rootSearchParams.get('authLocale') === 'zh'
+      ? 'zh'
+      : location.pathname.startsWith('/zh')
+        ? 'zh'
+        : 'en'
+    const redirectToAuth = () => {
+      stripSearchParamsFromUrl()
+      navigate(withLocale(callbackLocale, '/auth'), { replace: true })
+    }
+    const finalizeGoogleAuth = async () => {
+      stripSearchParamsFromUrl()
+      if (googleStatus === 'error') {
+        if (!disposed) {
+          setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
+            zh: 'Google 登录失败，请稍后重试。',
+            en: 'Google sign-in failed. Please try again later.',
+          }))
+          redirectToAuth()
+        }
+        return
+      }
+
+      const token = String(rootSearchParams.get('token') || '').trim()
+      const nextEmail = String(rootSearchParams.get('email') || '').trim()
+
+      if (googleStatus !== 'success' || !token || !nextEmail) {
+        if (!disposed) {
+          setModalMessage(copy(callbackLocale, {
+            zh: 'Google 登录返回的数据不完整，请重新尝试。',
+            en: 'Google sign-in returned incomplete data. Please try again.',
+          }))
+          redirectToAuth()
+        }
+        return
+      }
+
+      const mode = rootSearchParams.get('mode') === 'signup' ? 'signup' : 'login'
+      const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
+      const nextSession: AuthSession = {
+        authToken: token,
+        email: nextEmail,
+        partnerName: String(rootSearchParams.get('partnerName') || draft.bride || '').trim(),
+        plan: String(rootSearchParams.get('plan') || selectedPlan || '').trim(),
+        heartBeansBalance: Number(rootSearchParams.get('heartBeansBalance') || 0),
+        mode,
+        welcomeMessage: successMessage,
+        lastAuthAt: String(rootSearchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+        avatarUrl: String(rootSearchParams.get('avatarUrl') || '').trim(),
+      }
+
+      // Persist immediately so the member UI does not briefly fall back to guest state.
+      persistAuthSession(nextSession)
+      if (!disposed) {
+        setSongHistory([])
+        setAuthSession(nextSession)
+      }
+
+      try {
+        const response = await fetch(apiUrl('/api/member/session'), {
+          headers: {
+            'x-member-token': token,
+          },
+        })
+        const data = (await readJsonSafe(response)) as Partial<MemberProfile> & { message?: string }
+
+        if (!response.ok || !String(data.email || '').trim()) {
+          throw new Error(data.message || copy(callbackLocale, {
+            zh: 'Google 登录状态校验失败，请重新尝试。',
+            en: 'Google sign-in session validation failed. Please try again.',
+          }))
+        }
+
+        const verifiedSession: AuthSession = {
+          ...nextSession,
+          email: String(data.email || nextSession.email).trim(),
+          partnerName: String(data.partnerName || nextSession.partnerName).trim(),
+          plan: String(data.plan || nextSession.plan).trim(),
+          heartBeansBalance: typeof data.heartBeansBalance === 'number' ? data.heartBeansBalance : nextSession.heartBeansBalance,
+          lastAuthAt: String(data.lastAuthAt || nextSession.lastAuthAt).trim(),
+          avatarUrl: String(data.avatarUrl || nextSession.avatarUrl || '').trim(),
+        }
+
+        if (disposed) {
+          return
+        }
+
+        persistAuthSession(verifiedSession)
+        setAuthSession(verifiedSession)
+        setModalMessage(successMessage)
+        navigate(withLocale(callbackLocale, '/account'), { replace: true })
+      } catch (error) {
+        if (disposed) {
+          return
+        }
+
+        persistAuthSession(null)
+        setAuthSession(null)
+        setSongHistory([])
+        setModalMessage(error instanceof Error ? error.message : copy(callbackLocale, {
+          zh: 'Google 登录失败，请稍后重试。',
+          en: 'Google sign-in failed. Please try again later.',
+        }))
+        redirectToAuth()
+      }
+    }
+
+    void finalizeGoogleAuth()
+
+    return () => {
+      disposed = true
+    }
+  }, [draft.bride, location.pathname, navigate, pendingGoogleStatus, rootSearchParams, selectedPlan])
+
+  if (location.pathname === '/' && pendingGoogleStatus) {
+    return <div className="app-loading-shell">Signing you in with Google...</div>
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1061,7 +1518,7 @@ function App() {
             },
           })
           // #endregion
-          setSongHistory(nextItems)
+          setSongHistory((current) => mergeMemberHistoryItems(current, nextItems))
         }
       } catch (error) {
         if (!disposed) {
@@ -1072,8 +1529,25 @@ function App() {
 
     void loadMemberSongs()
 
+    const handleRefresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      void loadMemberSongs()
+    }
+
+    const timer = window.setInterval(() => {
+      void loadMemberSongs()
+    }, 5000)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleRefresh)
+
     return () => {
       disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleRefresh)
     }
   }, [activeMemberEmail, activeMemberToken])
 
@@ -1137,12 +1611,67 @@ function App() {
       return
     }
 
-    if (!authSession) {
-      window.localStorage.removeItem(AUTH_SESSION_KEY)
+    let disposed = false
+
+    const syncActiveShowcaseSession = async () => {
+      const currentSession = loadGeneratingShowcaseSession()
+      if (!isGeneratingShowcaseSession(currentSession) || !currentSession?.jobId) {
+        return
+      }
+
+      try {
+        const response = await fetch(apiUrl(`/api/jobs/${currentSession.jobId}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+        if (!response.ok) {
+          return
+        }
+
+        if (disposed) {
+          return
+        }
+
+        const nextSession = buildShowcaseSessionFromJob(result as SongJob, modalLocale, currentSession)
+        saveGeneratingShowcaseSession(nextSession)
+
+        const currentPlaybackSession = loadShowcaseSession()
+        if (currentPlaybackSession?.mode === 'job' && currentPlaybackSession.jobId === nextSession.jobId) {
+          saveShowcaseSession(nextSession)
+        }
+      } catch {
+        // Keep the last known Showcase session until the next successful sync.
+      }
+    }
+
+    void syncActiveShowcaseSession()
+
+    const handleRefresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      void syncActiveShowcaseSession()
+    }
+
+    const timer = window.setInterval(() => {
+      void syncActiveShowcaseSession()
+    }, 5000)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleRefresh)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleRefresh)
+    }
+  }, [modalLocale])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
       return
     }
 
-    window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(authSession))
+    persistAuthSession(authSession)
   }, [authSession])
 
   useEffect(() => {
@@ -1160,18 +1689,31 @@ function App() {
 
   const saveHistory = useCallback((item: HistoryItem) => {
     setSongHistory((current) => {
-      const next = [item, ...current.filter((entry) => entry.id !== item.id)].slice(0, 12)
+      const next = [item, ...current.filter((entry) => entry.id !== item.id)]
       return next
+    })
+  }, [])
+
+  const addPendingMemberSongs = useCallback((items: HistoryItem[]) => {
+    if (!items.length) {
+      return
+    }
+
+    setSongHistory((current) => {
+      const existingIds = new Set(items.map((item) => item.id))
+      const readyEntries = current.filter((entry) => !isPendingHistoryItem(entry))
+      return [...items, ...readyEntries.filter((entry) => !existingIds.has(entry.id))]
     })
   }, [])
 
   function handleAuthSuccess(session: AuthSession) {
     setSongHistory([])
+    persistAuthSession(session)
     setAuthSession(session)
   }
 
   function handleLogout() {
-    const currentSession = authSession
+    const currentSession = effectiveAuthSession
     if (currentSession?.authToken) {
       void fetch(apiUrl('/api/member/logout'), {
         method: 'POST',
@@ -1179,6 +1721,7 @@ function App() {
       }).catch(() => {})
     }
 
+    persistAuthSession(null)
     setAuthSession(null)
     setSongHistory([])
   }
@@ -1323,23 +1866,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
+              onAddPendingMemberSongs={addPendingMemberSongs}
             />
           ))}
         />
         <Route
           path="/zh/how-it-works"
-          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/styles"
           element={renderChineseRoute('/en/styles', (
-            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
+            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
           ))}
         />
         <Route
           path="/zh/preview"
-          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/pricing"
@@ -1348,17 +1892,18 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
         />
-        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="delivery" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="privacy" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="terms" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="refund" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="cancellation" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
         <Route
           path="/zh/checkout"
           element={renderChineseRoute('/en/checkout', (
@@ -1366,7 +1911,7 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
@@ -1381,7 +1926,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
             />
           ))}
         />
@@ -1394,7 +1939,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           ))}
@@ -1406,7 +1951,7 @@ function App() {
               locale="zh"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
@@ -1430,23 +1975,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
+              onAddPendingMemberSongs={addPendingMemberSongs}
             />
           }
         />
         <Route
           path="/en/how-it-works"
-          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<ShowcasePage locale="en" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/styles"
           element={
-            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
+            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
           }
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<PreviewPage locale="en" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/pricing"
@@ -1455,17 +2001,18 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
         />
-        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="delivery" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="privacy" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="terms" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="refund" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="cancellation" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
         <Route
           path="/en/checkout"
           element={
@@ -1473,7 +2020,7 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
@@ -1488,7 +2035,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
             />
           }
         />
@@ -1501,7 +2048,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           }
@@ -1513,7 +2060,7 @@ function App() {
               locale="en"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
@@ -1546,7 +2093,7 @@ function App() {
         </div>
       ) : null}
 
-      {floatingPlayer ? (
+      {floatingPlayer && !shouldHideFloatingPlayer ? (
         <FloatingPhonePlayer
           player={floatingPlayer}
           onClose={closeFloatingPlayer}
@@ -1725,7 +2272,7 @@ function FloatingPhonePlayer({
     }
 
     const target = event.target
-    if (target instanceof HTMLElement && target.closest('button, input, a, textarea, select, label')) {
+    if (target instanceof HTMLElement && target.closest('button, input, a, textarea, select, label, [data-no-drag]')) {
       return
     }
 
@@ -1769,6 +2316,10 @@ function FloatingPhonePlayer({
       })
     : activeTrack?.subtitle || player.subtitle || copy(player.locale, { zh: '正在播放', en: 'Now Playing' })
   const miniProgress = player.isGenerating ? player.generationProgress : progress
+  const lyricsPreview = (player.error || '').trim() || (player.lyrics || '').trim() || player.statusText || player.generationLabel || copy(player.locale, {
+    zh: '歌词会在这里显示，播放时也能继续保留可见。',
+    en: 'Lyrics will appear here and stay visible while you listen.',
+  })
 
   return (
     <div className="floating-phone-backdrop" role="presentation">
@@ -1791,6 +2342,7 @@ function FloatingPhonePlayer({
           <div className="floating-phone-compact">
             <div className="floating-phone-drag-area floating-phone-mini-main">
               <div className="floating-phone-compact-copy">
+                <span className="floating-phone-mini-eyebrow">{player.eyebrow || 'MelodyVow'}</span>
                 <strong>{activeTrack?.title || player.title}</strong>
                 <span>{miniStatus}</span>
               </div>
@@ -1810,6 +2362,37 @@ function FloatingPhonePlayer({
             <div className="floating-phone-mini-progress" aria-hidden="true">
               <span className="floating-phone-mini-progress-bar" style={{ width: `${Math.max(0, Math.min(100, miniProgress))}%` }} />
             </div>
+            <div className="floating-phone-mini-meta">
+              <span className={`floating-phone-mini-badge ${player.error ? 'is-error' : player.isGenerating ? 'is-generating' : 'is-ready'}`}>
+                {player.error
+                  ? player.error
+                  : player.isGenerating
+                  ? player.generationLabel || copy(player.locale, { zh: '歌词与旋律生成中', en: 'Generating lyrics and melody' })
+                  : player.statusText || copy(player.locale, { zh: '悬浮播放器已准备好播放。', en: 'The floating player is ready to play.' })}
+              </span>
+              {tracks.length > 1 ? (
+                <div className="floating-phone-mini-track-tabs" role="tablist" aria-label={copy(player.locale, { zh: '版本切换', en: 'Track versions' })}>
+                  {tracks.map((track, index) => (
+                    <button
+                      key={track.id}
+                      type="button"
+                      className={`floating-phone-mini-track-tab ${safeActiveTrackIndex === index ? 'is-active' : ''}`}
+                      onClick={() => setActiveTrackIndex(index)}
+                    >
+                      {track.subtitle || copy(player.locale, { zh: `版本 ${index + 1}`, en: `Version ${index + 1}` })}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <section className="floating-phone-mini-lyrics" aria-label={copy(player.locale, { zh: '歌词小窗口', en: 'Mini lyrics panel' })}>
+              <div className="floating-phone-mini-lyrics-head">
+                <strong>{copy(player.locale, { zh: 'Lyrics', en: 'Lyrics' })}</strong>
+              </div>
+              <div className="floating-phone-mini-lyrics-body" data-no-drag="true">
+                <p>{lyricsPreview}</p>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -1832,6 +2415,7 @@ function SiteLayout({
   children,
 }: LayoutProps) {
   const siteConfig = useSiteConfig()
+  const isMobileViewport = useIsMobileViewport()
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1841,6 +2425,7 @@ function SiteLayout({
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
   const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
   const memberAvatarUrl = currentAuthSession?.avatarUrl?.trim()
+  const showHeroEyebrow = Boolean(eyebrow) && !(active !== 'home' && eyebrow === 'MelodyVow')
 
   useEffect(() => {
     setMemberMenuOpen(false)
@@ -1871,7 +2456,7 @@ function SiteLayout({
     {
       key: 'how',
       label: copy(locale, { zh: '产品展示', en: 'Showcase' }),
-      to: withLocale(locale, '/how-it-works'),
+      to: getShowcaseEntryPath(locale),
     },
     {
       key: 'styles',
@@ -1951,7 +2536,9 @@ function SiteLayout({
               className="ghost-button locale-switch"
               onClick={() =>
                 navigate(
-                  locale === 'zh'
+                  active === 'how'
+                    ? getShowcaseEntryPath(locale === 'zh' ? 'en' : 'zh')
+                    : locale === 'zh'
                     ? withLocale('en', active === 'home' ? '' : activeToPath(active))
                     : withLocale('zh', active === 'home' ? '' : activeToPath(active)),
                 )
@@ -2012,9 +2599,8 @@ function SiteLayout({
         {!hideHero && active === 'home' && homePanel ? (
           <section className="home-hero-layout">
             <section className="hero-banner hero-banner-home">
-              <p className="eyebrow">{eyebrow}</p>
+              {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
               <div className="home-subtitle-wrap">
-                <p className="hero-subtitle">{subtitle}</p>
                 <div className="headline-stack">
                   <h1 className="visually-hidden">{title}</h1>
                   <img className="hero-title-art" src={heroTitleImage} alt="" />
@@ -2022,7 +2608,7 @@ function SiteLayout({
                 <button
                   type="button"
                   className="home-showcase-float-button"
-                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  onClick={() => navigate(getShowcaseEntryPath(locale))}
                 >
                   <span className="home-showcase-float-button-text">
                     {copy(locale, { zh: '去看求婚成功的歌曲', en: 'See Successful Proposal Songs' })}
@@ -2038,6 +2624,7 @@ function SiteLayout({
                   </span>
                 </button>
               </div>
+              {isMobileViewport ? <p className="hero-subtitle home-hero-subtitle-detached">{subtitle}</p> : null}
               <div className="hero-illustration" aria-hidden="true">
                 <img className="hero-ribbon hero-ribbon-right" src={purpleRibbonImage} alt="" />
                 <img className="hero-ribbon hero-ribbon-bottom" src={goldRibbonImage} alt="" />
@@ -2056,14 +2643,14 @@ function SiteLayout({
           </section>
         ) : useHomeMobileChrome && ['how', 'styles', 'pricing', 'account'].includes(active) ? (
           <section className="hero-banner hero-banner-home mobile-shared-hero">
-            <p className="eyebrow">MelodyVow</p>
+            {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <div className="home-subtitle-wrap">
-              <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p>
+              {isMobileViewport ? <p className="hero-subtitle">Turn Your Names Into a Wedding Song</p> : null}
             </div>
           </section>
         ) : !hideHero ? (
           <section className="hero-banner">
-            <p className="eyebrow">{eyebrow}</p>
+            {showHeroEyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <div className="headline-stack">
               <p className="brand-cn">{copy(locale, { zh: '旋律誓言', en: 'Turn love into melody' })}</p>
               {active === 'home' ? (
@@ -2097,17 +2684,15 @@ function SiteLayout({
   )
 }
 
-function ServiceHubSection({ locale, title }: { locale: Locale, title: string }) {
-  const items = getServiceHubItems(locale)
+function ServiceHubSection({ locale, title, className = '' }: { locale: Locale, title: string, className?: string }) {
+  const { primary, order } = getLegalLinks(locale)
 
   return (
-    <section className="service-hub-section">
-      <div className="glass-card service-hub-ribbon">
-        <div className="service-hub-ribbon-copy">
-          <span className="service-hub-kicker">{title}</span>
-        </div>
+    <section className={`service-hub-section ${className}`.trim()}>
+      <div className="service-hub-ribbon">
+        <p className="service-hub-kicker">{title}</p>
         <nav className="service-hub-inline-links" aria-label={copy(locale, { zh: '订阅服务支持链接', en: 'Subscription support links' })}>
-          {items.map((item, index) => (
+          {primary.map((item, index) => (
             <Fragment key={item.key}>
               {index > 0 ? <span className="service-hub-divider" aria-hidden="true">/</span> : null}
               <NavLink to={item.to} className="service-hub-inline-link">
@@ -2115,6 +2700,11 @@ function ServiceHubSection({ locale, title }: { locale: Locale, title: string })
               </NavLink>
             </Fragment>
           ))}
+        </nav>
+        <nav className="service-hub-inline-links service-hub-inline-links-order" aria-label={copy(locale, { zh: '订单查询链接', en: 'Order lookup link' })}>
+          <NavLink to={order.to} className="service-hub-inline-link">
+            {order.label}
+          </NavLink>
         </nav>
       </div>
     </section>
@@ -2152,9 +2742,11 @@ function HomeSocialLinksSection({ locale }: { locale: Locale }) {
   )
 }
 
-function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession }: HomePageProps) {
+function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession, onAddPendingMemberSongs }: HomePageProps) {
   const navigate = useNavigate()
+  const isMobileViewport = useIsMobileViewport()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showMobileStoryPrompt, setShowMobileStoryPrompt] = useState(false)
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
   const fallbackLanguageCode = locale === 'zh' ? 'zh' : 'en'
@@ -2164,6 +2756,10 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
 
   useEffect(() => launchHomepageFireworks(), [])
 
+  function handleCreateSongEntry() {
+    setShowMobileStoryPrompt(true)
+  }
+
   async function handleGenerateSong() {
     if (!memberEmail || !memberToken) {
       const message = copy(locale, {
@@ -2171,6 +2767,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         en: 'Please log in before generating a song so it can be saved to your account automatically.',
       })
       onOpenModal(message)
+      setShowMobileStoryPrompt(false)
       navigate(withLocale(locale, '/auth'))
       return
     }
@@ -2184,30 +2781,33 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
     const styleLabel = draft.style.trim() ? getStyleLabel(locale, draft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
     const vocal = draft.vocal.trim() || fallbackVocal.code
     const vocalLabel = draft.vocal.trim() ? getVocalLabel(locale, draft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
+    const initialLyrics = [draft.loveStory, draft.meetingStory, draft.vowKeywords].filter(Boolean).join('\n\n').trim()
 
     const pendingPlayerKey = `pending-generate-${locale}`
-    onUpsertFloatingPlayer({
-      key: pendingPlayerKey,
-      locale,
-      title: `${groomName} & ${brideName}`,
-      subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-      eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-      tracks: [],
-      canClose: false,
-      isGenerating: true,
-      generationProgress: 6,
-      generationLabel: copy(locale, {
-        zh: '正在提交婚礼歌曲生成请求，请稍候...',
-        en: 'Submitting your wedding song request...',
-      }),
-      statusText: copy(locale, {
-        zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
-        en: 'The floating player is open and will keep showing progress here.',
-      }),
-      lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-      error: '',
-      autoPlay: false,
-    })
+    if (!isMobileViewport) {
+      onUpsertFloatingPlayer({
+        key: pendingPlayerKey,
+        locale,
+        title: `${groomName} & ${brideName}`,
+        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+        tracks: [],
+        canClose: false,
+        isGenerating: true,
+        generationProgress: 6,
+        generationLabel: copy(locale, {
+          zh: '正在提交婚礼歌曲生成请求，请稍候...',
+          en: 'Submitting your wedding song request...',
+        }),
+        statusText: copy(locale, {
+          zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
+          en: 'The floating player is open and will keep showing progress here.',
+        }),
+        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+        error: '',
+        autoPlay: false,
+      })
+    }
 
     try {
       const response = await fetch(apiUrl('/api/generate-song'), {
@@ -2243,49 +2843,91 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         throw new Error(result.message ?? '生成请求失败，请稍后再试。')
       }
 
-      onUpsertFloatingPlayer({
-        key: result.jobId,
-        locale,
-        title: `${groomName} & ${brideName}`,
-        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-        tracks: [],
-        canClose: false,
-        isGenerating: true,
-        generationProgress: 12,
-        generationLabel: copy(locale, {
-          zh: '歌词与旋律已经进入生成队列，请保持弹窗开启。',
-          en: 'Lyrics and melody are now in the queue. Please keep the player open.',
-        }),
-        statusText: copy(locale, {
-          zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
-          en: 'Your song is generating. Both versions will appear in this floating player.',
-        }),
-        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-        error: '',
-        autoPlay: false,
-      })
+      if (isMobileViewport) {
+        onAddPendingMemberSongs(buildPendingHistoryItems({
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          languageLabel,
+          styleLabel,
+          vocalLabel,
+          lyricSnippet: initialLyrics,
+          lyrics: initialLyrics,
+        }))
+        saveShowcaseSession({
+          mode: 'job',
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          lyrics: initialLyrics,
+          statusText: copy(locale, {
+            zh: '歌词已提交到生成流程，Showcase 会在这里持续显示歌词与生成进度。',
+            en: 'Lyrics have entered the generation flow. Showcase will keep showing the lyrics and progress here.',
+          }),
+          generationProgress: 12,
+          isGenerating: true,
+          tracks: [],
+        })
+        setShowMobileStoryPrompt(false)
+        navigate(withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(result.jobId)}`))
+      } else {
+        onAddPendingMemberSongs(buildPendingHistoryItems({
+          jobId: result.jobId,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          languageLabel,
+          styleLabel,
+          vocalLabel,
+          lyricSnippet: initialLyrics,
+          lyrics: initialLyrics,
+        }))
+        onUpsertFloatingPlayer({
+          key: result.jobId,
+          locale,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+          tracks: [],
+          canClose: false,
+          isGenerating: true,
+          generationProgress: 12,
+          generationLabel: copy(locale, {
+            zh: '歌词与旋律已经进入生成队列，请保持弹窗开启。',
+            en: 'Lyrics and melody are now in the queue. Please keep the player open.',
+          }),
+          statusText: copy(locale, {
+            zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
+            en: 'Your song is generating. Both versions will appear in this floating player.',
+          }),
+          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          error: '',
+          autoPlay: false,
+        })
+      }
+      setShowMobileStoryPrompt(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : '生成请求失败，请稍后再试。'
-      onUpsertFloatingPlayer({
-        key: pendingPlayerKey,
-        locale,
-        title: `${groomName} & ${brideName}`,
-        subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
-        eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
-        tracks: [],
-        canClose: true,
-        isGenerating: false,
-        generationProgress: 0,
-        generationLabel: '',
-        statusText: copy(locale, {
-          zh: '请求没有成功发送，请检查提示信息后再试一次。',
-          en: 'The request could not be sent. Please review the message and try again.',
-        }),
-        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
-        error: message,
-        autoPlay: false,
-      })
+      if (!isMobileViewport) {
+        onUpsertFloatingPlayer({
+          key: pendingPlayerKey,
+          locale,
+          title: `${groomName} & ${brideName}`,
+          subtitle: `${languageLabel} · ${styleLabel} · ${vocalLabel}`,
+          eyebrow: copy(locale, { zh: '婚礼歌生成器', en: 'Wedding Song Generator' }),
+          tracks: [],
+          canClose: true,
+          isGenerating: false,
+          generationProgress: 0,
+          generationLabel: '',
+          statusText: copy(locale, {
+            zh: '请求没有成功发送，请检查提示信息后再试一次。',
+            en: 'The request could not be sent. Please review the message and try again.',
+          }),
+          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          error: message,
+          autoPlay: false,
+        })
+      }
       onOpenModal(message)
     } finally {
       setIsSubmitting(false)
@@ -2318,7 +2960,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <button
                   type="button"
                   className="home-app-card-arrow"
-                  onClick={() => navigate(withLocale(locale, '/how-it-works'))}
+                  onClick={() => navigate(getShowcaseEntryPath(locale))}
                   aria-label={copy(locale, { zh: '查看样片', en: 'View showcase' })}
                 >
                   ›
@@ -2380,7 +3022,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               <button
                 type="button"
                 className="home-app-submit"
-                onClick={() => void handleGenerateSong()}
+                onClick={handleCreateSongEntry}
                 disabled={isSubmitting}
               >
                 Create My Song
@@ -2551,7 +3193,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               <button
                 type="button"
                 className="primary-button wide home-phone-submit"
-                onClick={() => void handleGenerateSong()}
+                onClick={handleCreateSongEntry}
                 disabled={isSubmitting}
               >
                 {isSubmitting
@@ -2579,6 +3221,70 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               </button>
             ))}
           </section>
+
+          {showMobileStoryPrompt ? (
+            <div className="home-story-prompt-backdrop" role="presentation" onClick={() => setShowMobileStoryPrompt(false)}>
+              <div
+                className={`home-story-prompt-shell ${isMobileViewport ? '' : 'is-desktop'}`.trim()}
+                role="dialog"
+                aria-modal="true"
+                aria-label={copy(locale, { zh: '歌曲生成信息', en: 'Song creation details' })}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="home-story-prompt-card">
+                  <div className="home-story-prompt-head">
+                    <p>MelodyVow</p>
+                    <button
+                      type="button"
+                      className="home-story-prompt-close"
+                      onClick={() => setShowMobileStoryPrompt(false)}
+                      aria-label={copy(locale, { zh: '关闭', en: 'Close' })}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="home-story-prompt-section">
+                    <span className="home-story-prompt-label">Occasion</span>
+                    <div className="home-story-prompt-switch" role="tablist" aria-label={copy(locale, { zh: '选择使用场景', en: 'Select occasion' })}>
+                      {(['wedding', 'proposal'] as Occasion[]).map((occasion) => {
+                        const active = draft.occasion === occasion
+                        return (
+                          <button
+                            key={occasion}
+                            type="button"
+                            className={`home-story-prompt-chip ${active ? 'is-active' : ''}`}
+                            onClick={() => setDraft((current) => ({ ...current, occasion }))}
+                          >
+                            {getOccasionLabel(locale, occasion)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <label className="home-story-prompt-field">
+                    <span>Love Story</span>
+                    <textarea
+                      value={draft.loveStory}
+                      onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
+                      placeholder="Add a short story to make the lyrics feel personal"
+                      rows={4}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    className="home-story-prompt-submit"
+                    onClick={() => void handleGenerateSong()}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? copy(locale, { zh: '提交中...', en: 'Submitting...' }) : 'Create My Song'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
         </>
       )}
@@ -2635,6 +3341,46 @@ function computeGenerationProgress(job: SongJob | null, now = Date.now()) {
   return Math.min(96, (Math.max(0, now - safeStartedAt) / 120000) * 100)
 }
 
+function buildShowcaseSessionFromJob(job: SongJob, locale: Locale, currentSession: ShowcaseSessionContext | null) {
+  const nextLyrics = job.lyrics || currentSession?.lyrics || ''
+  const nextStatusText = job.error || getJobStatusLabel(locale, job.status, job.callbackEnabled)
+  const nextTracks: ShowcaseSessionTrack[] = job.status === 'ready'
+    ? (job.tracks ?? []).map((track, index) => ({
+        id: buildTrackHistoryId(job.id, index),
+        title: track.title || job.title || copy(locale, { zh: `歌曲 ${index + 1}`, en: `Track ${index + 1}` }),
+        meta: copy(locale, { zh: `生成版本 ${index + 1}`, en: `Generated version ${index + 1}` }),
+        blurb: summarizeStoryText(nextLyrics, copy(locale, {
+          zh: '歌曲已完成，点击即可播放。',
+          en: 'The song is ready. Tap to play.',
+        })),
+        audioUrl: getSongStreamUrl(buildTrackHistoryId(job.id, index)),
+        downloadUrl: getSongDownloadUrl(buildTrackHistoryId(job.id, index)),
+      }))
+    : [
+        {
+          id: job.id,
+          title: job.title || currentSession?.title || 'MelodyVow',
+          meta: currentSession?.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+          blurb: nextStatusText,
+          audioUrl: '',
+          downloadUrl: '',
+        },
+      ]
+
+  return {
+    mode: 'job' as const,
+    jobId: job.id,
+    title: job.title || currentSession?.title || 'MelodyVow',
+    subtitle: currentSession?.subtitle || '',
+    lyrics: nextLyrics,
+    statusText: nextStatusText,
+    generationProgress: computeGenerationProgress(job),
+    isGenerating: job.status !== 'ready' && job.status !== 'error',
+    tracks: nextTracks,
+    activeTrackId: nextTracks[0]?.id || '',
+  }
+}
+
 function buildFloatingPlayerPayloadFromJob(job: SongJob, locale: Locale, draft: SongDraft, error = '', autoPlay = false): FloatingPhonePlayerPayload {
   const isGenerating = job.status !== 'ready' && job.status !== 'error'
   const subtitleParts = [
@@ -2667,10 +3413,108 @@ function buildFloatingPlayerPayloadFromJob(job: SongJob, locale: Locale, draft: 
 
 function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }: ShowcasePageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isShowcaseMobile = useIsMobileViewport()
   const [tracks, setTracks] = useState<ShowcaseTrack[]>(productShowcaseTracks)
+  const [displayMode, setDisplayMode] = useState<'demo' | 'job' | 'history'>('demo')
+  const [displayTracks, setDisplayTracks] = useState<ShowcaseSessionTrack[]>(() =>
+    productShowcaseTracks.map((track) => ({
+      id: track.id,
+      title: copy(locale, track.title),
+      meta: copy(locale, track.meta),
+      blurb: copy(locale, track.blurb),
+      audioUrl: track.audioUrl,
+      downloadUrl: track.audioUrl,
+    })),
+  )
   const [activeTrackId, setActiveTrackId] = useState(productShowcaseTracks[0]?.id ?? '')
   const [error, setError] = useState('')
-  const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? tracks[0]
+  const [showcasePlaying, setShowcasePlaying] = useState(false)
+  const [showcaseProgress, setShowcaseProgress] = useState(0)
+  const [showcaseGenerationProgress, setShowcaseGenerationProgress] = useState(100)
+  const [showcaseIsGenerating, setShowcaseIsGenerating] = useState(false)
+  const [showcaseStatusText, setShowcaseStatusText] = useState(copy(locale, {
+    zh: '点击下方歌单，直接在这里试听 MelodyVow 的样片。',
+    en: 'Tap the list below to preview MelodyVow samples here.',
+  }))
+  const [pendingReadyNotice, setPendingReadyNotice] = useState('')
+  const [showcaseLyrics, setShowcaseLyrics] = useState('')
+  const showcaseAudioRef = useRef<HTMLAudioElement | null>(null)
+  const showcaseShouldAutoplayRef = useRef(false)
+  const showcaseLastJobStatusRef = useRef('')
+  const queuedReadyJobSessionRef = useRef<ShowcaseSessionContext | null>(null)
+  const activeTrack = displayTracks.find((track) => track.id === activeTrackId) ?? displayTracks[0] ?? null
+
+  function buildDemoTracks(items: ShowcaseTrack[]) {
+    return items.map((track) => ({
+      id: track.id,
+      title: copy(locale, track.title),
+      meta: copy(locale, track.meta),
+      blurb: copy(locale, track.blurb),
+      audioUrl: track.audioUrl,
+      downloadUrl: track.audioUrl,
+    }))
+  }
+
+  function applyShowcaseSession(session: ShowcaseSessionContext) {
+    // #region debug-point A:apply-showcase-session
+    reportDebugEvent({
+      hypothesisId: 'A',
+      location: 'web/src/App.tsx:ShowcasePage.applyShowcaseSession',
+      msg: '[DEBUG] Applying Showcase session into player state',
+      data: {
+        mode: session.mode,
+        jobId: session.jobId || '',
+        activeTrackId: session.activeTrackId || '',
+        trackCount: session.tracks?.length || 0,
+        firstTrackId: session.tracks?.[0]?.id || '',
+        firstTrackAudioUrl: session.tracks?.[0]?.audioUrl || '',
+        isGenerating: session.isGenerating ?? null,
+        generationProgress: session.generationProgress ?? null,
+      },
+    })
+    // #endregion
+    if (session.mode === 'history' && session.tracks?.length) {
+      setDisplayMode('history')
+      setDisplayTracks(session.tracks)
+      setActiveTrackId(session.activeTrackId || session.tracks[0]?.id || '')
+      setShowcaseLyrics(session.lyrics || '')
+      setShowcaseStatusText(session.statusText || copy(locale, {
+        zh: '会员中心歌曲会统一在这里播放，并同时显示歌词。',
+        en: 'Member songs now play here with lyrics kept visible.',
+      }))
+      setShowcaseGenerationProgress(100)
+      setShowcaseIsGenerating(false)
+      return
+    }
+
+    const nextTracks = session.tracks?.length
+      ? session.tracks
+      : [
+          {
+            id: session.jobId || 'pending-job',
+            title: session.title || 'MelodyVow',
+            meta: session.subtitle || copy(locale, { zh: '婚礼歌曲生成中', en: 'Wedding song generating' }),
+            blurb: session.statusText || copy(locale, {
+              zh: '歌词与旋律已经进入生成流程，请稍候。',
+              en: 'Lyrics and melody are in the generation flow. Please wait.',
+            }),
+            audioUrl: '',
+            downloadUrl: '',
+          },
+        ]
+
+    setDisplayMode('job')
+    setDisplayTracks(nextTracks)
+    setActiveTrackId(session.activeTrackId || nextTracks[0]?.id || '')
+    setShowcaseLyrics(session.lyrics || '')
+    setShowcaseStatusText(session.statusText || copy(locale, {
+      zh: 'Showcase 正在承接歌词与生成进度。',
+      en: 'Showcase is now carrying the lyrics and generation progress.',
+    }))
+    setShowcaseGenerationProgress(session.generationProgress ?? 12)
+    setShowcaseIsGenerating(session.isGenerating ?? true)
+  }
 
   useEffect(() => {
     let disposed = false
@@ -2701,33 +3545,489 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
     }
   }, [])
 
+  useEffect(() => {
+    if (displayMode !== 'demo') {
+      return
+    }
+
+    const nextTracks = buildDemoTracks(tracks)
+    setDisplayTracks(nextTracks)
+    setActiveTrackId((current) => (nextTracks.some((track) => track.id === current) ? current : nextTracks[0]?.id ?? ''))
+    setShowcaseLyrics('')
+    setShowcaseStatusText(copy(locale, {
+      zh: '点击下方歌单，直接在这里试听 MelodyVow 的样片。',
+      en: 'Tap the list below to preview MelodyVow samples here.',
+    }))
+    setShowcaseGenerationProgress(100)
+    setShowcaseIsGenerating(false)
+  }, [displayMode, locale, tracks])
+
+  useEffect(() => {
+    const mode = searchParams.get('mode')
+    const showcaseSession = loadShowcaseSession()
+    const generatingSession = loadGeneratingShowcaseSession()
+    const shouldResumeGeneratingJob = !mode && isShowcaseMobile && isGeneratingShowcaseSession(generatingSession)
+
+    if (!isShowcaseMobile) {
+      setDisplayMode('demo')
+      return
+    }
+
+    if (mode === 'job' || shouldResumeGeneratingJob) {
+      const nextSession = generatingSession || {
+        mode: 'job' as const,
+        jobId: searchParams.get('job') || showcaseSession?.jobId || '',
+        title: showcaseSession?.title || 'MelodyVow',
+        subtitle: showcaseSession?.subtitle || '',
+        lyrics: showcaseSession?.lyrics || '',
+        statusText: showcaseSession?.statusText || '',
+        generationProgress: showcaseSession?.generationProgress ?? 12,
+        isGenerating: showcaseSession?.isGenerating ?? true,
+        tracks: showcaseSession?.tracks || [],
+        activeTrackId: showcaseSession?.activeTrackId || '',
+      }
+      applyShowcaseSession(nextSession)
+      saveShowcaseSession(nextSession)
+      return
+    }
+
+    if (mode === 'history' && showcaseSession?.mode === 'history' && showcaseSession.tracks?.length) {
+      applyShowcaseSession(showcaseSession)
+      return
+    }
+
+    setDisplayMode('demo')
+  }, [isShowcaseMobile, locale, searchParams])
+
+  useEffect(() => {
+    if (!isShowcaseMobile || displayMode !== 'job') {
+      return
+    }
+
+    const jobId = searchParams.get('job') || loadGeneratingShowcaseSession()?.jobId || ''
+    if (!jobId) {
+      return
+    }
+
+    let disposed = false
+
+    const syncShowcaseJob = async (allowAutoplay = false) => {
+      try {
+        const response = await fetch(apiUrl(`/api/jobs/${jobId}`))
+        const result = (await readJsonSafe(response)) as SongJob | { message?: string }
+        if (!response.ok) {
+          throw new Error('message' in result && result.message ? result.message : '任务查询失败。')
+        }
+
+        const job = result as SongJob
+        if (disposed) {
+          return
+        }
+
+        const currentSession = loadGeneratingShowcaseSession()
+        const nextSession = buildShowcaseSessionFromJob(job, locale, currentSession)
+        const nextTracks = nextSession.tracks || []
+        const audio = showcaseAudioRef.current
+        const currentPlaybackSession = loadShowcaseSession()
+        const isViewingSameJob = displayMode === 'job' && (currentPlaybackSession?.jobId === jobId || searchParams.get('job') === jobId)
+        const canTakeOverVisiblePlayer = displayMode === 'job' && (isViewingSameJob || searchParams.get('mode') === 'job')
+        const isPlayingAnotherTrack = Boolean(audio && !audio.paused && displayMode !== 'job')
+
+        // #region debug-point D:job-sync-branch
+        reportDebugEvent({
+          hypothesisId: 'D',
+          location: 'web/src/App.tsx:ShowcasePage.syncShowcaseJob:branch',
+          msg: '[DEBUG] Evaluated Showcase job sync branch',
+          data: {
+            jobId,
+            jobStatus: job.status,
+            displayMode,
+            currentPlaybackMode: currentPlaybackSession?.mode || '',
+            currentPlaybackJobId: currentPlaybackSession?.jobId || '',
+            isViewingSameJob,
+            canTakeOverVisiblePlayer,
+            isPlayingAnotherTrack,
+            audioPaused: audio ? audio.paused : null,
+            audioCurrentTime: audio ? Number(audio.currentTime || 0) : null,
+            audioSrc: audio?.currentSrc || audio?.src || '',
+          },
+        })
+        // #endregion
+
+        if (job.status === 'ready' && (allowAutoplay || showcaseLastJobStatusRef.current !== 'ready')) {
+          if (canTakeOverVisiblePlayer && (!isPlayingAnotherTrack || isViewingSameJob)) {
+            showcaseShouldAutoplayRef.current = true
+            queuedReadyJobSessionRef.current = null
+            setPendingReadyNotice('')
+            applyShowcaseSession(nextSession)
+            saveShowcaseSession(nextSession)
+          } else if (isPlayingAnotherTrack) {
+            queuedReadyJobSessionRef.current = nextSession
+            setPendingReadyNotice(copy(locale, {
+              zh: '新生成的歌曲已完成，当前歌曲播放结束后会自动切换播放。',
+              en: 'Your generated song is ready and will start after the current track finishes.',
+            }))
+          }
+        } else if (canTakeOverVisiblePlayer) {
+          applyShowcaseSession(nextSession)
+          saveShowcaseSession(nextSession)
+        }
+
+        // #region debug-point B:showcase-job-sync
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.syncShowcaseJob',
+          msg: '[DEBUG] Showcase synced job payload into mobile player state',
+          data: {
+            jobId,
+            jobStatus: job.status,
+            allowAutoplay,
+            willAutoplay: showcaseShouldAutoplayRef.current,
+            nextTrackCount: nextTracks.length,
+            nextFirstTrackId: nextTracks[0]?.id || '',
+            nextFirstTrackAudioUrl: nextTracks[0]?.audioUrl || '',
+            nextFirstTrackDownloadUrl: nextTracks[0]?.downloadUrl || '',
+            nextActiveTrackId: nextTracks[0]?.id || '',
+          },
+        })
+        // #endregion
+
+        setError(job.status === 'error' ? (job.error || copy(locale, { zh: '生成失败，请稍后重试。', en: 'Generation failed. Please try again later.' })) : '')
+        saveGeneratingShowcaseSession(nextSession)
+        showcaseLastJobStatusRef.current = job.status
+      } catch (loadError) {
+        if (!disposed) {
+          setError(loadError instanceof Error ? loadError.message : '任务查询失败。')
+        }
+      }
+    }
+
+    void syncShowcaseJob(true)
+    const timer = window.setInterval(() => {
+      void syncShowcaseJob()
+    }, 5000)
+
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [displayMode, isShowcaseMobile, locale, searchParams])
+
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio) {
+      return
+    }
+
+    const handleTimeUpdate = () => {
+      if (audio.duration) {
+        setShowcaseProgress((audio.currentTime / audio.duration) * 100)
+      } else {
+        setShowcaseProgress(0)
+      }
+    }
+
+    const handlePlay = () => {
+      // #region debug-point B:audio-play
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:play',
+        msg: '[DEBUG] Showcase audio play event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+      setShowcasePlaying(true)
+    }
+
+    const handlePause = () => {
+      // #region debug-point B:audio-pause
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:pause',
+        msg: '[DEBUG] Showcase audio pause event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          ended: audio.ended,
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+      setShowcasePlaying(false)
+    }
+
+    const handleEnded = () => {
+      // #region debug-point C:audio-ended
+      reportDebugEvent({
+        hypothesisId: 'C',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:ended',
+        msg: '[DEBUG] Showcase audio ended event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          hasQueuedReadySession: Boolean(queuedReadyJobSessionRef.current?.jobId),
+          queuedReadyJobId: queuedReadyJobSessionRef.current?.jobId || '',
+        },
+      })
+      // #endregion
+      setShowcasePlaying(false)
+      setShowcaseProgress(100)
+
+      const queuedSession = queuedReadyJobSessionRef.current
+      if (queuedSession?.mode === 'job' && queuedSession.tracks?.some((track) => track.audioUrl)) {
+        queuedReadyJobSessionRef.current = null
+        setPendingReadyNotice('')
+        showcaseShouldAutoplayRef.current = true
+        applyShowcaseSession(queuedSession)
+        saveShowcaseSession(queuedSession)
+      }
+    }
+
+    const handleAudioError = () => {
+      // #region debug-point B:audio-error
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEvents:error',
+        msg: '[DEBUG] Showcase audio error event fired',
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          errorCode: audio.error?.code || null,
+          errorMessage: audio.error?.message || '',
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+    }
+
+    const handleAudioNetworkEvent = (eventName: string) => {
+      // #region debug-point B:audio-network
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: `web/src/App.tsx:ShowcasePage.audioEvents:${eventName}`,
+        msg: `[DEBUG] Showcase audio ${eventName} event fired`,
+        data: {
+          activeTrackId,
+          currentTime: Number(audio.currentTime || 0),
+          duration: Number(audio.duration || 0),
+          readyState: audio.readyState,
+          networkState: audio.networkState,
+          paused: audio.paused,
+          ended: audio.ended,
+          src: audio.currentSrc || audio.src || '',
+        },
+      })
+      // #endregion
+    }
+
+    audio.addEventListener('timeupdate', handleTimeUpdate)
+    audio.addEventListener('play', handlePlay)
+    audio.addEventListener('pause', handlePause)
+    audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('error', handleAudioError)
+    audio.addEventListener('stalled', () => handleAudioNetworkEvent('stalled'))
+    audio.addEventListener('abort', () => handleAudioNetworkEvent('abort'))
+    audio.addEventListener('suspend', () => handleAudioNetworkEvent('suspend'))
+    audio.addEventListener('waiting', () => handleAudioNetworkEvent('waiting'))
+    audio.addEventListener('canplay', () => handleAudioNetworkEvent('canplay'))
+
+    return () => {
+      audio.removeEventListener('timeupdate', handleTimeUpdate)
+      audio.removeEventListener('play', handlePlay)
+      audio.removeEventListener('pause', handlePause)
+      audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('error', handleAudioError)
+    }
+  }, [activeTrackId])
+
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio || !activeTrack?.audioUrl) {
+      // #region debug-point B:showcase-audio-missing
+      reportDebugEvent({
+        hypothesisId: 'B',
+        location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+        msg: '[DEBUG] Showcase audio effect missing playable track',
+        data: {
+          activeTrackId: activeTrack?.id || '',
+          activeTrackAudioUrl: activeTrack?.audioUrl || '',
+          activeTrackDownloadUrl: activeTrack?.downloadUrl || '',
+          hasAudioElement: Boolean(audio),
+        },
+      })
+      // #endregion
+      setShowcasePlaying(false)
+      setShowcaseProgress(0)
+      return
+    }
+
+    audio.src = activeTrack.audioUrl
+    audio.load()
+    setShowcaseProgress(0)
+    setShowcasePlaying(false)
+
+    if (!showcaseShouldAutoplayRef.current) {
+      return
+    }
+
+    const tryPlay = async () => {
+      try {
+        await audio.play()
+        // #region debug-point B:showcase-autoplay-success
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+          msg: '[DEBUG] Showcase autoplay succeeded',
+          data: {
+            activeTrackId: activeTrack.id,
+            activeTrackAudioUrl: activeTrack.audioUrl,
+            activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+          },
+        })
+        // #endregion
+      } catch {
+        // #region debug-point B:showcase-autoplay-failed
+        reportDebugEvent({
+          hypothesisId: 'B',
+          location: 'web/src/App.tsx:ShowcasePage.audioEffect',
+          msg: '[DEBUG] Showcase autoplay failed',
+          data: {
+            activeTrackId: activeTrack.id,
+            activeTrackAudioUrl: activeTrack.audioUrl,
+            activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+          },
+        })
+        // #endregion
+        setError(copy(locale, {
+          zh: '当前样片暂时无法播放，请稍后再试。',
+          en: 'This sample cannot be played right now. Please try again later.',
+        }))
+      } finally {
+        showcaseShouldAutoplayRef.current = false
+      }
+    }
+
+    void tryPlay()
+  }, [activeTrack?.id, activeTrack?.audioUrl, locale])
+
+  useEffect(() => {
+    const audio = showcaseAudioRef.current
+    if (!audio || isShowcaseMobile) {
+      return
+    }
+
+    audio.pause()
+    setShowcasePlaying(false)
+  }, [isShowcaseMobile])
+
+  useEffect(() => () => {
+    const audio = showcaseAudioRef.current
+    if (audio) {
+      audio.pause()
+    }
+  }, [])
+
+  async function handleMobileShowcasePlayback() {
+    const audio = showcaseAudioRef.current
+    if (!audio || !activeTrack?.audioUrl) {
+      return
+    }
+
+    // #region debug-point B:manual-play-click
+    reportDebugEvent({
+      hypothesisId: 'B',
+      location: 'web/src/App.tsx:ShowcasePage.handleMobileShowcasePlayback',
+      msg: '[DEBUG] User triggered Showcase mobile playback toggle',
+      data: {
+        activeTrackId: activeTrack.id,
+        activeTrackAudioUrl: activeTrack.audioUrl,
+        activeTrackDownloadUrl: activeTrack.downloadUrl || '',
+        paused: audio.paused,
+        currentTime: Number(audio.currentTime || 0),
+        duration: Number(audio.duration || 0),
+        readyState: audio.readyState,
+        networkState: audio.networkState,
+        src: audio.currentSrc || audio.src || '',
+      },
+    })
+    // #endregion
+    setError('')
+
+    if (audio.paused) {
+      try {
+        await audio.play()
+      } catch {
+        setError(copy(locale, {
+          zh: '当前样片暂时无法播放，请稍后再试。',
+          en: 'This sample cannot be played right now. Please try again later.',
+        }))
+      }
+      return
+    }
+
+    audio.pause()
+  }
+
   function handleSelectTrack(trackId: string) {
-    const trackIndex = tracks.findIndex((track) => track.id === trackId)
-    const nextTrack = tracks[trackIndex] ?? tracks[0]
+    const trackIndex = displayTracks.findIndex((track) => track.id === trackId)
+    const nextTrack = displayTracks[trackIndex] ?? displayTracks[0]
+    // #region debug-point A:select-track
+    reportDebugEvent({
+      hypothesisId: 'A',
+      location: 'web/src/App.tsx:ShowcasePage.handleSelectTrack',
+      msg: '[DEBUG] User selected Showcase track',
+      data: {
+        requestedTrackId: trackId,
+        nextTrackId: nextTrack?.id || '',
+        nextTrackAudioUrl: nextTrack?.audioUrl || '',
+        displayMode,
+        displayTrackCount: displayTracks.length,
+        showcaseIsGenerating,
+      },
+    })
+    // #endregion
     setActiveTrackId(trackId)
     setError('')
+
+    if (isShowcaseMobile) {
+      showcaseShouldAutoplayRef.current = true
+      return
+    }
+
     onUpsertFloatingPlayer({
       key: `showcase-${trackId}`,
       locale,
-      title: copy(locale, nextTrack?.title ?? { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' }),
-      subtitle: copy(locale, nextTrack?.meta ?? { zh: '婚礼样片', en: 'Wedding sample' }),
+      title: nextTrack?.title || copy(locale, { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' }),
+      subtitle: nextTrack?.meta || copy(locale, { zh: '婚礼样片', en: 'Wedding sample' }),
       eyebrow: copy(locale, { zh: '样片播放器', en: 'Showcase Player' }),
-      tracks: tracks.map((track) => ({
+      tracks: displayTracks.map((track) => ({
         id: track.id,
-        title: copy(locale, track.title),
-        subtitle: copy(locale, track.meta),
+        title: track.title,
+        subtitle: track.meta,
         audioUrl: track.audioUrl,
-        downloadUrl: track.audioUrl,
+        downloadUrl: track.downloadUrl || track.audioUrl,
       })),
       activeTrackIndex: Math.max(trackIndex, 0),
       canClose: true,
-      isGenerating: false,
-      generationProgress: 100,
+      isGenerating: showcaseIsGenerating,
+      generationProgress: showcaseIsGenerating ? showcaseGenerationProgress : 100,
       generationLabel: '',
-      statusText: copy(locale, {
-        zh: '所有样片播放都会统一进入浮动手机播放器。',
-        en: 'All sample playback now opens in the floating phone player.',
-      }),
+      statusText: showcaseStatusText,
+      lyrics: showcaseLyrics,
       autoPlay: true,
     })
   }
@@ -2748,40 +4048,93 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
       hideHero
     >
       <section className="showcase-layout">
-        <article className="glass-panel floating-player-teaser">
-          <div className="phone-brand-block">
-            <h2>{copy(locale, { zh: '悬浮手机播放器', en: 'Floating Phone Player' })}</h2>
-            <p>{copy(locale, { zh: '所有样片和生成歌曲都会从这里统一播放。', en: 'All sample and generated songs now open here.' })}</p>
-          </div>
-          <div className="phone-record-visual floating-phone-visual" aria-hidden="true">
-            <div className="floating-phone-disc-shell is-spinning">
-              <img className="floating-phone-disc-image" src={phoneDiscImage} alt="" />
-            </div>
-            <img className="phone-record-couple" src={coupleImage} alt="" />
-            <img className="phone-record-heart" src={pinkHeartImage} alt="" />
-          </div>
-          <div className="status-banner is-ready">
-            {copy(locale, {
-              zh: '点击右侧任意样片，都会打开右下角悬浮播放器，不再使用旧播放器。',
-              en: 'Tap any sample on the right to open the docked floating player.',
-            })}
-          </div>
-          {activeTrack ? (
-            <div className="player-now-playing floating-player-meta">
-              <div>
-                <p className="mini-eyebrow">{copy(locale, { zh: '当前主推样片', en: 'Featured Sample' })}</p>
-                <h3>{copy(locale, activeTrack.title)}</h3>
-                <p>{copy(locale, activeTrack.meta)}</p>
+        <article className="glass-card showcase-mobile-player">
+          <audio ref={showcaseAudioRef} preload="metadata" />
+          <div className="showcase-mobile-player-shell">
+            <div className="showcase-mobile-player-card">
+              <div className="showcase-mobile-player-head">
+                <p className="showcase-mobile-player-eyebrow">{copy(locale, { zh: '唯一播放器', en: 'Only Player' })}</p>
+                <span className="showcase-mobile-player-count">
+                  {copy(locale, {
+                    zh: `${displayTracks.length} 首歌曲`,
+                    en: `${displayTracks.length} tracks`,
+                  })}
+                </span>
+              </div>
+
+              <div className="showcase-mobile-player-main">
+                <button
+                  type="button"
+                  className={`showcase-mobile-play-button ${showcasePlaying ? 'is-playing' : ''}`}
+                  onClick={() => void handleMobileShowcasePlayback()}
+                  disabled={!activeTrack?.audioUrl}
+                  aria-label={copy(locale, { zh: '播放或暂停样片', en: 'Play or pause sample' })}
+                >
+                  {showcasePlaying ? '❚❚' : '▶'}
+                </button>
+
+                <div className="showcase-mobile-player-copy">
+                  <strong>{activeTrack?.title || copy(locale, { zh: 'MelodyVow 展示', en: 'MelodyVow Showcase' })}</strong>
+                  <span>{activeTrack?.meta || copy(locale, { zh: '婚礼样片', en: 'Wedding sample' })}</span>
+                  <p>{showcaseStatusText || activeTrack?.blurb || copy(locale, { zh: '点击下方歌单，直接在这里试听。', en: 'Tap a song below to preview it here.' })}</p>
+                </div>
+              </div>
+
+              <div className="showcase-mobile-player-progress-copy">
+                <span>
+                  {showcaseIsGenerating
+                    ? copy(locale, { zh: '歌曲生成进度', en: 'Generation Progress' })
+                    : showcasePlaying
+                    ? copy(locale, { zh: '歌曲播放中', en: 'Now Playing' })
+                    : copy(locale, { zh: '歌曲播放进度', en: 'Song Progress' })}
+                </span>
+                <span>{`${Math.round(showcaseIsGenerating ? showcaseGenerationProgress : showcaseProgress)}%`}</span>
+              </div>
+              <div className="showcase-mobile-player-progress" aria-hidden="true">
+                <span style={{ width: `${Math.max(0, Math.min(100, showcaseIsGenerating ? showcaseGenerationProgress : showcaseProgress))}%` }} />
               </div>
             </div>
-          ) : null}
+          </div>
+          {pendingReadyNotice ? <p className="showcase-mobile-ready-notice">{pendingReadyNotice}</p> : null}
           {error ? <p className="form-error">{error}</p> : null}
+          <article className="glass-card showcase-mobile-lyrics">
+            <div className="showcase-mobile-lyrics-shell">
+              <div className="showcase-mobile-lyrics-card">
+                <div className="showcase-mobile-lyrics-head">
+                  <p>{copy(locale, { zh: '歌词面板', en: 'Lyrics Panel' })}</p>
+                  <span>{displayMode === 'job' ? copy(locale, { zh: '生成中可见', en: 'Visible While Generating' }) : copy(locale, { zh: '统一播放页', en: 'Unified Player' })}</span>
+                </div>
+                <div className="showcase-mobile-lyrics-body">
+                  {showcaseLyrics || copy(locale, {
+                    zh: '这里会显示当前歌曲的歌词、故事关键词，或者生成中的文案内容。',
+                    en: 'The current lyrics, story keywords, or generation copy will appear here.',
+                  })}
+                </div>
+              </div>
+            </div>
+          </article>
         </article>
 
         <aside className="showcase-sidebar">
           <article className="glass-card showcase-intro">
             <p className="mini-eyebrow">{copy(locale, { zh: '全球', en: 'Global' })}</p>
             <h3>{copy(locale, { zh: '曾经求婚成功的浪漫歌曲', en: 'Romantic Songs from Successful Proposals' })}</h3>
+            <p className="showcase-mobile-intro-copy">
+              {displayMode === 'job'
+                ? copy(locale, {
+                    zh: '生成中的歌曲会先在这里显示歌词和进度，等 Suno 完成后自动播放。',
+                    en: 'Generated songs stay here with lyrics and progress, then autoplay once Suno finishes.',
+                  })
+                : displayMode === 'history'
+                ? copy(locale, {
+                    zh: '会员中心歌曲已经切到这里播放，你可以一边听一边看歌词。',
+                    en: 'Member songs have moved here, so you can listen while keeping the lyrics visible.',
+                  })
+                : copy(locale, {
+                    zh: '下方歌单会统一进入上面的手机播放器，点击即可播放。',
+                    en: 'Every sample below plays inside the mobile player above.',
+                  })}
+            </p>
             <button
               type="button"
               className="showcase-home-link"
@@ -2793,7 +4146,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
           </article>
 
           <div className="showcase-track-list">
-            {tracks.map((track, index) => {
+            {displayTracks.map((track, index) => {
               const isActive = track.id === activeTrackId
 
               return (
@@ -2805,11 +4158,12 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
                 >
                   <div className="showcase-track-index">{String(index + 1).padStart(2, '0')}</div>
                   <div className="showcase-track-copy">
-                    <strong>{copy(locale, track.title)}</strong>
-                    <span>{copy(locale, track.meta)}</span>
+                    <strong>{track.title}</strong>
+                    <span>{track.meta}</span>
+                    <small>{track.blurb}</small>
                   </div>
                   <div className={`showcase-track-icon ${isActive ? 'is-playing' : ''}`}>
-                    ▶
+                    {isActive && showcasePlaying && isShowcaseMobile ? '❚❚' : '▶'}
                   </div>
                 </button>
               )
@@ -2949,14 +4303,14 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
 
     const fallbackPlans: PlanItem[] = locale === 'zh'
       ? [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '推荐', features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'] },
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'] },
         ]
       : [
-          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: ['5 service credits', 'AI lyrics', 'Names in song', 'MP3 download'] },
-          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: 'Recommended', features: ['15 service credits', 'Full lyrics', 'Wedding version', 'HD audio'] },
-          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: ['40 service credits', 'Real singer', 'Custom arrangement', 'Dual mix'] },
+          { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['5 service credits', 'AI lyrics', 'Names in song', 'MP3 download'] },
+          { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['15 service credits', 'Full lyrics', 'Wedding version', 'HD audio'] },
+          { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['40 service credits', 'Real singer', 'Custom arrangement', 'Dual mix'] },
         ]
 
     async function loadPlans() {
@@ -2969,7 +4323,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
         }
         const items = Array.isArray(data.items) ? data.items : []
         if (!disposed) {
-          setPlans(items.length ? items : fallbackPlans)
+          setPlans((items.length ? items : fallbackPlans).map(normalizePricingPlan))
         }
       } catch {
         if (!disposed) {
@@ -3010,7 +4364,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
             {plan.badge ? <span className="corner-badge">{plan.badge}</span> : null}
             <div className="step-badge">{plan.name.slice(0, 1)}</div>
             <h3>{plan.name}</h3>
-            <div className="price-tag">{plan.currency === 'CNY' || !plan.currency ? `¥${plan.price}` : `${plan.price}`}</div>
+            <div className="price-tag">{formatPlanPrice(plan)}</div>
             <p>{copy(locale, { zh: `包含 ${plan.heartBeans || 0} 点订阅服务额度`, en: `${plan.heartBeans || 0} service credits included` })}</p>
             <ul>
               {(plan.features || []).map((item) => (
@@ -3019,7 +4373,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
             </ul>
             <button
               type="button"
-              className="primary-button compact"
+              className="primary-button compact pricing-action-button"
               onClick={() => {
                 setSelectedPlan(plan.name)
                 navigate(withLocale(locale, `/checkout?planId=${encodeURIComponent(plan.id)}`))
@@ -3036,6 +4390,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
           zh: '订阅购买前请先阅读服务政策',
           en: 'Review service policies before purchase',
         })}
+        className="pricing-service-hub"
       />
     </SiteLayout>
   )
@@ -3055,9 +4410,9 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
     let disposed = false
 
     const fallbackPlans: PlanItem[] = [
-      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'CNY', badge: '', features: [] },
-      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'CNY', badge: '', features: [] },
-      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'CNY', badge: '', features: [] },
+      { id: 'starter', name: 'Starter', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [] },
+      { id: 'pro', name: 'Pro', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [] },
+      { id: 'premium', name: 'Premium', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [] },
     ]
 
     async function loadCheckoutData() {
@@ -3069,7 +4424,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
           fetch(apiUrl('/api/payment/methods')),
         ])
         const [plansData, methodsData] = await Promise.all([plansRes.json(), methodsRes.json()])
-        const nextPlans = Array.isArray(plansData.items) ? (plansData.items as PlanItem[]) : fallbackPlans
+        const nextPlans = Array.isArray(plansData.items) ? (plansData.items as PlanItem[]).map(normalizePricingPlan) : fallbackPlans
         const nextMethods = Array.isArray(methodsData.items) ? (methodsData.items as PaymentMethod[]) : []
 
         if (!disposed) {
@@ -3173,9 +4528,9 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
           {loading ? <p className="empty-state">{copy(locale, { zh: '加载中...', en: 'Loading...' })}</p> : null}
           {!loading && activePlan ? (
             <>
-              <div className="price-tag">{activePlan.currency === 'CNY' || !activePlan.currency ? `¥${activePlan.price}` : `${activePlan.price}`}</div>
+              <div className="price-tag">{formatPlanPrice(activePlan)}</div>
               <p>{copy(locale, { zh: `开通 ${activePlan.heartBeans || 0} 点订阅服务额度`, en: `${activePlan.heartBeans || 0} service credits will be activated` })}</p>
-              <button type="button" className="ghost-button compact" onClick={() => navigate(withLocale(locale, '/pricing'))}>
+              <button type="button" className="primary-button compact pricing-action-button" onClick={() => navigate(withLocale(locale, '/pricing'))}>
                 {copy(locale, { zh: '返回选择套餐', en: 'Back to Pricing' })}
               </button>
             </>
@@ -3196,7 +4551,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
               <button
                 key={method.id}
                 type="button"
-                className="primary-button"
+                className="primary-button pricing-action-button"
                 disabled={submitting || loading}
                 onClick={() => void handleStartPayment(method)}
               >
@@ -3212,6 +4567,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
 
 function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onLogout, authSession }: AuthPageProps) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -3229,6 +4585,71 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   function refreshCaptcha() {
     setCaptchaChallenge(createCaptchaChallenge())
     setCaptchaInput('')
+  }
+
+  useEffect(() => {
+    const googleStatus = String(searchParams.get('google') || '').trim()
+    if (!googleStatus) {
+      return
+    }
+
+    if (googleStatus === 'error') {
+      setAuthError(searchParams.get('message') || copy(locale, {
+        zh: 'Google 登录失败，请稍后重试。',
+        en: 'Google sign-in failed. Please try again later.',
+      }))
+      refreshCaptcha()
+      navigate(withLocale(locale, '/auth'), { replace: true })
+      return
+    }
+
+    const token = String(searchParams.get('token') || '').trim()
+    const nextEmail = String(searchParams.get('email') || '').trim()
+
+    if (googleStatus !== 'success' || !token || !nextEmail) {
+      setAuthError(copy(locale, {
+        zh: 'Google 登录返回的数据不完整，请重新尝试。',
+        en: 'Google sign-in returned incomplete data. Please try again.',
+      }))
+      refreshCaptcha()
+      navigate(withLocale(locale, '/auth'), { replace: true })
+      return
+    }
+
+    const mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login'
+    const successMessage = buildMemberAuthSuccessMessage(locale, mode, nextEmail)
+
+    onAuthSuccess({
+      authToken: token,
+      email: nextEmail,
+      partnerName: String(searchParams.get('partnerName') || draft.bride || '').trim(),
+      plan: String(searchParams.get('plan') || selectedPlan || '').trim(),
+      heartBeansBalance: Number(searchParams.get('heartBeansBalance') || 0),
+      mode,
+      welcomeMessage: successMessage,
+      lastAuthAt: String(searchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
+      avatarUrl: String(searchParams.get('avatarUrl') || '').trim(),
+    })
+
+    onOpenModal(successMessage)
+    refreshCaptcha()
+    navigate(withLocale(locale, '/account'), { replace: true })
+  }, [draft.bride, locale, navigate, onAuthSuccess, onOpenModal, searchParams, selectedPlan])
+
+  function handleGoogleAuthStart() {
+    setAuthError('')
+
+    if (!GOOGLE_LOGIN_ENABLED) {
+      onOpenModal(copy(locale, {
+        zh: 'Google 登录尚未在前端完成配置，请稍后再试。',
+        en: 'Google sign-in is not configured on the frontend yet.',
+      }))
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.assign(apiUrl(`/api/member/google/start?locale=${encodeURIComponent(locale)}`))
+    }
   }
 
   async function handleAuthSubmit() {
@@ -3274,14 +4695,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
       ? partnerName.trim()
       : draft.bride
 
-    const successMessage = copy(locale, {
-      zh: tab === 'login'
-        ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
-        : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
-      en: tab === 'login'
-        ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
-        : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
-    })
+    const successMessage = buildMemberAuthSuccessMessage(locale, tab, email.trim())
 
     setIsSubmitting(true)
 
@@ -3445,8 +4859,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
           </button>
 
           <div className="social-actions">
-            <button type="button" className="ghost-button compact">
-              Google
+            <button type="button" className="ghost-button compact" onClick={handleGoogleAuthStart}>
+              {copy(locale, { zh: '使用 Google 登录', en: 'Continue with Google' })}
             </button>
           </div>
         </article>
@@ -3456,6 +4870,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
 }
 
 function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer }: AccountPageProps) {
+  const navigate = useNavigate()
+  const isMobileViewport = useIsMobileViewport()
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
@@ -3539,8 +4955,119 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
     }
   }
 
+  async function handleCopyLyrics(item: HistoryItem) {
+    const lyricsText = String(item.lyrics || item.lyricSnippet || '').trim()
+
+    if (!lyricsText) {
+      onOpenModal(copy(locale, {
+        zh: '这首歌暂时还没有可复制的歌词内容。',
+        en: 'This song does not have any lyrics available to copy yet.',
+      }))
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(lyricsText)
+      onOpenModal(copy(locale, {
+        zh: '歌词已复制。',
+        en: 'Lyrics copied.',
+      }))
+    } catch {
+      onOpenModal(`${copy(locale, {
+        zh: '歌词如下：',
+        en: 'Lyrics:',
+      })}\n${lyricsText}`)
+    }
+  }
+
   async function handleTogglePlay(item: HistoryItem) {
     try {
+      const groupJobId = item.jobId || item.id
+      const itemLyrics = String(item.lyrics || item.lyricSnippet || '').trim()
+      const relatedReadyTracks = history.filter((candidate) => {
+        const candidateJobId = candidate.jobId || candidate.id
+        return candidateJobId === groupJobId && candidate.rawStatus === 'ready' && Boolean(candidate.audioUrl || candidate.downloadUrl)
+      })
+      const canPlayCurrentItem = item.rawStatus === 'ready' && Boolean(item.audioUrl || item.downloadUrl)
+
+      if (isMobileViewport) {
+        if (!canPlayCurrentItem && groupJobId) {
+          saveShowcaseSession({
+            mode: 'job',
+            jobId: groupJobId,
+            title: item.title || 'MelodyVow',
+            subtitle: item.subtitle,
+            lyrics: itemLyrics,
+            statusText: copy(locale, {
+              zh: '这首歌还在生成中，Showcase 会继续显示进度，完成后自动播放。',
+              en: 'This song is still generating. Showcase will keep showing progress and autoplay once it is ready.',
+            }),
+            generationProgress: 72,
+            isGenerating: true,
+            tracks: [],
+            activeTrackId: '',
+          })
+          navigate(withLocale(locale, `/how-it-works?mode=job&job=${encodeURIComponent(groupJobId)}`))
+          return
+        }
+
+        const mobileTracks = (relatedReadyTracks.length ? relatedReadyTracks : [item]).map((track) => ({
+          id: track.id,
+          title: track.title || 'MelodyVow',
+          meta: track.variantLabel || track.subtitle,
+          blurb: summarizeStoryText(
+            String(track.lyrics || track.lyricSnippet || '').trim(),
+            copy(locale, {
+              zh: '点击播放按钮即可直接试听这首歌曲。',
+              en: 'Tap play to listen to this song here.',
+            }),
+          ),
+          audioUrl: getSongStreamUrl(track.id),
+          downloadUrl: getSongDownloadUrl(track.id),
+        }))
+
+        // #region debug-point E:account-history-handoff
+        reportDebugEvent({
+          hypothesisId: 'E',
+          location: 'web/src/App.tsx:AccountPage.handleTogglePlay',
+          msg: '[DEBUG] Account handed off song playback to Showcase session',
+          data: {
+            songId: item.id,
+            jobId: groupJobId,
+            relatedReadyTrackCount: relatedReadyTracks.length,
+            title: item.title || '',
+            audioUrl: item.audioUrl || '',
+            downloadUrl: item.downloadUrl || '',
+            lyricTextLength: itemLyrics.length,
+          },
+        })
+        // #endregion
+        saveShowcaseSession({
+          mode: 'history',
+          title: item.title || 'MelodyVow',
+          subtitle: item.subtitle,
+          lyrics: itemLyrics,
+          statusText: copy(locale, {
+            zh: '会员中心歌曲已切换到 Showcase 页面播放，这里可以同时查看歌词。',
+            en: 'Member songs now play inside Showcase, where the lyrics can stay visible.',
+          }),
+          generationProgress: 100,
+          isGenerating: false,
+          activeTrackId: item.id,
+          tracks: mobileTracks,
+        })
+        navigate(withLocale(locale, `/how-it-works?mode=history&track=${encodeURIComponent(item.id)}`))
+        return
+      }
+
+      if (!canPlayCurrentItem) {
+        onOpenModal(copy(locale, {
+          zh: '这首歌还在生成中，桌面端暂时不能播放，请稍后刷新会员中心。',
+          en: 'This song is still generating. Desktop playback is not ready yet. Please refresh your member center shortly.',
+        }))
+        return
+      }
+
       onUpsertFloatingPlayer({
         key: `account-${item.id}`,
         locale,
@@ -3554,10 +5081,10 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
         generationProgress: 100,
         generationLabel: '',
         statusText: copy(locale, {
-          zh: '会员中心的歌曲会统一在这个悬浮播放器中播放。',
-          en: 'Songs from your member center now play in this floating player.',
+          zh: '会员中心的歌曲会统一在这个悬浮播放器中播放，下方会保留歌词小窗口。',
+          en: 'Songs from your member center now play in this floating player with lyrics kept below.',
         }),
-        lyrics: item.lyricSnippet || '',
+        lyrics: itemLyrics,
         error: '',
         autoPlay: true,
       })
@@ -3588,7 +5115,16 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
       <section className="account-layout">
         <aside className="account-sidebar">
           <section className="glass-card account-member-card">
-            <h3>{displayName}</h3>
+            <div className="account-member-card-head">
+              <h3>{displayName}</h3>
+              <button
+                type="button"
+                className="account-mini-logout-button"
+                onClick={onLogout}
+              >
+                {copy(locale, { zh: '退出登录', en: 'Log out' })}
+              </button>
+            </div>
             <p className="account-member-email">{memberLabel}</p>
             <div className="tag-row">
               <span className="soft-pill accent">{currentPlanLabel} Member</span>
@@ -3622,7 +5158,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
 
         <section className="account-song-list">
           {history.map((item) => (
-            <article key={item.id} className="glass-card account-song-row">
+            <article key={item.id} className={`glass-card account-song-row ${item.rawStatus === 'ready' ? '' : 'is-pending'}`}>
               <div className="account-song-main">
                 <h3 className="account-song-title">{item.title}</h3>
                 <p className="account-song-subtitle">{item.subtitle}</p>
@@ -3639,18 +5175,30 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   className="ghost-button compact"
                   onClick={() => void handleTogglePlay(item)}
                 >
-                  {copy(locale, { zh: '浮动播放器', en: 'Open Player' })}
+                  {item.rawStatus === 'ready'
+                    ? copy(locale, { zh: '浮动播放器', en: 'Open Player' })
+                    : copy(locale, { zh: '查看进度', en: 'View Progress' })}
                 </button>
                 <button
                   type="button"
                   className="ghost-button compact"
                   onClick={() => void handleShareSong(item)}
+                  disabled={!item.downloadUrl && !item.audioUrl}
                 >
                   {copy(locale, { zh: '分享链接', en: 'Share Link' })}
                 </button>
                 <button
                   type="button"
+                  className="ghost-button compact"
+                  onClick={() => void handleCopyLyrics(item)}
+                  disabled={!String(item.lyrics || item.lyricSnippet || '').trim()}
+                >
+                  {copy(locale, { zh: '复制歌词', en: 'Copy Lyrics' })}
+                </button>
+                <button
+                  type="button"
                   className="primary-button compact"
+                  disabled={!item.downloadUrl && !item.audioUrl}
                   onClick={() => {
                     reportDebugEvent({
                       hypothesisId: 'C',
@@ -3770,6 +5318,7 @@ function AdminDashboardPage({
   const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
   const [metrics, setMetrics] = useState({
     totalSongs: 0,
     readySongs: 0,
@@ -3819,59 +5368,156 @@ function AdminDashboardPage({
           'x-admin-token': activeSession!.token,
         }
 
-        const [overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes] = await Promise.all([
-          fetch(apiUrl('/api/admin/overview'), { headers }),
-          fetch(apiUrl('/api/admin/members'), { headers }),
-          fetch(apiUrl('/api/admin/songs'), { headers }),
-          fetch(apiUrl('/api/admin/showcase-tracks'), { headers }),
-          fetch(apiUrl('/api/admin/plans'), { headers }),
-          fetch(apiUrl('/api/admin/payment-methods'), { headers }),
-          fetch(apiUrl('/api/admin/orders'), { headers }),
-          fetch(apiUrl('/api/admin/config'), { headers }),
-        ])
+        const adminRequests = [
+          { key: 'overview', path: '/api/admin/overview', label: '总览' },
+          { key: 'members', path: '/api/admin/members', label: '会员' },
+          { key: 'songs', path: '/api/admin/songs', label: '歌曲' },
+          { key: 'showcase', path: '/api/admin/showcase-tracks', label: '样片' },
+          { key: 'plans', path: '/api/admin/plans', label: '套餐' },
+          { key: 'payments', path: '/api/admin/payment-methods', label: '支付方式' },
+          { key: 'orders', path: '/api/admin/orders', label: '订单' },
+          { key: 'config', path: '/api/admin/config', label: '配置' },
+        ] as const
 
-        const [overviewData, membersData, songsData, showcaseData, plansData, paymentsData, ordersData, configData] = await Promise.all([
-          readJsonSafe(overviewRes),
-          readJsonSafe(membersRes),
-          readJsonSafe(songsRes),
-          readJsonSafe(showcaseRes),
-          readJsonSafe(plansRes),
-          readJsonSafe(paymentsRes),
-          readJsonSafe(ordersRes),
-          readJsonSafe(configRes),
-        ])
+        const settled = await Promise.allSettled(
+          adminRequests.map(async (request) => {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-        if ([overviewRes, membersRes, songsRes, showcaseRes, plansRes, paymentsRes, ordersRes, configRes].some((item) => !item.ok)) {
-          const message = overviewData.message
-            || membersData.message
-            || songsData.message
-            || showcaseData.message
-            || plansData.message
-            || paymentsData.message
-            || ordersData.message
-            || configData.message
-            || '后台数据加载失败。'
-          throw new Error(message)
+            try {
+              const response = await fetch(apiUrl(request.path), {
+                headers,
+                signal: controller.signal,
+              })
+              const data = await readJsonSafe(response)
+              return {
+                ...request,
+                response,
+                data,
+              }
+            } finally {
+              clearTimeout(timeoutId)
+            }
+          }),
+        )
+
+        if (disposed) {
+          return
         }
 
-        if (!disposed) {
-          setMetrics(overviewData.metrics)
-          const nextMembers = Array.isArray(membersData.items) ? membersData.items : []
-          const nextSongs = Array.isArray(songsData.items) ? songsData.items : []
-          const nextShowcase = Array.isArray(showcaseData.items) ? showcaseData.items : []
-          const nextPlans = Array.isArray(plansData.items) ? plansData.items : []
-          const nextPayments = Array.isArray(paymentsData.items) ? paymentsData.items : []
-          const nextOrders = Array.isArray(ordersData.items) ? ordersData.items : []
-          setMembers(nextMembers)
-          setSongs(nextSongs)
+        const failureMessages: string[] = []
+        let authExpired = false
+        let nextMembers: AdminMember[] | null = null
+        let nextSongs: AdminSong[] | null = null
+        let nextShowcase: ShowcaseTrack[] | null = null
+        let nextPlans: PlanItem[] | null = null
+        let nextPayments: PaymentMethodAdmin[] | null = null
+        let nextOrders: AdminOrder[] | null = null
+        let nextConfig: AdminConfig | null = null
+
+        settled.forEach((result) => {
+          if (result.status === 'rejected') {
+            failureMessages.push('部分后台数据请求超时，请刷新重试。')
+            return
+          }
+
+          const { key, label, response, data } = result.value
+
+          if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+              authExpired = true
+            }
+            failureMessages.push(data?.message || `${label}数据加载失败。`)
+            return
+          }
+
+          switch (key) {
+            case 'overview':
+              if (data?.metrics) {
+                setMetrics(data.metrics)
+              }
+              break
+            case 'members':
+              nextMembers = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'songs':
+              nextSongs = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'showcase':
+              nextShowcase = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'plans':
+              nextPlans = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'payments':
+              nextPayments = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'orders':
+              nextOrders = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'config':
+              nextConfig = data as AdminConfig
+              break
+          }
+        })
+
+        if (authExpired) {
+          onLogout()
+          navigate('/admin/login', { replace: true })
+          return
+        }
+
+        if (nextMembers) {
+          const membersData: AdminMember[] = nextMembers
+          setMembers(membersData)
+          setSelectedMember((current) => {
+            if (current) {
+              return membersData.find((item) => item.email === current.email) ?? membersData[0] ?? null
+            }
+            return membersData[0] ?? null
+          })
+        }
+
+        if (nextSongs) {
+          const songsData: AdminSong[] = nextSongs
+          setSongs(songsData)
+          setSelectedSong((current) => {
+            if (current) {
+              return songsData.find((item) => item.id === current.id) ?? songsData[0] ?? null
+            }
+            return songsData[0] ?? null
+          })
+        }
+
+        if (nextShowcase) {
           setShowcaseTracks(nextShowcase)
+        }
+
+        if (nextPlans) {
           setPlans(nextPlans)
+        }
+
+        if (nextPayments) {
           setPaymentMethods(nextPayments)
-          setOrders(nextOrders)
-          setSelectedMember(nextMembers[0] ?? null)
-          setSelectedSong(nextSongs[0] ?? null)
-          setSelectedOrder(nextOrders[0] ?? null)
-          setConfig(configData as AdminConfig)
+        }
+
+        if (nextOrders) {
+          const ordersData: AdminOrder[] = nextOrders
+          setOrders(ordersData)
+          setSelectedOrder((current) => {
+            if (current) {
+              return ordersData.find((item) => item.id === current.id) ?? ordersData[0] ?? null
+            }
+            return ordersData[0] ?? null
+          })
+        }
+
+        if (nextConfig) {
+          setConfig(nextConfig)
+        }
+
+        if (failureMessages.length) {
+          setError(failureMessages[0] || '部分后台数据加载失败。')
         }
       } catch (loadError) {
         if (!disposed) {
@@ -3896,6 +5542,20 @@ function AdminDashboardPage({
     }
   }, [activeSession, navigate, onLogout])
 
+  useEffect(() => {
+    if (!saveMessage) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSaveMessage('')
+    }, 2200)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [saveMessage])
+
   if (!activeSession) {
     return <Navigate to="/admin/login" replace />
   }
@@ -3903,6 +5563,7 @@ function AdminDashboardPage({
   async function handleSaveConfig() {
     setSavingConfig(true)
     setError('')
+    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl('/api/admin/config'), {
@@ -3920,6 +5581,7 @@ function AdminDashboardPage({
       }
 
       setConfig(result as AdminConfig)
+      setSaveMessage('后台配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '配置保存失败。')
     } finally {
@@ -3966,6 +5628,9 @@ function AdminDashboardPage({
       return
     }
 
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl(`/api/admin/orders/${selectedOrder.id}`), {
         method: 'PATCH',
@@ -3983,6 +5648,7 @@ function AdminDashboardPage({
       const saved = result as AdminOrder
       setSelectedOrder(saved)
       setOrders((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+      setSaveMessage('订单修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '订单保存失败。')
     }
@@ -3992,6 +5658,9 @@ function AdminDashboardPage({
     if (!selectedMember) {
       return
     }
+
+    setError('')
+    setSaveMessage('')
 
     const topupAmount = Math.max(0, Number(manualTopupAmount || 0))
     const currentBalance = Number(selectedMember.heartBeansBalance ?? 0)
@@ -4027,12 +5696,16 @@ function AdminDashboardPage({
       setMembers((current) => current.map((item) => (item.email === saved.email ? { ...item, ...saved } : item)))
       setManualTopupAmount('0')
       setManualTopupNote('')
+      setSaveMessage('会员信息已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '会员信息保存失败。')
     }
   }
 
   async function handleSavePlans() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/plans'), {
         method: 'PUT',
@@ -4047,12 +5720,16 @@ function AdminDashboardPage({
         throw new Error(result.message || '套餐保存失败。')
       }
       setPlans(Array.isArray(result.items) ? result.items : plans)
+      setSaveMessage('套餐配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '套餐保存失败。')
     }
   }
 
   async function handleSaveShowcaseTracks() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/showcase-tracks'), {
         method: 'PUT',
@@ -4067,12 +5744,16 @@ function AdminDashboardPage({
         throw new Error(result.message || '样片保存失败。')
       }
       setShowcaseTracks(Array.isArray(result.items) ? result.items : showcaseTracks)
+      setSaveMessage('样片配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '样片保存失败。')
     }
   }
 
   async function handleSavePaymentMethods() {
+    setError('')
+    setSaveMessage('')
+
     try {
       const response = await fetch(apiUrl('/api/admin/payment-methods'), {
         method: 'PUT',
@@ -4087,6 +5768,7 @@ function AdminDashboardPage({
         throw new Error(result.message || '支付方式保存失败。')
       }
       setPaymentMethods(Array.isArray(result.items) ? result.items : paymentMethods)
+      setSaveMessage('支付方式已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '支付方式保存失败。')
     }
@@ -4096,6 +5778,9 @@ function AdminDashboardPage({
     if (!selectedSong) {
       return
     }
+
+    setError('')
+    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl(`/api/admin/songs/${selectedSong.id}`), {
@@ -4113,6 +5798,7 @@ function AdminDashboardPage({
       const saved = result as AdminSong
       setSelectedSong(saved)
       setSongs((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+      setSaveMessage('歌曲修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲更新失败。')
     }
@@ -4133,6 +5819,7 @@ function AdminDashboardPage({
 
       setSongs((current) => current.filter((item) => item.id !== songId))
       setSelectedSong((current) => (current?.id === songId ? null : current))
+      setSaveMessage('歌曲记录已删除。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲删除失败。')
     }
@@ -4210,6 +5897,7 @@ function AdminDashboardPage({
 
         <main className="admin-main">
           {error ? <p className="form-error">{error}</p> : null}
+          {saveMessage ? <p className="admin-save-feedback">{saveMessage}</p> : null}
           {loading ? <p className="empty-state">后台数据加载中...</p> : null}
 
           {!loading && tab === 'overview' ? (
@@ -5143,178 +6831,64 @@ function LegalPage({ locale, policy, authSession, onLogout }: LegalPageProps) {
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupError, setLookupError] = useState('')
 
-  const policyContent: Record<LegalPageKey, { active: string, title: Copy, subtitle: Copy, sections: Array<{ heading: Copy, paragraphs: Copy[] }> }> = {
-    delivery: {
-      active: 'legal_delivery',
-      title: { zh: '交付与履约', en: 'Delivery & Fulfillment' },
+  const policyContent: Record<'legal' | 'find-order', { active: string, title: Copy, subtitle: Copy, sections: Array<{ heading: Copy, paragraphs: Copy[] }> }> = {
+    legal: {
+      active: 'legal',
+      title: { zh: '服务说明与政策', en: 'Policies & Support' },
       subtitle: {
-        zh: '说明 MelodyVow 如何交付订阅服务、何时生效以及会员如何使用服务额度。',
-        en: 'This page explains how MelodyVow fulfills subscription services, when access becomes active, and how members use their service quota.',
+        zh: '集中说明 MelodyVow 的交付方式、隐私保护、使用规则、退款范围与取消处理。',
+        en: 'A consolidated overview of MelodyVow fulfillment, privacy, usage terms, refund scope, and cancellation handling.',
       },
       sections: [
         {
-          heading: { zh: '数字服务交付方式', en: 'Digital Delivery Method' },
+          heading: { zh: '交付与履约', en: 'Delivery & Fulfillment' },
           paragraphs: [
             {
-              zh: 'MelodyVow 销售的是订阅式数字婚礼歌曲服务，不涉及实体商品发货。用户完成付款后，订单会在网站内记录，管理员确认付款成功后，对应订阅套餐会把服务额度开通到会员账户。',
-              en: 'MelodyVow sells a subscription-based digital wedding song service and does not ship physical goods. After payment, the order is recorded on-site, and once payment is confirmed, the selected plan activates service credits in the member account.',
+              zh: 'MelodyVow 提供的是订阅式数字婚礼歌曲服务，不涉及实体商品发货。订单创建并确认付款后，系统会把对应服务额度开通到会员账户，并在会员中心记录歌曲、订单与下载内容。',
+              en: 'MelodyVow provides a subscription-based digital wedding song service and does not ship physical goods. Once payment is confirmed, the corresponding service quota is activated in the member account, and the related song, order, and download records appear in the account center.',
             },
             {
-              zh: '会员在首页点击“开始生成婚礼歌”时，会按当前服务配置扣除相应数量的服务额度，并在会员中心查看歌曲记录、订单状态与可下载内容。',
-              en: 'When a member clicks "Create My Song" on the homepage, the configured amount of service quota is consumed and the generated song, order status, and downloadable files become available in the member account.',
+              zh: '歌曲生成属于数字内容交付，完成时间取决于外部 AI 服务、网络状况与排队负载。若系统侧生成失败，已扣除的服务额度会自动退回。',
+              en: 'Song generation is a digital-content delivery process, and completion time depends on external AI services, network conditions, and queue load. If the generation fails on the system side, the consumed service quota is automatically returned.',
             },
           ],
         },
         {
-          heading: { zh: '履约时间', en: 'Fulfillment Timing' },
+          heading: { zh: '隐私与数据保护', en: 'Privacy & Data Protection' },
           paragraphs: [
             {
-              zh: '会员权益通常在付款确认后生效。若使用第三方支付链接，实际到账时间以支付平台记录和网站后台确认时间为准。',
-              en: 'Member entitlements generally become active after payment confirmation. For third-party payment links, the effective time depends on the payment record and website order confirmation.',
+              zh: '当你注册会员、购买套餐或生成歌曲时，网站会收集完成服务所必需的信息，例如邮箱、伴侣姓名、订单信息、生成参数与歌曲记录。这些信息仅用于会员认证、订单处理、服务开通、歌曲生成和必要的客服支持。',
+              en: 'When you register, purchase a plan, or generate a song, the site collects only the information required to fulfill the service, such as email, partner name, order data, generation inputs, and song records. This information is used only for authentication, order handling, service activation, song generation, and essential customer support.',
             },
             {
-              zh: '歌曲生成属于数字内容服务，完成时间取决于外部 AI 服务、网络状况和排队负载。若生成失败，本次扣除的服务额度会自动退回。',
-              en: 'Song generation is a digital content service, and completion time depends on external AI services, network conditions, and queue load. If generation fails, the consumed service quota is automatically returned.',
-            },
-          ],
-        },
-      ],
-    },
-    privacy: {
-      active: 'legal_privacy',
-      title: { zh: '隐私政策', en: 'Privacy Policy' },
-      subtitle: {
-        zh: '说明网站收集哪些信息、如何使用以及如何保护会员数据。',
-        en: 'This page explains what information the website collects, how it is used, and how member data is protected.',
-      },
-      sections: [
-        {
-          heading: { zh: '我们收集的信息', en: 'Information We Collect' },
-          paragraphs: [
-            {
-              zh: '当你注册会员、购买订阅套餐或生成歌曲时，我们可能会收集邮箱、伴侣姓名、订单信息、生成参数、歌曲记录和账户状态等与服务交付直接相关的数据。',
-              en: 'When you register, purchase a subscription plan, or generate a song, we may collect information directly related to service delivery, including email address, partner name, order data, generation inputs, song records, and account status.',
-            },
-            {
-              zh: '我们不会在 MelodyVow 网站内存储支付密码、银行卡密码或 PayPal 账户密码。支付环节由第三方支付平台处理。',
-              en: 'We do not store payment passwords, card passwords, or PayPal account passwords inside MelodyVow. Payment steps are handled by third-party payment platforms.',
+              zh: '网站不会在前端保存支付密码、银行卡密码或第三方支付账户密码。管理员凭据、API 密钥和其他敏感配置必须通过服务器环境变量管理，并按最小权限原则保护。',
+              en: 'The site does not store payment passwords, bank-card passwords, or third-party payment account passwords on the frontend. Administrator credentials, API keys, and other sensitive settings must be managed through server environment variables and protected under a least-privilege approach.',
             },
           ],
         },
         {
-          heading: { zh: '信息使用与保护', en: 'How Information Is Used and Protected' },
+          heading: { zh: '服务条款与用户责任', en: 'Terms of Service & User Responsibilities' },
           paragraphs: [
             {
-              zh: '这些信息仅用于会员认证、订单处理、订阅服务开通、歌曲生成、记录展示和必要的客服支持。管理员凭据、API 密钥及其他敏感配置必须通过服务器环境变量管理，不会在前端公开。',
-              en: 'This information is used only for member authentication, order handling, subscription activation, song generation, record display, and necessary customer support. Admin credentials, API keys, and other sensitive settings must be managed through server environment variables and are not exposed on the frontend.',
+              zh: 'MelodyVow 提供婚礼歌曲生成、会员账户、套餐购买、歌曲记录查看和订单管理等数字服务。所有生成结果都依赖第三方 AI 服务与网络环境，因此实际完成时间、音频风格和交付速度可能存在差异。',
+              en: 'MelodyVow provides digital services including wedding-song generation, member accounts, plan purchases, song-history review, and order administration. All generated results depend on third-party AI services and network conditions, so actual completion time, audio style, and delivery speed may vary.',
             },
             {
-              zh: '如后续接入正式数据库与备份系统，我们会继续按最小权限原则保护会员和订单数据。',
-              en: 'As the site moves to a production database and backup system, member and order data will continue to be handled under a least-privilege approach.',
-            },
-          ],
-        },
-      ],
-    },
-    terms: {
-      active: 'legal_terms',
-      title: { zh: '服务条款', en: 'Terms of Service' },
-      subtitle: {
-        zh: '说明会员使用网站、购买套餐和生成歌曲时需遵守的规则。',
-        en: 'This page explains the rules that apply when members use the site, purchase plans, and generate songs.',
-      },
-      sections: [
-        {
-          heading: { zh: '服务范围', en: 'Scope of Service' },
-          paragraphs: [
-            {
-              zh: 'MelodyVow 提供订阅式婚礼歌曲生成与会员账户服务，包括注册登录、套餐购买、服务额度开通、生成记录查看和后台订单管理。',
-              en: 'MelodyVow provides subscription-based wedding song generation and member account services, including registration, login, plan purchases, service-credit activation, song history, and order administration.',
-            },
-            {
-              zh: '所有生成结果都依赖第三方 AI 服务和网络环境，因此实际生成时间、音频风格和交付速度可能存在差异。',
-              en: 'All generated results depend on third-party AI services and network conditions, so actual completion time, audio style, and fulfillment speed may vary.',
+              zh: '会员需确保提交的信息真实、合法，并妥善保管自己的登录邮箱与密码。不得利用本服务从事违法、侵权、欺诈或滥用支付流程的行为。若账户或订单存在异常，网站有权进行人工复核并暂时限制相关权益。',
+              en: 'Members must provide lawful information and keep their login email and password secure. The service may not be used for illegal, infringing, fraudulent, or payment-abusive activity. If an account or order appears abnormal, the site may place the related entitlement under manual review and temporary restriction.',
             },
           ],
         },
         {
-          heading: { zh: '用户责任', en: 'User Responsibilities' },
+          heading: { zh: '退款与取消', en: 'Refunds & Cancellations' },
           paragraphs: [
             {
-              zh: '会员应确保提交的信息真实、合法，并妥善保管自己的登录邮箱与密码。不得使用本服务从事违法、侵权、欺诈或滥用支付流程的行为。',
-              en: 'Members must provide lawful information and keep their login email and password secure. The service may not be used for illegal, infringing, fraudulent, or abusive payment-related activity.',
+              zh: '若用户已付款但网站未正确开通对应服务，或支付记录存在重复扣款、明显异常，经核实后管理员可处理退款或服务补发。若歌曲生成在系统侧失败，服务额度会自动退回，这属于站内服务回退。',
+              en: 'If payment is completed but the purchased service is not activated correctly, or if duplicate or clearly abnormal charges are verified, an administrator may issue a refund or restore the missing service. If song generation fails on the system side, the consumed service quota is automatically returned as an on-site service reversal.',
             },
             {
-              zh: '如果网站发现账户被滥用、支付存在异常或订单存在高风险，管理员有权暂时冻结相关权益并进行人工复核。',
-              en: 'If the site detects account abuse, suspicious payment behavior, or high-risk orders, the administrator may temporarily hold related entitlements for manual review.',
-            },
-          ],
-        },
-      ],
-    },
-    refund: {
-      active: 'legal_refund',
-      title: { zh: '退款政策', en: 'Refund Policy' },
-      subtitle: {
-        zh: '说明订阅服务、服务额度与歌曲生成相关的退款处理原则。',
-        en: 'This page explains the refund rules for subscription services, service credits, and song generation requests.',
-      },
-      sections: [
-        {
-          heading: { zh: '可退款场景', en: 'Refund Scenarios' },
-          paragraphs: [
-            {
-              zh: '若用户已付款但网站未按订单向会员账户开通对应订阅服务额度，或支付记录存在重复扣款、明显异常，经核实后可由管理员处理退款或服务补发。',
-              en: 'If payment is completed but the purchased subscription service credits are not activated correctly, or if duplicate or clearly abnormal charges are verified, the administrator may issue a refund or restore the missing service entitlement.',
-            },
-            {
-              zh: '若歌曲生成流程在系统侧失败，本次扣除的服务额度会自动退回会员账户，这属于站内服务回退，不需要用户重复申请。',
-              en: 'If song generation fails on the system side, the consumed service credits are automatically returned to the member account. This is handled as an on-site service reversal and does not require a separate request.',
-            },
-          ],
-        },
-        {
-          heading: { zh: '不适用场景', en: 'Non-Refundable Cases' },
-          paragraphs: [
-            {
-              zh: '对于已经成功交付并可正常使用的订阅服务、已成功生成并可访问的歌曲内容，原则上不支持因个人主观偏好发起退款。',
-              en: 'For subscription services that have already been delivered and used normally, or songs that have been successfully generated and accessed, refunds are generally not available based on personal preference alone.',
-            },
-            {
-              zh: '如订单已经触发退款或取消流程，网站会同步回收该订单已开通的服务额度；若账户余额不足以回收，订单可能被暂时锁定，等待人工处理。',
-              en: 'If an order enters a refund or cancellation flow, the service credits activated by that order will be reclaimed. If the current balance is insufficient for reclamation, the order may be temporarily held for manual handling.',
-            },
-          ],
-        },
-      ],
-    },
-    cancellation: {
-      active: 'legal_cancellation',
-      title: { zh: '取消政策', en: 'Cancellation Policy' },
-      subtitle: {
-        zh: '说明下单后取消、支付未完成以及会员权益回收的处理方式。',
-        en: 'This page explains how cancellations, unpaid orders, and entitlement reversals are handled.',
-      },
-      sections: [
-        {
-          heading: { zh: '订单取消', en: 'Order Cancellation' },
-          paragraphs: [
-            {
-              zh: '如果订单尚未完成付款确认，管理员可将订单维持为 pending、processing 或直接标记为 cancelled，未生效订单不会为会员开通服务额度。',
-              en: 'If payment has not been confirmed, an order may remain pending, stay in processing, or be marked cancelled. Orders that never become effective do not activate service credits.',
-            },
-            {
-              zh: '如果订单已经被确认为 paid，但后续发生取消或退款，网站会按订单记录回收此前开通的服务额度，以保持会员权益与订单状态一致。',
-              en: 'If an order was already marked paid and is later cancelled or refunded, the site reclaims the service credits granted by that order to keep account entitlements aligned with order status.',
-            },
-          ],
-        },
-        {
-          heading: { zh: '会员取消与后续购买', en: 'Account Cancellation and Future Purchases' },
-          paragraphs: [
-            {
-              zh: '当前网站的会员模式以订阅套餐和站内服务额度消耗为主，不属于钱包储值。若后续增加自动续费功能，取消方式会在订阅页和本页同步更新。',
-              en: 'The current membership model focuses on subscription plans and on-site service-credit usage rather than a stored-value wallet. If auto-renewing plans are added later, the cancellation steps will be updated on both the pricing page and this page.',
+              zh: '对于已经成功交付并可正常使用的订阅服务或已成功生成并可访问的歌曲内容，原则上不支持基于个人主观偏好的退款。若订单后续被取消或退款，系统会同步回收该订单开通的相关权益，以保持账户状态与订单状态一致。',
+              en: 'For subscription services that have already been delivered and used normally, or songs that have been successfully generated and accessed, refunds are generally not available based on personal preference alone. If an order is later cancelled or refunded, the related entitlements granted by that order are reclaimed to keep the account state aligned with the order state.',
             },
           ],
         },
@@ -5354,7 +6928,7 @@ function LegalPage({ locale, policy, authSession, onLogout }: LegalPageProps) {
     },
   }
 
-  const current = policyContent[policy]
+  const current = policy === 'find-order' ? policyContent['find-order'] : policyContent.legal
   const orderLookupEnabled = policy === 'find-order'
 
   async function handleLookupOrder() {
@@ -5467,16 +7041,18 @@ function activeToPath(active: string) {
       return '/pricing'
     case 'account':
       return '/auth'
+    case 'legal':
+      return '/legal'
     case 'legal_delivery':
-      return '/delivery-fulfillment'
+      return '/legal'
     case 'legal_privacy':
-      return '/privacy-policy'
+      return '/legal'
     case 'legal_terms':
-      return '/terms-of-service'
+      return '/legal'
     case 'legal_refund':
-      return '/refund-policy'
+      return '/legal'
     case 'legal_cancellation':
-      return '/cancellation-policy'
+      return '/legal'
     case 'legal_find_order':
       return '/find-my-order'
     default:
