@@ -1265,11 +1265,12 @@ function App() {
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(() => loadPublicSiteConfig())
   const [siteConfigReady, setSiteConfigReady] = useState(false)
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
+  const effectiveAuthSession = authSession ?? loadAuthSession()
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
   const rootSearchParams = new URLSearchParams(location.search)
   const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
-  const activeMemberToken = authSession?.authToken?.trim() || ''
-  const activeMemberEmail = authSession?.email?.trim() || ''
+  const activeMemberToken = effectiveAuthSession?.authToken?.trim() || ''
+  const activeMemberEmail = effectiveAuthSession?.email?.trim() || ''
   const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
 
   useEffect(() => {
@@ -1681,7 +1682,7 @@ function App() {
   }
 
   function handleLogout() {
-    const currentSession = authSession
+    const currentSession = effectiveAuthSession
     if (currentSession?.authToken) {
       void fetch(apiUrl('/api/member/logout'), {
         method: 'POST',
@@ -1834,24 +1835,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onAddPendingMemberSongs={addPendingMemberSongs}
             />
           ))}
         />
         <Route
           path="/zh/how-it-works"
-          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/styles"
           element={renderChineseRoute('/en/styles', (
-            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
+            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
           ))}
         />
         <Route
           path="/zh/preview"
-          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/pricing"
@@ -1860,18 +1861,18 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
         />
-        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
         <Route
           path="/zh/checkout"
           element={renderChineseRoute('/en/checkout', (
@@ -1879,7 +1880,7 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
@@ -1894,7 +1895,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
             />
           ))}
         />
@@ -1907,7 +1908,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           ))}
@@ -1919,7 +1920,7 @@ function App() {
               locale="zh"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           ))}
@@ -1943,24 +1944,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onAddPendingMemberSongs={addPendingMemberSongs}
             />
           }
         />
         <Route
           path="/en/how-it-works"
-          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<ShowcasePage locale="en" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/styles"
           element={
-            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
+            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
           }
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<PreviewPage locale="en" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/pricing"
@@ -1969,18 +1970,18 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
         />
-        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
-        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
         <Route
           path="/en/checkout"
           element={
@@ -1988,7 +1989,7 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
@@ -2003,7 +2004,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
             />
           }
         />
@@ -2016,7 +2017,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           }
@@ -2028,7 +2029,7 @@ function App() {
               locale="en"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={authSession}
+              authSession={effectiveAuthSession}
               onLogout={handleLogout}
             />
           }
