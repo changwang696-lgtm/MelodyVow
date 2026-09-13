@@ -16,12 +16,11 @@ const SUNO_MODEL = process.env.SUNO_MODEL ?? 'chirp-v4-5'
 const SUNO_GENERATE_URL = process.env.SUNO_GENERATE_URL ?? 'https://api.wike.cc/api/suno/generate'
 const SUNO_FEED_URL = process.env.SUNO_FEED_URL ?? 'https://api.wike.cc/api/suno/feed'
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
-const FRONTEND_ORIGIN_INPUTS = String(process.env.FRONTEND_ORIGIN || '')
+const FRONTEND_ORIGINS = String(process.env.FRONTEND_ORIGIN || '')
   .split(',')
   .map((value) => value.trim().replace(/\/$/, ''))
   .filter(Boolean)
-const FRONTEND_ORIGINS = expandFrontendOrigins(FRONTEND_ORIGIN_INPUTS)
-const FRONTEND_ORIGIN = FRONTEND_ORIGIN_INPUTS[0] || ''
+const FRONTEND_ORIGIN = FRONTEND_ORIGINS[0] || ''
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '').trim()
 const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || '').trim()
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -46,30 +45,6 @@ const memberSessions = new Map()
 const lyricRequests = new Map()
 const sunoTasks = new Map()
 const googleOauthStates = new Map()
-
-function expandFrontendOrigins(origins) {
-  const expanded = new Set(origins)
-
-  for (const origin of origins) {
-    try {
-      const parsed = new URL(origin)
-      const host = String(parsed.hostname || '').trim().toLowerCase()
-
-      if (!host || host === 'localhost' || host === '127.0.0.1' || !host.includes('.')) {
-        continue
-      }
-
-      const pairedHost = host.startsWith('www.') ? host.slice(4) : `www.${host}`
-      const port = parsed.port ? `:${parsed.port}` : ''
-      expanded.add(`${parsed.protocol}//${pairedHost}${port}`)
-    }
-    catch {
-      // Ignore invalid origins from env and keep the explicit values untouched.
-    }
-  }
-
-  return [...expanded]
-}
 
 const productShowcaseTracks = [
   {
