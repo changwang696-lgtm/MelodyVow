@@ -640,17 +640,24 @@ function getGoogleRedirectUri(req) {
 }
 
 function buildFrontendAuthUrl(locale, params = {}) {
-  const target = new URL(`${getFrontendBaseUrl()}/`)
-  target.searchParams.set('authLocale', normalizeLocale(locale))
+  const rawBase = String(getFrontendBaseUrl() || '').trim()
+  const baseWithoutHash = rawBase.split('#')[0] || rawBase
+  const baseUrl = new URL(baseWithoutHash.endsWith('/') ? baseWithoutHash : `${baseWithoutHash}/`)
+  const hashPath = normalizeLocale(locale) === 'zh' ? '/zh' : '/en'
+  const hashParams = new URLSearchParams()
 
+  hashParams.set('authLocale', normalizeLocale(locale))
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') {
       return
     }
 
-    target.searchParams.set(key, String(value))
+    hashParams.set(key, String(value))
   })
 
+  const target = new URL(`${baseUrl.origin}${baseUrl.pathname}`)
+  const hashQuery = hashParams.toString()
+  target.hash = `#${hashPath}${hashQuery ? `?${hashQuery}` : ''}`
   return target.toString()
 }
 
