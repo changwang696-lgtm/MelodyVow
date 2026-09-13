@@ -498,7 +498,9 @@ function stripSearchParamsFromUrl() {
     return
   }
 
-  const nextUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`
+  const hash = String(window.location.hash || '')
+  const hashWithoutQuery = hash ? hash.split('?')[0] || '' : ''
+  const nextUrl = `${window.location.origin}${window.location.pathname}${hashWithoutQuery}`
   window.history.replaceState(null, '', nextUrl)
 }
 
@@ -1276,9 +1278,25 @@ function App() {
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
   const effectiveAuthSession = authSession ?? loadAuthSession()
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
-  const rootSearchParams = new URLSearchParams(
-    typeof window !== 'undefined' && window.location.search ? window.location.search : location.search,
-  )
+  const rootSearchRaw = (() => {
+    if (typeof window === 'undefined') {
+      return location.search
+    }
+
+    const rawSearch = String(window.location.search || '')
+    if (rawSearch) {
+      return rawSearch
+    }
+
+    const rawHash = String(window.location.hash || '')
+    const hashQueryIndex = rawHash.indexOf('?')
+    if (hashQueryIndex >= 0) {
+      return rawHash.slice(hashQueryIndex + 1)
+    }
+
+    return location.search
+  })()
+  const rootSearchParams = new URLSearchParams(rootSearchRaw)
   const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
   const activeMemberToken = effectiveAuthSession?.authToken?.trim() || ''
   const activeMemberEmail = effectiveAuthSession?.email?.trim() || ''
