@@ -493,6 +493,15 @@ function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
 }
 
+function stripSearchParamsFromUrl() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const nextUrl = `${window.location.origin}${window.location.pathname}${window.location.hash}`
+  window.history.replaceState(null, '', nextUrl)
+}
+
 function buildMemberAuthSuccessMessage(locale: Locale, mode: 'login' | 'signup', email: string) {
   return copy(locale, {
     zh: mode === 'login'
@@ -1330,9 +1339,11 @@ function App() {
         ? 'zh'
         : 'en'
     const redirectToAuth = () => {
+      stripSearchParamsFromUrl()
       navigate(withLocale(callbackLocale, '/auth'), { replace: true })
     }
     const finalizeGoogleAuth = async () => {
+      stripSearchParamsFromUrl()
       if (googleStatus === 'error') {
         if (!disposed) {
           setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
