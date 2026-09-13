@@ -178,6 +178,18 @@ function normalizeCreditBalanceType(value, fallback = 'topup') {
   return CREDIT_BALANCE_TYPES.has(normalized) ? normalized : fallback
 }
 
+function normalizePayPalCurrencyCode(value) {
+  const normalized = String(value || '').trim().toUpperCase()
+
+  // Current PayPal rollout for MelodyVow uses USD plans and USD checkout.
+  // Older local data may still contain CNY, which causes PayPal order creation to fail.
+  if (normalized === 'USD') {
+    return 'USD'
+  }
+
+  return 'USD'
+}
+
 function getDefaultHeartBeansForPlan(input) {
   const key = `${String(input?.id || '').trim()} ${String(input?.name || '').trim()}`.toLowerCase()
   const type = normalizePlanType(input?.type, key.includes('topup') || key.includes('boost') || key.includes('pack') ? 'credit_pack' : 'subscription')
@@ -1597,7 +1609,7 @@ async function createPayPalCheckoutForPlan({ member, plan, order, locale }) {
           custom_id: order.id,
           description: `${plan.name} (${plan.heartBeans} credits)`,
           amount: {
-            currency_code: String(plan.currency || 'USD').trim() || 'USD',
+            currency_code: normalizePayPalCurrencyCode(plan.currency),
             value: Number(plan.price || 0).toFixed(2),
           },
         },
