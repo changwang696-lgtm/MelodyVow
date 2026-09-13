@@ -5690,6 +5690,36 @@ function AdminDashboardPage({
     }
   }
 
+  async function handleDeleteMember(email: string) {
+    if (!window.confirm(`确认删除会员 ${email} 吗？这会同时删除该会员的订单、歌曲、额度流水和登录状态。`)) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/members/${encodeURIComponent(email)}`), {
+        method: 'DELETE',
+        headers: {
+          'x-admin-token': activeSession!.token,
+        },
+      })
+      const result = (await readJsonSafe(response)) as { ok?: boolean; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '会员删除失败。')
+      }
+
+      setMembers((current) => current.filter((item) => item.email !== email))
+      setOrders((current) => current.filter((item) => (item.email || '').toLowerCase() !== email.toLowerCase()))
+      setSongs((current) => current.filter((item) => (item.email || '').toLowerCase() !== email.toLowerCase()))
+      setSelectedMember((current) => (current?.email === email ? null : current))
+      setSelectedOrder((current) => ((current?.email || '').toLowerCase() === email.toLowerCase() ? null : current))
+      setSelectedSong((current) => ((current?.email || '').toLowerCase() === email.toLowerCase() ? null : current))
+      setManualTopupAmount('0')
+      setManualTopupNote('')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '会员删除失败。')
+    }
+  }
+
   async function handleSavePlans() {
     try {
       const response = await fetch(apiUrl('/api/admin/plans'), {
@@ -5710,6 +5740,29 @@ function AdminDashboardPage({
     }
   }
 
+  async function handleDeletePlan(planId: string) {
+    if (!window.confirm(`确认删除套餐 ${planId} 吗？删除后前台将不再展示该套餐。`)) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/plans/${encodeURIComponent(planId)}`), {
+        method: 'DELETE',
+        headers: {
+          'x-admin-token': activeSession!.token,
+        },
+      })
+      const result = (await readJsonSafe(response)) as { ok?: boolean; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '套餐删除失败。')
+      }
+
+      setPlans((current) => current.filter((item) => item.id !== planId))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '套餐删除失败。')
+    }
+  }
+
   async function handleSaveShowcaseTracks() {
     try {
       const response = await fetch(apiUrl('/api/admin/showcase-tracks'), {
@@ -5727,6 +5780,29 @@ function AdminDashboardPage({
       setShowcaseTracks(Array.isArray(result.items) ? result.items : showcaseTracks)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '样片保存失败。')
+    }
+  }
+
+  async function handleDeleteShowcaseTrack(trackId: string) {
+    if (!window.confirm(`确认删除样片 ${trackId} 吗？`)) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/showcase-tracks/${encodeURIComponent(trackId)}`), {
+        method: 'DELETE',
+        headers: {
+          'x-admin-token': activeSession!.token,
+        },
+      })
+      const result = (await readJsonSafe(response)) as { ok?: boolean; message?: string }
+      if (!response.ok) {
+        throw new Error(result.message || '样片删除失败。')
+      }
+
+      setShowcaseTracks((current) => current.filter((item) => item.id !== trackId))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '样片删除失败。')
     }
   }
 
@@ -6128,9 +6204,14 @@ function AdminDashboardPage({
                       </article>
                     </section>
 
-                    <button type="button" className="primary-button" onClick={() => void handleSaveMember()}>
-                      保存会员修改
-                    </button>
+                    <div className="admin-link-actions">
+                      <button type="button" className="primary-button" onClick={() => void handleSaveMember()}>
+                        保存会员修改
+                      </button>
+                      <button type="button" className="ghost-button" onClick={() => void handleDeleteMember(selectedMember.email)}>
+                        删除会员
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <p className="empty-state">请选择一位会员查看详情。</p>
@@ -6352,6 +6433,13 @@ function AdminDashboardPage({
                           }
                         />
                       </label>
+                      <button
+                        type="button"
+                        className="ghost-button compact"
+                        onClick={() => void handleDeleteShowcaseTrack(track.id)}
+                      >
+                        删除样片
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -6495,6 +6583,13 @@ function AdminDashboardPage({
                           rows={4}
                         />
                       </label>
+                      <button
+                        type="button"
+                        className="ghost-button compact"
+                        onClick={() => void handleDeletePlan(plan.id)}
+                      >
+                        删除套餐
+                      </button>
                     </div>
                   </article>
                 ))}
