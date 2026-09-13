@@ -16,7 +16,11 @@ const SUNO_MODEL = process.env.SUNO_MODEL ?? 'chirp-v4-5'
 const SUNO_GENERATE_URL = process.env.SUNO_GENERATE_URL ?? 'https://api.wike.cc/api/suno/generate'
 const SUNO_FEED_URL = process.env.SUNO_FEED_URL ?? 'https://api.wike.cc/api/suno/feed'
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '')
+const FRONTEND_ORIGINS = String(process.env.FRONTEND_ORIGIN || '')
+  .split(',')
+  .map((value) => value.trim().replace(/\/$/, ''))
+  .filter(Boolean)
+const FRONTEND_ORIGIN = FRONTEND_ORIGINS[0] || ''
 const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '').trim()
 const GOOGLE_CLIENT_SECRET = String(process.env.GOOGLE_CLIENT_SECRET || '').trim()
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -89,8 +93,8 @@ app.use(express.urlencoded({ extended: true }))
 app.use((req, res, next) => {
   const requestOrigin = req.headers.origin
 
-  if (FRONTEND_ORIGIN && requestOrigin === FRONTEND_ORIGIN) {
-    res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN)
+  if (FRONTEND_ORIGINS.length > 0 && requestOrigin && FRONTEND_ORIGINS.includes(String(requestOrigin).replace(/\/$/, ''))) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin)
   }
   else if (!FRONTEND_ORIGIN && requestOrigin) {
     res.setHeader('Access-Control-Allow-Origin', requestOrigin)
