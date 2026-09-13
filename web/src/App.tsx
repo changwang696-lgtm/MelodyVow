@@ -484,66 +484,12 @@ const defaultPublicSiteConfig: PublicSiteConfig = {
 const SiteConfigContext = createContext<PublicSiteConfig>(defaultPublicSiteConfig)
 const HOME_FIREWORK_GOLD_COLORS = ['#fffbf0', '#fff1c2', '#ffe08a', '#f4c45d', '#d89b2f', '#9d6915']
 const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
-const PRIMARY_SITE_HOST = 'melodyvowai.com'
-
-function getProductionApiBaseUrl() {
-  if (typeof window === 'undefined') {
-    return ''
-  }
-
-  const hostname = String(window.location.hostname || '').trim().toLowerCase()
-  if (hostname === PRIMARY_SITE_HOST || hostname === `www.${PRIMARY_SITE_HOST}`) {
-    return 'https://api.melodyvowai.com'
-  }
-
-  return ''
-}
-
-function redirectToPrimarySiteHost() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  const hostname = String(window.location.hostname || '').trim().toLowerCase()
-  if (hostname !== `www.${PRIMARY_SITE_HOST}`) {
-    return
-  }
-
-  window.location.replace(`https://${PRIMARY_SITE_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`)
-}
-
-redirectToPrimarySiteHost()
-
-// Keep production auth working even if the frontend env misses the API base.
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || getProductionApiBaseUrl()).replace(/\/$/, '')
-const GOOGLE_LOGIN_ENABLED = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
-}
-
-function stripSearchParamsFromUrl() {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  const hash = String(window.location.hash || '')
-  const hashWithoutQuery = hash ? hash.split('?')[0] || '' : ''
-  const nextUrl = `${window.location.origin}${window.location.pathname}${hashWithoutQuery}`
-  window.history.replaceState(null, '', nextUrl)
-}
-
-function buildMemberAuthSuccessMessage(locale: Locale, mode: 'login' | 'signup', email: string) {
-  return copy(locale, {
-    zh: mode === 'login'
-      ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
-      : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
-    en: mode === 'login'
-      ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
-      : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
-  })
 }
 
 function getMemberAuthHeaders(session: AuthSession | null | undefined) {
@@ -1094,19 +1040,6 @@ function loadAuthSession() {
   }
 }
 
-function persistAuthSession(session: AuthSession | null) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  if (!session) {
-    window.localStorage.removeItem(AUTH_SESSION_KEY)
-    return
-  }
-
-  window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session))
-}
-
 function loadAdminSession() {
   if (typeof window === 'undefined') {
     return null as AdminSession | null
@@ -1284,7 +1217,6 @@ function ScrollManager() {
 
 function App() {
   const location = useLocation()
-  const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const [draft, setDraft] = useState<SongDraft>({
     groom: '',
@@ -1307,30 +1239,9 @@ function App() {
   const [siteConfig, setSiteConfig] = useState<PublicSiteConfig>(() => loadPublicSiteConfig())
   const [siteConfigReady, setSiteConfigReady] = useState(false)
   const [floatingPlayer, setFloatingPlayer] = useState<FloatingPhonePlayerState | null>(null)
-  const effectiveAuthSession = authSession ?? loadAuthSession()
   const modalLocale: Locale = location.pathname.startsWith('/en') ? 'en' : 'zh'
-  const rootSearchRaw = (() => {
-    if (typeof window === 'undefined') {
-      return location.search
-    }
-
-    const rawSearch = String(window.location.search || '')
-    if (rawSearch) {
-      return rawSearch
-    }
-
-    const rawHash = String(window.location.hash || '')
-    const hashQueryIndex = rawHash.indexOf('?')
-    if (hashQueryIndex >= 0) {
-      return rawHash.slice(hashQueryIndex + 1)
-    }
-
-    return location.search
-  })()
-  const rootSearchParams = new URLSearchParams(rootSearchRaw)
-  const pendingGoogleStatus = String(rootSearchParams.get('google') || '').trim()
-  const activeMemberToken = effectiveAuthSession?.authToken?.trim() || ''
-  const activeMemberEmail = effectiveAuthSession?.email?.trim() || ''
+  const activeMemberToken = authSession?.authToken?.trim() || ''
+  const activeMemberEmail = authSession?.email?.trim() || ''
   const shouldHideFloatingPlayer = isMobileViewport && /\/how-it-works$/.test(location.pathname)
 
   useEffect(() => {
@@ -1373,133 +1284,6 @@ function App() {
   useEffect(() => {
     document.documentElement.lang = modalLocale === 'en' ? 'en' : 'zh-CN'
   }, [modalLocale])
-
-  useEffect(() => {
-    let disposed = false
-    const googleStatus = pendingGoogleStatus
-
-    if (!googleStatus) {
-      return () => {
-        disposed = true
-      }
-    }
-
-    const callbackLocale: Locale = rootSearchParams.get('authLocale') === 'zh'
-      ? 'zh'
-      : location.pathname.startsWith('/zh')
-        ? 'zh'
-        : 'en'
-    const redirectToAuth = () => {
-      stripSearchParamsFromUrl()
-      navigate(withLocale(callbackLocale, '/auth'), { replace: true })
-    }
-    const finalizeGoogleAuth = async () => {
-      stripSearchParamsFromUrl()
-      if (googleStatus === 'error') {
-        if (!disposed) {
-          setModalMessage(rootSearchParams.get('message') || copy(callbackLocale, {
-            zh: 'Google 登录失败，请稍后重试。',
-            en: 'Google sign-in failed. Please try again later.',
-          }))
-          redirectToAuth()
-        }
-        return
-      }
-
-      const token = String(rootSearchParams.get('token') || '').trim()
-      const nextEmail = String(rootSearchParams.get('email') || '').trim()
-
-      if (googleStatus !== 'success' || !token || !nextEmail) {
-        if (!disposed) {
-          setModalMessage(copy(callbackLocale, {
-            zh: 'Google 登录返回的数据不完整，请重新尝试。',
-            en: 'Google sign-in returned incomplete data. Please try again.',
-          }))
-          redirectToAuth()
-        }
-        return
-      }
-
-      const mode = rootSearchParams.get('mode') === 'signup' ? 'signup' : 'login'
-      const successMessage = buildMemberAuthSuccessMessage(callbackLocale, mode, nextEmail)
-      const nextSession: AuthSession = {
-        authToken: token,
-        email: nextEmail,
-        partnerName: String(rootSearchParams.get('partnerName') || draft.bride || '').trim(),
-        plan: String(rootSearchParams.get('plan') || selectedPlan || '').trim(),
-        heartBeansBalance: Number(rootSearchParams.get('heartBeansBalance') || 0),
-        mode,
-        welcomeMessage: successMessage,
-        lastAuthAt: String(rootSearchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
-        avatarUrl: String(rootSearchParams.get('avatarUrl') || '').trim(),
-      }
-
-      // Persist immediately so the member UI does not briefly fall back to guest state.
-      persistAuthSession(nextSession)
-      if (!disposed) {
-        setSongHistory([])
-        setAuthSession(nextSession)
-      }
-
-      try {
-        const response = await fetch(apiUrl('/api/member/session'), {
-          headers: {
-            'x-member-token': token,
-          },
-        })
-        const data = (await readJsonSafe(response)) as Partial<MemberProfile> & { message?: string }
-
-        if (!response.ok || !String(data.email || '').trim()) {
-          throw new Error(data.message || copy(callbackLocale, {
-            zh: 'Google 登录状态校验失败，请重新尝试。',
-            en: 'Google sign-in session validation failed. Please try again.',
-          }))
-        }
-
-        const verifiedSession: AuthSession = {
-          ...nextSession,
-          email: String(data.email || nextSession.email).trim(),
-          partnerName: String(data.partnerName || nextSession.partnerName).trim(),
-          plan: String(data.plan || nextSession.plan).trim(),
-          heartBeansBalance: typeof data.heartBeansBalance === 'number' ? data.heartBeansBalance : nextSession.heartBeansBalance,
-          lastAuthAt: String(data.lastAuthAt || nextSession.lastAuthAt).trim(),
-          avatarUrl: String(data.avatarUrl || nextSession.avatarUrl || '').trim(),
-        }
-
-        if (disposed) {
-          return
-        }
-
-        persistAuthSession(verifiedSession)
-        setAuthSession(verifiedSession)
-        setModalMessage(successMessage)
-        navigate(withLocale(callbackLocale, '/account'), { replace: true })
-      } catch (error) {
-        if (disposed) {
-          return
-        }
-
-        persistAuthSession(null)
-        setAuthSession(null)
-        setSongHistory([])
-        setModalMessage(error instanceof Error ? error.message : copy(callbackLocale, {
-          zh: 'Google 登录失败，请稍后重试。',
-          en: 'Google sign-in failed. Please try again later.',
-        }))
-        redirectToAuth()
-      }
-    }
-
-    void finalizeGoogleAuth()
-
-    return () => {
-      disposed = true
-    }
-  }, [draft.bride, location.pathname, navigate, pendingGoogleStatus, rootSearchParams, selectedPlan])
-
-  if (location.pathname === '/' && pendingGoogleStatus) {
-    return <div className="app-loading-shell">Signing you in with Google...</div>
-  }
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1702,7 +1486,12 @@ function App() {
       return
     }
 
-    persistAuthSession(authSession)
+    if (!authSession) {
+      window.localStorage.removeItem(AUTH_SESSION_KEY)
+      return
+    }
+
+    window.localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(authSession))
   }, [authSession])
 
   useEffect(() => {
@@ -1739,12 +1528,11 @@ function App() {
 
   function handleAuthSuccess(session: AuthSession) {
     setSongHistory([])
-    persistAuthSession(session)
     setAuthSession(session)
   }
 
   function handleLogout() {
-    const currentSession = effectiveAuthSession
+    const currentSession = authSession
     if (currentSession?.authToken) {
       void fetch(apiUrl('/api/member/logout'), {
         method: 'POST',
@@ -1752,7 +1540,6 @@ function App() {
       }).catch(() => {})
     }
 
-    persistAuthSession(null)
     setAuthSession(null)
     setSongHistory([])
   }
@@ -1897,24 +1684,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onAddPendingMemberSongs={addPendingMemberSongs}
             />
           ))}
         />
         <Route
           path="/zh/how-it-works"
-          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/how-it-works', <ShowcasePage locale="zh" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/styles"
           element={renderChineseRoute('/en/styles', (
-            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
+            <StylesPage locale="zh" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
           ))}
         />
         <Route
           path="/zh/preview"
-          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
+          element={renderChineseRoute('/en/preview', <PreviewPage locale="zh" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />)}
         />
         <Route
           path="/zh/pricing"
@@ -1923,18 +1710,18 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           ))}
         />
-        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
-        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/legal" element={renderChineseRoute('/en/legal', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/delivery-fulfillment" element={renderChineseRoute('/en/delivery-fulfillment', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/privacy-policy" element={renderChineseRoute('/en/privacy-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/terms-of-service" element={renderChineseRoute('/en/terms-of-service', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/refund-policy" element={renderChineseRoute('/en/refund-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/cancellation-policy" element={renderChineseRoute('/en/cancellation-policy', <LegalPage locale="zh" policy="legal" authSession={authSession} onLogout={handleLogout} />)} />
+        <Route path="/zh/find-my-order" element={renderChineseRoute('/en/find-my-order', <LegalPage locale="zh" policy="find-order" authSession={authSession} onLogout={handleLogout} />)} />
         <Route
           path="/zh/checkout"
           element={renderChineseRoute('/en/checkout', (
@@ -1942,7 +1729,7 @@ function App() {
               locale="zh"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           ))}
@@ -1957,7 +1744,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
             />
           ))}
         />
@@ -1970,7 +1757,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           ))}
@@ -1982,7 +1769,7 @@ function App() {
               locale="zh"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           ))}
@@ -2006,24 +1793,24 @@ function App() {
               onOpenModal={setModalMessage}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onAddPendingMemberSongs={addPendingMemberSongs}
             />
           }
         />
         <Route
           path="/en/how-it-works"
-          element={<ShowcasePage locale="en" authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<ShowcasePage locale="en" authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/styles"
           element={
-            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={effectiveAuthSession} onLogout={handleLogout} />
+            <StylesPage locale="en" draft={draft} setDraft={setDraft} authSession={authSession} onLogout={handleLogout} />
           }
         />
         <Route
           path="/en/preview"
-          element={<PreviewPage locale="en" draft={draft} authSession={effectiveAuthSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
+          element={<PreviewPage locale="en" draft={draft} authSession={authSession} onLogout={handleLogout} onUpsertFloatingPlayer={upsertFloatingPlayer} />}
         />
         <Route
           path="/en/pricing"
@@ -2032,18 +1819,18 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           }
         />
-        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
-        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={effectiveAuthSession} onLogout={handleLogout} />} />
+        <Route path="/en/legal" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/delivery-fulfillment" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/privacy-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/terms-of-service" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/refund-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/cancellation-policy" element={<LegalPage locale="en" policy="legal" authSession={authSession} onLogout={handleLogout} />} />
+        <Route path="/en/find-my-order" element={<LegalPage locale="en" policy="find-order" authSession={authSession} onLogout={handleLogout} />} />
         <Route
           path="/en/checkout"
           element={
@@ -2051,7 +1838,7 @@ function App() {
               locale="en"
               selectedPlan={selectedPlan}
               setSelectedPlan={setSelectedPlan}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           }
@@ -2066,7 +1853,7 @@ function App() {
               onOpenModal={setModalMessage}
               onAuthSuccess={handleAuthSuccess}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
             />
           }
         />
@@ -2079,7 +1866,7 @@ function App() {
               onOpenModal={setModalMessage}
               history={songHistory}
               onLogout={handleLogout}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
             />
           }
@@ -2091,7 +1878,7 @@ function App() {
               locale="en"
               draft={draft}
               onOpenModal={setModalMessage}
-              authSession={effectiveAuthSession}
+              authSession={authSession}
               onLogout={handleLogout}
             />
           }
@@ -4598,7 +4385,6 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
 
 function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onLogout, authSession }: AuthPageProps) {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -4616,71 +4402,6 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   function refreshCaptcha() {
     setCaptchaChallenge(createCaptchaChallenge())
     setCaptchaInput('')
-  }
-
-  useEffect(() => {
-    const googleStatus = String(searchParams.get('google') || '').trim()
-    if (!googleStatus) {
-      return
-    }
-
-    if (googleStatus === 'error') {
-      setAuthError(searchParams.get('message') || copy(locale, {
-        zh: 'Google 登录失败，请稍后重试。',
-        en: 'Google sign-in failed. Please try again later.',
-      }))
-      refreshCaptcha()
-      navigate(withLocale(locale, '/auth'), { replace: true })
-      return
-    }
-
-    const token = String(searchParams.get('token') || '').trim()
-    const nextEmail = String(searchParams.get('email') || '').trim()
-
-    if (googleStatus !== 'success' || !token || !nextEmail) {
-      setAuthError(copy(locale, {
-        zh: 'Google 登录返回的数据不完整，请重新尝试。',
-        en: 'Google sign-in returned incomplete data. Please try again.',
-      }))
-      refreshCaptcha()
-      navigate(withLocale(locale, '/auth'), { replace: true })
-      return
-    }
-
-    const mode = searchParams.get('mode') === 'signup' ? 'signup' : 'login'
-    const successMessage = buildMemberAuthSuccessMessage(locale, mode, nextEmail)
-
-    onAuthSuccess({
-      authToken: token,
-      email: nextEmail,
-      partnerName: String(searchParams.get('partnerName') || draft.bride || '').trim(),
-      plan: String(searchParams.get('plan') || selectedPlan || '').trim(),
-      heartBeansBalance: Number(searchParams.get('heartBeansBalance') || 0),
-      mode,
-      welcomeMessage: successMessage,
-      lastAuthAt: String(searchParams.get('lastAuthAt') || new Date().toISOString()).trim(),
-      avatarUrl: String(searchParams.get('avatarUrl') || '').trim(),
-    })
-
-    onOpenModal(successMessage)
-    refreshCaptcha()
-    navigate(withLocale(locale, '/account'), { replace: true })
-  }, [draft.bride, locale, navigate, onAuthSuccess, onOpenModal, searchParams, selectedPlan])
-
-  function handleGoogleAuthStart() {
-    setAuthError('')
-
-    if (!GOOGLE_LOGIN_ENABLED) {
-      onOpenModal(copy(locale, {
-        zh: 'Google 登录尚未在前端完成配置，请稍后再试。',
-        en: 'Google sign-in is not configured on the frontend yet.',
-      }))
-      return
-    }
-
-    if (typeof window !== 'undefined') {
-      window.location.assign(apiUrl(`/api/member/google/start?locale=${encodeURIComponent(locale)}`))
-    }
   }
 
   async function handleAuthSubmit() {
@@ -4726,7 +4447,14 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
       ? partnerName.trim()
       : draft.bride
 
-    const successMessage = buildMemberAuthSuccessMessage(locale, tab, email.trim())
+    const successMessage = copy(locale, {
+      zh: tab === 'login'
+        ? `欢迎回来，${email.trim()}。你现在可以继续管理婚礼歌曲、歌单和下载文件。`
+        : `注册成功，${email.trim()} 已创建会员账户。现在就可以开始保存歌曲、管理歌单和继续下单。`,
+      en: tab === 'login'
+        ? `Welcome back, ${email.trim()}. You can now manage your wedding songs, playlists and downloads.`
+        : `Registration successful. ${email.trim()} is now ready to save songs, manage playlists and continue checkout.`,
+    })
 
     setIsSubmitting(true)
 
@@ -4890,8 +4618,8 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
           </button>
 
           <div className="social-actions">
-            <button type="button" className="ghost-button compact" onClick={handleGoogleAuthStart}>
-              {copy(locale, { zh: '使用 Google 登录', en: 'Continue with Google' })}
+            <button type="button" className="ghost-button compact">
+              Google
             </button>
           </div>
         </article>
@@ -5349,7 +5077,6 @@ function AdminDashboardPage({
   const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [saveMessage, setSaveMessage] = useState('')
   const [metrics, setMetrics] = useState({
     totalSongs: 0,
     readySongs: 0,
@@ -5573,20 +5300,6 @@ function AdminDashboardPage({
     }
   }, [activeSession, navigate, onLogout])
 
-  useEffect(() => {
-    if (!saveMessage) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setSaveMessage('')
-    }, 2200)
-
-    return () => {
-      window.clearTimeout(timeoutId)
-    }
-  }, [saveMessage])
-
   if (!activeSession) {
     return <Navigate to="/admin/login" replace />
   }
@@ -5594,7 +5307,6 @@ function AdminDashboardPage({
   async function handleSaveConfig() {
     setSavingConfig(true)
     setError('')
-    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl('/api/admin/config'), {
@@ -5612,7 +5324,6 @@ function AdminDashboardPage({
       }
 
       setConfig(result as AdminConfig)
-      setSaveMessage('后台配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '配置保存失败。')
     } finally {
@@ -5659,9 +5370,6 @@ function AdminDashboardPage({
       return
     }
 
-    setError('')
-    setSaveMessage('')
-
     try {
       const response = await fetch(apiUrl(`/api/admin/orders/${selectedOrder.id}`), {
         method: 'PATCH',
@@ -5679,7 +5387,6 @@ function AdminDashboardPage({
       const saved = result as AdminOrder
       setSelectedOrder(saved)
       setOrders((current) => current.map((item) => (item.id === saved.id ? saved : item)))
-      setSaveMessage('订单修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '订单保存失败。')
     }
@@ -5689,9 +5396,6 @@ function AdminDashboardPage({
     if (!selectedMember) {
       return
     }
-
-    setError('')
-    setSaveMessage('')
 
     const topupAmount = Math.max(0, Number(manualTopupAmount || 0))
     const currentBalance = Number(selectedMember.heartBeansBalance ?? 0)
@@ -5727,16 +5431,12 @@ function AdminDashboardPage({
       setMembers((current) => current.map((item) => (item.email === saved.email ? { ...item, ...saved } : item)))
       setManualTopupAmount('0')
       setManualTopupNote('')
-      setSaveMessage('会员信息已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '会员信息保存失败。')
     }
   }
 
   async function handleSavePlans() {
-    setError('')
-    setSaveMessage('')
-
     try {
       const response = await fetch(apiUrl('/api/admin/plans'), {
         method: 'PUT',
@@ -5751,16 +5451,12 @@ function AdminDashboardPage({
         throw new Error(result.message || '套餐保存失败。')
       }
       setPlans(Array.isArray(result.items) ? result.items : plans)
-      setSaveMessage('套餐配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '套餐保存失败。')
     }
   }
 
   async function handleSaveShowcaseTracks() {
-    setError('')
-    setSaveMessage('')
-
     try {
       const response = await fetch(apiUrl('/api/admin/showcase-tracks'), {
         method: 'PUT',
@@ -5775,16 +5471,12 @@ function AdminDashboardPage({
         throw new Error(result.message || '样片保存失败。')
       }
       setShowcaseTracks(Array.isArray(result.items) ? result.items : showcaseTracks)
-      setSaveMessage('样片配置已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '样片保存失败。')
     }
   }
 
   async function handleSavePaymentMethods() {
-    setError('')
-    setSaveMessage('')
-
     try {
       const response = await fetch(apiUrl('/api/admin/payment-methods'), {
         method: 'PUT',
@@ -5799,7 +5491,6 @@ function AdminDashboardPage({
         throw new Error(result.message || '支付方式保存失败。')
       }
       setPaymentMethods(Array.isArray(result.items) ? result.items : paymentMethods)
-      setSaveMessage('支付方式已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '支付方式保存失败。')
     }
@@ -5809,9 +5500,6 @@ function AdminDashboardPage({
     if (!selectedSong) {
       return
     }
-
-    setError('')
-    setSaveMessage('')
 
     try {
       const response = await fetch(apiUrl(`/api/admin/songs/${selectedSong.id}`), {
@@ -5829,7 +5517,6 @@ function AdminDashboardPage({
       const saved = result as AdminSong
       setSelectedSong(saved)
       setSongs((current) => current.map((item) => (item.id === saved.id ? saved : item)))
-      setSaveMessage('歌曲修改已保存。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲更新失败。')
     }
@@ -5850,7 +5537,6 @@ function AdminDashboardPage({
 
       setSongs((current) => current.filter((item) => item.id !== songId))
       setSelectedSong((current) => (current?.id === songId ? null : current))
-      setSaveMessage('歌曲记录已删除。')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '歌曲删除失败。')
     }
@@ -5928,7 +5614,6 @@ function AdminDashboardPage({
 
         <main className="admin-main">
           {error ? <p className="form-error">{error}</p> : null}
-          {saveMessage ? <p className="admin-save-feedback">{saveMessage}</p> : null}
           {loading ? <p className="empty-state">后台数据加载中...</p> : null}
 
           {!loading && tab === 'overview' ? (
