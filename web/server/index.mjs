@@ -5,6 +5,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
+import Stripe from 'stripe'
 import { getDatabaseConnectionString, PostgresPersistence } from './postgres-persistence.mjs'
 
 const app = express()
@@ -17,6 +18,12 @@ const SUNO_GENERATE_URL = process.env.SUNO_GENERATE_URL ?? 'https://api.wike.cc/
 const SUNO_FEED_URL = process.env.SUNO_FEED_URL ?? 'https://api.wike.cc/api/suno/feed'
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '')
+const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || '').trim()
+const STRIPE_WEBHOOK_SECRET = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim()
+const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || '').trim()
+const PAYPAL_CLIENT_SECRET = String(process.env.PAYPAL_CLIENT_SECRET || '').trim()
+const PAYPAL_WEBHOOK_ID = String(process.env.PAYPAL_WEBHOOK_ID || '').trim()
+const PAYPAL_MODE = String(process.env.PAYPAL_MODE || '').trim().toLowerCase() === 'live' ? 'live' : 'sandbox'
 const JOB_TTL_MS = 1000 * 60 * 60 * 6
 const POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS ?? 12000)
 const MAX_POLL_ATTEMPTS = Number(process.env.SUNO_POLL_MAX_ATTEMPTS ?? 40)
@@ -27,6 +34,19 @@ const DATA_DIR = path.join(__dirname, 'data')
 const ADMIN_DATA_FILE = path.join(DATA_DIR, 'admin-data.json')
 const DEBUG_ENV_FILE = path.join(process.cwd(), '.dbg', 'song-playback-regression.env')
 const BACKGROUND_THEME_IDS = new Set(['vivid_rainbow', 'elegant_dark', 'soft_pink_gold', 'ocean_dream'])
+const PLAN_TYPES = new Set(['subscription', 'credit_pack'])
+const BILLING_INTERVALS = new Set(['month', 'year'])
+const PAYMENT_PROVIDERS = new Set(['stripe_checkout', 'paypal', 'alipay'])
+const CREDIT_BALANCE_TYPES = new Set(['subscription', 'topup'])
+const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
+const CREDIT_LEDGER_LIMIT = 20000
+const stripe = STRIPE_SECRET_KEY
+  ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2025-08-27.basil' })
+  : null
+let paypalAccessTokenCache = {
+  token: '',
+  expiresAt: 0,
+}
 
 const jobs = new Map()
 const sunoTaskToJob = new Map()
@@ -78,8 +98,16 @@ const productShowcaseTracks = [
   },
 ]
 
-app.use(express.json({ limit: '1mb' }))
-app.use(express.urlencoded({ extended: true }))
+app.use((req, res, next) => {
+  if (req.path === '/api/stripe/webhook') {
+    express.raw({ type: 'application/json' })(req, res, next)
+    return
+  }
+
+  express.json({ limit: '1mb' })(req, res, () => {
+    express.urlencoded({ extended: true })(req, res, next)
+  })
+})
 app.use((req, res, next) => {
   const requestOrigin = req.headers.origin
 
@@ -122,8 +150,53 @@ function normalizeBackgroundTheme(value, fallback = 'vivid_rainbow') {
   return BACKGROUND_THEME_IDS.has(normalized) ? normalized : fallback
 }
 
+function normalizePlanType(value, fallback = 'subscription') {
+  const normalized = String(value || '').trim().toLowerCase()
+  return PLAN_TYPES.has(normalized) ? normalized : fallback
+}
+
+function normalizeBillingInterval(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return BILLING_INTERVALS.has(normalized) ? normalized : ''
+}
+
+function normalizePaymentProvider(value, fallback = 'paypal') {
+  const normalized = String(value || '').trim().toLowerCase()
+  return PAYMENT_PROVIDERS.has(normalized) ? normalized : fallback
+}
+
+function normalizePlanTypeList(value, fallback = ['credit_pack']) {
+  const items = Array.isArray(value)
+    ? value.map((item) => normalizePlanType(item, '')).filter(Boolean)
+    : []
+
+  return items.length ? Array.from(new Set(items)) : fallback
+}
+
+function normalizeCreditBalanceType(value, fallback = 'topup') {
+  const normalized = String(value || '').trim().toLowerCase()
+  return CREDIT_BALANCE_TYPES.has(normalized) ? normalized : fallback
+}
+
 function getDefaultHeartBeansForPlan(input) {
   const key = `${String(input?.id || '').trim()} ${String(input?.name || '').trim()}`.toLowerCase()
+  const type = normalizePlanType(input?.type, key.includes('topup') || key.includes('boost') || key.includes('pack') ? 'credit_pack' : 'subscription')
+
+  if (type === 'credit_pack') {
+    if (key.includes('boost') || key.includes('starter')) {
+      return 5
+    }
+
+    if (key.includes('celebration') || key.includes('premium')) {
+      return 40
+    }
+
+    if (key.includes('signature') || key.includes('pro')) {
+      return 15
+    }
+
+    return 0
+  }
 
   if (key.includes('starter')) {
     return 5
@@ -145,47 +218,111 @@ function createDefaultAdminData() {
     members: [],
     plans: [
       {
-        id: 'starter',
-        name: 'Starter',
+        id: 'starter-monthly',
+        name: 'Starter Monthly',
         price: 89,
         heartBeans: 5,
-        currency: 'CNY',
+        type: 'subscription',
+        billingInterval: 'month',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
         badge: '',
-        features: ['5 点订阅服务额度', 'AI 歌词生成', '名字入歌', 'MP3 下载'],
+        features: ['每月自动续费', '每月发放 5 点订阅额度', 'AI 歌词生成', 'MP3 下载'],
       },
       {
-        id: 'pro',
-        name: 'Pro',
+        id: 'pro-monthly',
+        name: 'Pro Monthly',
         price: 199,
         heartBeans: 15,
-        currency: 'CNY',
+        type: 'subscription',
+        billingInterval: 'month',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
         badge: '推荐',
-        features: ['15 点订阅服务额度', '完整歌词', '婚礼版本', '高清音频'],
+        features: ['每月自动续费', '每月发放 15 点订阅额度', '完整歌词', '高清音频'],
       },
       {
-        id: 'premium',
-        name: 'Premium',
+        id: 'premium-monthly',
+        name: 'Premium Monthly',
         price: 499,
         heartBeans: 40,
-        currency: 'CNY',
+        type: 'subscription',
+        billingInterval: 'month',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
         badge: '',
-        features: ['40 点订阅服务额度', '真人演唱', '高级编曲', '双版本混音'],
+        features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音'],
+      },
+      {
+        id: 'boost-5',
+        name: 'Boost 5',
+        price: 69,
+        heartBeans: 5,
+        type: 'credit_pack',
+        billingInterval: '',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
+        badge: '',
+        features: ['一次性购买', '立即到账 5 点充值额度', '适合低频用户'],
+      },
+      {
+        id: 'signature-15',
+        name: 'Signature 15',
+        price: 169,
+        heartBeans: 15,
+        type: 'credit_pack',
+        billingInterval: '',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
+        badge: '热门',
+        features: ['一次性购买', '立即到账 15 点充值额度', '适合婚礼筹备期集中使用'],
+      },
+      {
+        id: 'celebration-40',
+        name: 'Celebration 40',
+        price: 429,
+        heartBeans: 40,
+        type: 'credit_pack',
+        billingInterval: '',
+        stripePriceId: '',
+        paypalPlanId: '',
+        currency: 'USD',
+        badge: '',
+        features: ['一次性购买', '立即到账 40 点充值额度', '适合工作室或高频用户'],
       },
     ],
     showcaseTracks: productShowcaseTracks,
     paymentMethods: [
       {
+        id: 'stripe_checkout',
+        name: 'Stripe',
+        enabled: true,
+        provider: 'stripe_checkout',
+        envKey: 'STRIPE_SECRET_KEY',
+        supportedPlanTypes: ['subscription', 'credit_pack'],
+        description: 'Stripe Checkout for subscriptions and top-ups',
+      },
+      {
         id: 'paypal',
         name: 'PayPal',
         enabled: true,
+        provider: 'paypal',
         envKey: 'PAYPAL_CHECKOUT_URL',
-        description: 'PayPal Checkout',
+        supportedPlanTypes: ['subscription', 'credit_pack'],
+        description: 'PayPal Checkout & Subscriptions',
       },
       {
         id: 'alipay',
         name: '支付宝',
         enabled: false,
+        provider: 'alipay',
         envKey: 'ALIPAY_CHECKOUT_URL',
+        supportedPlanTypes: ['credit_pack'],
         description: 'Alipay payment link',
       },
     ],
@@ -193,27 +330,42 @@ function createDefaultAdminData() {
       {
         id: 'ord-demo-001',
         couple: 'Hao & Xin',
-        plan: 'Pro',
+        planId: 'pro-monthly',
+        plan: 'Pro Monthly',
+        planType: 'subscription',
         amount: 199,
         heartBeans: 15,
+        creditsBalanceType: 'subscription',
         status: 'paid',
         email: 'hao@example.com',
         note: '婚礼开场曲，需提前交付伴奏版。',
+        paymentMethod: 'stripe_checkout',
+        mode: 'subscription',
+        source: 'stripe',
+        subscriptionCurrentPeriodEnd: nowIso(),
         createdAt: nowIso(),
       },
       {
         id: 'ord-demo-002',
         couple: 'Luna & Ethan',
-        plan: 'Premium',
-        amount: 499,
-        heartBeans: 40,
+        planId: 'signature-15',
+        plan: 'Signature 15',
+        planType: 'credit_pack',
+        amount: 169,
+        heartBeans: 15,
+        creditsBalanceType: 'topup',
         status: 'processing',
         email: 'luna@example.com',
         note: '需要双语版本和 first dance mix。',
+        paymentMethod: 'stripe_checkout',
+        mode: 'payment',
+        source: 'stripe',
         createdAt: nowIso(),
       },
     ],
     songs: [],
+    creditLedger: [],
+    processedStripeEvents: [],
     config: {
       deepseekProvider: 'DeepSeek',
       sunoProvider: 'Suno',
@@ -238,7 +390,21 @@ function normalizeLoadedAdminData(parsed) {
       ? parsed.members.map((member) => ({
           ...member,
           email: String(member?.email || '').trim().toLowerCase(),
-          heartBeansBalance: normalizePositiveNumber(member?.heartBeansBalance, 0),
+          topupHeartBeansBalance: normalizePositiveNumber(
+            member?.topupHeartBeansBalance,
+            normalizePositiveNumber(member?.heartBeansBalance, 0),
+          ),
+          subscriptionHeartBeansBalance: normalizePositiveNumber(member?.subscriptionHeartBeansBalance, 0),
+          heartBeansBalance: normalizePositiveNumber(
+            member?.topupHeartBeansBalance,
+            normalizePositiveNumber(member?.heartBeansBalance, 0),
+          ) + normalizePositiveNumber(member?.subscriptionHeartBeansBalance, 0),
+          subscriptionStatus: String(member?.subscriptionStatus || '').trim(),
+          subscriptionPlanId: String(member?.subscriptionPlanId || '').trim(),
+          subscriptionCurrentPeriodEnd: String(member?.subscriptionCurrentPeriodEnd || '').trim(),
+          stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
+          paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
+          subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
         }))
       : [],
     plans: Array.isArray(parsed?.plans) && parsed.plans.length
@@ -248,21 +414,55 @@ function normalizeLoadedAdminData(parsed) {
           name: String(plan?.name || ''),
           price: normalizePositiveNumber(plan?.price, 0),
           heartBeans: normalizePositiveNumber(plan?.heartBeans, getDefaultHeartBeansForPlan(plan)),
-          currency: String(plan?.currency || 'CNY'),
+          type: normalizePlanType(plan?.type, String(plan?.billingInterval || '').trim() ? 'subscription' : 'credit_pack'),
+          billingInterval: normalizeBillingInterval(plan?.billingInterval),
+          stripePriceId: String(plan?.stripePriceId || '').trim(),
+          paypalPlanId: String(plan?.paypalPlanId || '').trim(),
+          currency: String(plan?.currency || 'USD'),
           badge: String(plan?.badge || ''),
           features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
         }))
       : defaults.plans,
     showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
-    paymentMethods: Array.isArray(parsed?.paymentMethods) && parsed.paymentMethods.length ? parsed.paymentMethods : defaults.paymentMethods,
+    paymentMethods: Array.isArray(parsed?.paymentMethods) && parsed.paymentMethods.length
+      ? parsed.paymentMethods.map((method) => ({
+          ...method,
+          id: String(method?.id || '').trim(),
+          name: String(method?.name || '').trim(),
+          enabled: normalizeBoolean(method?.enabled, false),
+          provider: normalizePaymentProvider(method?.provider, String(method?.id || '').trim() === 'stripe_checkout' ? 'stripe_checkout' : 'paypal'),
+          envKey: String(method?.envKey || '').trim(),
+          supportedPlanTypes: normalizePlanTypeList(method?.supportedPlanTypes, ['credit_pack']),
+          description: String(method?.description || '').trim(),
+        }))
+      : defaults.paymentMethods,
     orders: Array.isArray(parsed?.orders)
       ? parsed.orders.map((order) => ({
           ...order,
+          planId: String(order?.planId || '').trim(),
+          planType: normalizePlanType(order?.planType, 'credit_pack'),
           heartBeans: normalizePositiveNumber(order?.heartBeans, getDefaultHeartBeansForPlan({ name: order?.plan })),
+          creditsBalanceType: normalizeCreditBalanceType(order?.creditsBalanceType, order?.planType === 'subscription' ? 'subscription' : 'topup'),
           heartBeansGrantedAt: String(order?.heartBeansGrantedAt || '').trim(),
+          paymentMethod: String(order?.paymentMethod || '').trim(),
+          source: String(order?.source || '').trim(),
+          mode: String(order?.mode || '').trim(),
+          stripeCheckoutSessionId: String(order?.stripeCheckoutSessionId || '').trim(),
+          stripeCustomerId: String(order?.stripeCustomerId || '').trim(),
+          stripePaymentIntentId: String(order?.stripePaymentIntentId || '').trim(),
+          stripeInvoiceId: String(order?.stripeInvoiceId || '').trim(),
+          stripeSubscriptionId: String(order?.stripeSubscriptionId || '').trim(),
+          paypalOrderId: String(order?.paypalOrderId || '').trim(),
+          paypalCaptureId: String(order?.paypalCaptureId || '').trim(),
+          paypalSubscriptionId: String(order?.paypalSubscriptionId || '').trim(),
+          subscriptionCurrentPeriodEnd: String(order?.subscriptionCurrentPeriodEnd || '').trim(),
         }))
       : createDefaultAdminData().orders,
     songs: Array.isArray(parsed?.songs) ? parsed.songs : [],
+    creditLedger: Array.isArray(parsed?.creditLedger) ? parsed.creditLedger.slice(0, CREDIT_LEDGER_LIMIT) : [],
+    processedStripeEvents: Array.isArray(parsed?.processedStripeEvents)
+      ? parsed.processedStripeEvents.map((item) => String(item || '').trim()).filter(Boolean).slice(0, WEBHOOK_EVENT_HISTORY_LIMIT)
+      : [],
     config: {
       ...defaults.config,
       ...(parsed?.config ?? {}),
@@ -312,6 +512,8 @@ function buildPersistenceSnapshot() {
       { key: 'plans', value: adminData.plans, updatedAt: timestamp },
       { key: 'paymentMethods', value: adminData.paymentMethods, updatedAt: timestamp },
       { key: 'showcaseTracks', value: adminData.showcaseTracks, updatedAt: timestamp },
+      { key: 'creditLedger', value: adminData.creditLedger, updatedAt: timestamp },
+      { key: 'processedStripeEvents', value: adminData.processedStripeEvents, updatedAt: timestamp },
     ],
     members: adminData.members,
     orders: adminData.orders,
@@ -365,6 +567,8 @@ function restoreStateFromSnapshot(snapshot) {
     plans: settingsMap.get('plans'),
     paymentMethods: settingsMap.get('paymentMethods'),
     showcaseTracks: settingsMap.get('showcaseTracks'),
+    creditLedger: settingsMap.get('creditLedger'),
+    processedStripeEvents: settingsMap.get('processedStripeEvents'),
   })
 
   jobs.clear()
@@ -478,6 +682,56 @@ function getPaymentCheckoutUrl(method) {
   }
 
   return ''
+}
+
+function getStripeClient() {
+  if (!stripe) {
+    throw new Error('缺少 STRIPE_SECRET_KEY。')
+  }
+
+  return stripe
+}
+
+function getFrontendBaseUrl() {
+  return FRONTEND_ORIGIN || PUBLIC_BASE_URL || 'http://127.0.0.1:5173'
+}
+
+function buildFrontendHashUrl(locale = 'en', pathName = '/account', query = {}) {
+  const url = new URL(getFrontendBaseUrl())
+  const normalizedPath = String(pathName || '/account').startsWith('/') ? String(pathName || '/account') : `/${String(pathName || '/account')}`
+  const localizedPath = `/${locale === 'zh' ? 'zh' : 'en'}${normalizedPath}`
+  const params = new URLSearchParams()
+
+  Object.entries(query).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      return
+    }
+
+    params.set(key, String(value))
+  })
+
+  url.hash = `${localizedPath}${params.toString() ? `?${params.toString()}` : ''}`
+  return url.toString()
+}
+
+function findPlanById(planId) {
+  const normalized = String(planId || '').trim()
+  return adminData.plans.find((item) => String(item?.id || '').trim() === normalized) || null
+}
+
+function findPlanByStripePriceId(priceId) {
+  const normalized = String(priceId || '').trim()
+  return adminData.plans.find((item) => String(item?.stripePriceId || '').trim() === normalized) || null
+}
+
+function findPlanByPayPalPlanId(planId) {
+  const normalized = String(planId || '').trim()
+  return adminData.plans.find((item) => String(item?.paypalPlanId || '').trim() === normalized) || null
+}
+
+function supportsPlanType(method, planType) {
+  const supportedPlanTypes = normalizePlanTypeList(method?.supportedPlanTypes, ['credit_pack'])
+  return supportedPlanTypes.includes(normalizePlanType(planType, 'credit_pack'))
 }
 
 function buildPersistedTrackSongId(jobId, index) {
@@ -609,11 +863,32 @@ function findMemberByEmail(email) {
   return adminData.members.find((item) => normalizeEmail(item.email) === normalizedEmail) || null
 }
 
+function buildMemberCreditSnapshot(member) {
+  const topupHeartBeansBalance = normalizePositiveNumber(
+    member?.topupHeartBeansBalance,
+    normalizePositiveNumber(member?.heartBeansBalance, 0),
+  )
+  const subscriptionHeartBeansBalance = normalizePositiveNumber(member?.subscriptionHeartBeansBalance, 0)
+
+  return {
+    topupHeartBeansBalance,
+    subscriptionHeartBeansBalance,
+    heartBeansBalance: topupHeartBeansBalance + subscriptionHeartBeansBalance,
+  }
+}
+
 function upsertMember(member) {
+  const creditSnapshot = buildMemberCreditSnapshot(member)
   const nextMember = {
     ...member,
     email: normalizeEmail(member.email),
-    heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0),
+    ...creditSnapshot,
+    subscriptionStatus: String(member?.subscriptionStatus || '').trim(),
+    subscriptionPlanId: String(member?.subscriptionPlanId || '').trim(),
+    subscriptionCurrentPeriodEnd: String(member?.subscriptionCurrentPeriodEnd || '').trim(),
+    stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
+    paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
+    subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
   }
 
   adminData = {
@@ -621,73 +896,279 @@ function upsertMember(member) {
     members: [nextMember, ...adminData.members.filter((item) => normalizeEmail(item.email) !== normalizeEmail(member.email))].slice(0, 5000),
   }
   saveAdminData()
+
+  return nextMember
 }
 
-function awardHeartBeansToMember(email, amount, planName) {
+function appendCreditLedger(entry) {
+  const nextEntry = {
+    id: String(entry?.id || crypto.randomUUID()).trim(),
+    memberEmail: normalizeEmail(entry?.memberEmail),
+    delta: Number(entry?.delta || 0),
+    balanceType: normalizeCreditBalanceType(entry?.balanceType, 'topup'),
+    sourceType: String(entry?.sourceType || '').trim(),
+    sourceId: String(entry?.sourceId || '').trim(),
+    note: String(entry?.note || '').trim(),
+    createdAt: entry?.createdAt || nowIso(),
+  }
+
+  adminData = {
+    ...adminData,
+    creditLedger: [nextEntry, ...(Array.isArray(adminData.creditLedger) ? adminData.creditLedger : [])].slice(0, CREDIT_LEDGER_LIMIT),
+  }
+  saveAdminData()
+  return nextEntry
+}
+
+function hasProcessedStripeEvent(eventId) {
+  const normalized = String(eventId || '').trim()
+  return Boolean(normalized) && Array.isArray(adminData.processedStripeEvents) && adminData.processedStripeEvents.includes(normalized)
+}
+
+function markProcessedStripeEvent(eventId) {
+  const normalized = String(eventId || '').trim()
+  if (!normalized) {
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    processedStripeEvents: [normalized, ...(Array.isArray(adminData.processedStripeEvents) ? adminData.processedStripeEvents : []).filter((item) => item !== normalized)]
+      .slice(0, WEBHOOK_EVENT_HISTORY_LIMIT),
+  }
+  saveAdminData()
+}
+
+function updateOrder(orderId, patch) {
+  const index = adminData.orders.findIndex((item) => String(item.id || '').trim() === String(orderId || '').trim())
+  if (index === -1) {
+    return null
+  }
+
+  const current = adminData.orders[index]
+  const next = {
+    ...current,
+    ...patch,
+    id: current.id,
+    updatedAt: nowIso(),
+  }
+
+  adminData = {
+    ...adminData,
+    orders: adminData.orders.map((item, itemIndex) => (itemIndex === index ? next : item)),
+  }
+  saveAdminData()
+  return next
+}
+
+function findOrderByStripeReference({ checkoutSessionId = '', invoiceId = '', subscriptionId = '' } = {}) {
+  return adminData.orders.find((order) => {
+    if (checkoutSessionId && String(order?.stripeCheckoutSessionId || '').trim() === String(checkoutSessionId).trim()) {
+      return true
+    }
+
+    if (invoiceId && String(order?.stripeInvoiceId || '').trim() === String(invoiceId).trim()) {
+      return true
+    }
+
+    if (subscriptionId && String(order?.stripeSubscriptionId || '').trim() === String(subscriptionId).trim()) {
+      return true
+    }
+
+    return false
+  }) || null
+}
+
+function findOrderByPayPalReference({ orderId = '', captureId = '', subscriptionId = '' } = {}) {
+  return adminData.orders.find((order) => {
+    if (orderId && String(order?.paypalOrderId || '').trim() === String(orderId).trim()) {
+      return true
+    }
+
+    if (captureId && String(order?.paypalCaptureId || '').trim() === String(captureId).trim()) {
+      return true
+    }
+
+    if (subscriptionId && String(order?.paypalSubscriptionId || '').trim() === String(subscriptionId).trim()) {
+      return true
+    }
+
+    return false
+  }) || null
+}
+
+function upsertOrder(order) {
+  const normalizedId = String(order?.id || '').trim() || `ord-${crypto.randomUUID()}`
+  const nextOrder = {
+    ...order,
+    id: normalizedId,
+    email: normalizeEmail(order?.email),
+    planId: String(order?.planId || '').trim(),
+    plan: String(order?.plan || '').trim(),
+    planType: normalizePlanType(order?.planType, 'credit_pack'),
+    heartBeans: normalizePositiveNumber(order?.heartBeans, 0),
+    creditsBalanceType: normalizeCreditBalanceType(order?.creditsBalanceType, order?.planType === 'subscription' ? 'subscription' : 'topup'),
+    paymentMethod: String(order?.paymentMethod || '').trim(),
+    source: String(order?.source || '').trim(),
+    mode: String(order?.mode || '').trim(),
+    stripeCheckoutSessionId: String(order?.stripeCheckoutSessionId || '').trim(),
+    stripeCustomerId: String(order?.stripeCustomerId || '').trim(),
+    stripePaymentIntentId: String(order?.stripePaymentIntentId || '').trim(),
+    stripeInvoiceId: String(order?.stripeInvoiceId || '').trim(),
+    stripeSubscriptionId: String(order?.stripeSubscriptionId || '').trim(),
+    paypalOrderId: String(order?.paypalOrderId || '').trim(),
+    paypalCaptureId: String(order?.paypalCaptureId || '').trim(),
+    paypalSubscriptionId: String(order?.paypalSubscriptionId || '').trim(),
+    subscriptionCurrentPeriodEnd: String(order?.subscriptionCurrentPeriodEnd || '').trim(),
+    createdAt: order?.createdAt || nowIso(),
+    updatedAt: order?.updatedAt || nowIso(),
+  }
+
+  adminData = {
+    ...adminData,
+    orders: [nextOrder, ...adminData.orders.filter((item) => String(item.id || '').trim() !== normalizedId)].slice(0, 5000),
+  }
+  saveAdminData()
+  return nextOrder
+}
+
+function awardHeartBeansToMember(email, amount, planName, balanceType = 'topup', metadata = {}) {
   const normalizedEmail = normalizeEmail(email)
   const heartBeans = normalizePositiveNumber(amount, 0)
+  const normalizedBalanceType = normalizeCreditBalanceType(balanceType, 'topup')
 
   if (!normalizedEmail || heartBeans <= 0) {
     return null
   }
 
   const member = findMemberByEmail(normalizedEmail) || { email: normalizedEmail }
+  const creditSnapshot = buildMemberCreditSnapshot(member)
   const nextMember = {
     ...member,
     email: normalizedEmail,
     plan: String(planName || member.plan || '').trim(),
-    heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0) + heartBeans,
+    topupHeartBeansBalance: creditSnapshot.topupHeartBeansBalance + (normalizedBalanceType === 'topup' ? heartBeans : 0),
+    subscriptionHeartBeansBalance: creditSnapshot.subscriptionHeartBeansBalance + (normalizedBalanceType === 'subscription' ? heartBeans : 0),
     updatedAt: nowIso(),
   }
 
-  upsertMember(nextMember)
-  return nextMember
+  const savedMember = upsertMember(nextMember)
+  appendCreditLedger({
+    memberEmail: normalizedEmail,
+    delta: heartBeans,
+    balanceType: normalizedBalanceType,
+    sourceType: metadata.sourceType || 'manual_award',
+    sourceId: metadata.sourceId || '',
+    note: metadata.note || `${String(planName || '').trim()} credits granted`,
+  })
+  return savedMember
 }
 
-function refundHeartBeansToMember(member, amount) {
-  const heartBeans = normalizePositiveNumber(amount, 0)
-  const currentBalance = normalizePositiveNumber(member?.heartBeansBalance, 0)
+function refundHeartBeansToMember(member, breakdown = { subscription: 0, topup: 0 }, metadata = {}) {
+  const subscriptionCredits = normalizePositiveNumber(breakdown?.subscription, 0)
+  const topupCredits = normalizePositiveNumber(breakdown?.topup, 0)
+  const currentBalance = buildMemberCreditSnapshot(member)
 
-  if (heartBeans <= 0) {
+  if (subscriptionCredits <= 0 && topupCredits <= 0) {
     return {
       ...member,
-      heartBeansBalance: currentBalance,
+      ...currentBalance,
     }
   }
 
   const nextMember = {
     ...member,
-    heartBeansBalance: currentBalance + heartBeans,
+    topupHeartBeansBalance: currentBalance.topupHeartBeansBalance + topupCredits,
+    subscriptionHeartBeansBalance: currentBalance.subscriptionHeartBeansBalance + subscriptionCredits,
     updatedAt: nowIso(),
   }
 
-  upsertMember(nextMember)
-  return nextMember
+  const savedMember = upsertMember(nextMember)
+
+  if (subscriptionCredits > 0) {
+    appendCreditLedger({
+      memberEmail: savedMember.email,
+      delta: subscriptionCredits,
+      balanceType: 'subscription',
+      sourceType: metadata.sourceType || 'refund',
+      sourceId: metadata.sourceId || '',
+      note: metadata.note || 'Refunded subscription credits',
+    })
+  }
+
+  if (topupCredits > 0) {
+    appendCreditLedger({
+      memberEmail: savedMember.email,
+      delta: topupCredits,
+      balanceType: 'topup',
+      sourceType: metadata.sourceType || 'refund',
+      sourceId: metadata.sourceId || '',
+      note: metadata.note || 'Refunded top-up credits',
+    })
+  }
+
+  return savedMember
 }
 
 function consumeHeartBeansFromMember(member, amount) {
   const heartBeans = normalizePositiveNumber(amount, 0)
-  const currentBalance = normalizePositiveNumber(member?.heartBeansBalance, 0)
+  const currentBalance = buildMemberCreditSnapshot(member)
 
   if (heartBeans <= 0) {
     return {
       ...member,
-      heartBeansBalance: currentBalance,
+      ...currentBalance,
+      debited: {
+        subscription: 0,
+        topup: 0,
+      },
     }
   }
 
-  if (currentBalance < heartBeans) {
-    throw new Error(`订阅服务额度不足：当前剩余 ${currentBalance}，本次需要 ${heartBeans}。`)
+  if (currentBalance.heartBeansBalance < heartBeans) {
+    throw new Error(`服务额度不足：当前剩余 ${currentBalance.heartBeansBalance}，本次需要 ${heartBeans}。`)
   }
 
+  const debitedSubscription = Math.min(currentBalance.subscriptionHeartBeansBalance, heartBeans)
+  const debitedTopup = heartBeans - debitedSubscription
   const nextMember = {
     ...member,
-    heartBeansBalance: currentBalance - heartBeans,
+    topupHeartBeansBalance: currentBalance.topupHeartBeansBalance - debitedTopup,
+    subscriptionHeartBeansBalance: currentBalance.subscriptionHeartBeansBalance - debitedSubscription,
     updatedAt: nowIso(),
   }
 
-  upsertMember(nextMember)
-  return nextMember
+  const savedMember = upsertMember(nextMember)
+
+  if (debitedSubscription > 0) {
+    appendCreditLedger({
+      memberEmail: savedMember.email,
+      delta: -debitedSubscription,
+      balanceType: 'subscription',
+      sourceType: 'song_generation',
+      sourceId: '',
+      note: 'Consumed subscription credits for generation',
+    })
+  }
+
+  if (debitedTopup > 0) {
+    appendCreditLedger({
+      memberEmail: savedMember.email,
+      delta: -debitedTopup,
+      balanceType: 'topup',
+      sourceType: 'song_generation',
+      sourceId: '',
+      note: 'Consumed top-up credits for generation',
+    })
+  }
+
+  return {
+    ...savedMember,
+    debited: {
+      subscription: debitedSubscription,
+      topup: debitedTopup,
+    },
+  }
 }
 
 function createPasswordHash(password) {
@@ -713,6 +1194,7 @@ function verifyPassword(password, storedValue) {
 }
 
 function createMemberSession(member) {
+  const creditSnapshot = buildMemberCreditSnapshot(member)
   const token = crypto.randomUUID()
   const session = {
     token,
@@ -730,7 +1212,15 @@ function createMemberSession(member) {
       email: normalizeEmail(member.email),
       partnerName: String(member.partnerName || '').trim(),
       plan: String(member.plan || '').trim(),
-      heartBeansBalance: normalizePositiveNumber(member.heartBeansBalance, 0),
+      heartBeansBalance: creditSnapshot.heartBeansBalance,
+      topupHeartBeansBalance: creditSnapshot.topupHeartBeansBalance,
+      subscriptionHeartBeansBalance: creditSnapshot.subscriptionHeartBeansBalance,
+      subscriptionStatus: String(member.subscriptionStatus || '').trim(),
+      subscriptionPlanId: String(member.subscriptionPlanId || '').trim(),
+      subscriptionCurrentPeriodEnd: String(member.subscriptionCurrentPeriodEnd || '').trim(),
+      stripeCustomerId: String(member.stripeCustomerId || '').trim(),
+      paypalSubscriptionId: String(member.paypalSubscriptionId || '').trim(),
+      subscriptionProvider: String(member.subscriptionProvider || '').trim(),
       lastAuthAt: member.lastAuthAt || nowIso(),
       avatarUrl: String(member.avatarUrl || '').trim(),
     },
@@ -786,6 +1276,388 @@ function getValidMemberFromToken(token) {
   }
 
   return { session, member, error: '', status: 200 }
+}
+
+async function ensureStripeCustomerForMember(member) {
+  const stripeClient = getStripeClient()
+  const existingCustomerId = String(member?.stripeCustomerId || '').trim()
+
+  if (existingCustomerId) {
+    return existingCustomerId
+  }
+
+  const customer = await stripeClient.customers.create({
+    email: normalizeEmail(member?.email),
+    name: String(member?.partnerName || '').trim() || undefined,
+    metadata: {
+      memberEmail: normalizeEmail(member?.email),
+    },
+  })
+
+  const savedMember = upsertMember({
+    ...member,
+    stripeCustomerId: customer.id,
+    updatedAt: nowIso(),
+  })
+
+  return String(savedMember.stripeCustomerId || customer.id).trim()
+}
+
+async function syncMemberSubscriptionFromStripe(member, subscriptionId, fallbackPlan = null) {
+  if (!member || !subscriptionId) {
+    return member
+  }
+
+  const stripeClient = getStripeClient()
+  const subscription = await stripeClient.subscriptions.retrieve(String(subscriptionId).trim())
+  const subscriptionPriceId = String(subscription?.items?.data?.[0]?.price?.id || '').trim()
+  const resolvedPlan = fallbackPlan || findPlanByStripePriceId(subscriptionPriceId)
+  const savedMember = upsertMember({
+    ...member,
+    stripeCustomerId: String(subscription.customer || member.stripeCustomerId || '').trim(),
+    plan: resolvedPlan?.name || member.plan || '',
+    subscriptionPlanId: resolvedPlan?.id || member.subscriptionPlanId || '',
+    subscriptionStatus: String(subscription.status || '').trim(),
+    subscriptionProvider: 'stripe',
+    subscriptionCurrentPeriodEnd: subscription.current_period_end
+      ? new Date(subscription.current_period_end * 1000).toISOString()
+      : String(member.subscriptionCurrentPeriodEnd || '').trim(),
+    updatedAt: nowIso(),
+  })
+
+  return savedMember
+}
+
+async function createStripeCheckoutForPlan({ member, plan, order, locale }) {
+  const stripeClient = getStripeClient()
+  const customerId = await ensureStripeCustomerForMember(member)
+  const planType = normalizePlanType(plan?.type, 'credit_pack')
+  const mode = planType === 'subscription' ? 'subscription' : 'payment'
+  const session = await stripeClient.checkout.sessions.create({
+    mode,
+    customer: customerId,
+    success_url: buildFrontendHashUrl(locale, '/account', {
+      checkout: 'success',
+      source: planType,
+      session_id: '{CHECKOUT_SESSION_ID}',
+      planId: plan.id,
+    }),
+    cancel_url: buildFrontendHashUrl(locale, '/checkout', {
+      checkout: 'cancel',
+      planId: plan.id,
+    }),
+    line_items: [
+      {
+        price: String(plan.stripePriceId || '').trim(),
+        quantity: 1,
+      },
+    ],
+    metadata: {
+      orderId: order.id,
+      memberEmail: normalizeEmail(member.email),
+      planId: plan.id,
+      planType,
+    },
+    subscription_data: mode === 'subscription'
+      ? {
+          metadata: {
+            orderId: order.id,
+            memberEmail: normalizeEmail(member.email),
+            planId: plan.id,
+          },
+        }
+      : undefined,
+  })
+
+  const savedOrder = updateOrder(order.id, {
+    stripeCheckoutSessionId: session.id,
+    stripeCustomerId: customerId,
+    mode,
+    source: 'stripe',
+  }) || order
+
+  return {
+    checkoutUrl: session.url,
+    checkoutSessionId: session.id,
+    order: savedOrder,
+  }
+}
+
+function isPayPalConfigured() {
+  return Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET)
+}
+
+function getPayPalApiBase() {
+  return PAYPAL_MODE === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com'
+}
+
+async function getPayPalAccessToken() {
+  if (!isPayPalConfigured()) {
+    throw new Error('PayPal 未配置客户端密钥。')
+  }
+
+  if (paypalAccessTokenCache.token && paypalAccessTokenCache.expiresAt > Date.now() + 30_000) {
+    return paypalAccessTokenCache.token
+  }
+
+  const response = await fetch(`${getPayPalApiBase()}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Accept-Language': 'en_US',
+      Authorization: `Basic ${Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_CLIENT_SECRET}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  })
+
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload?.access_token) {
+    throw new Error(payload?.error_description || payload?.error || '获取 PayPal access token 失败。')
+  }
+
+  paypalAccessTokenCache = {
+    token: String(payload.access_token || '').trim(),
+    expiresAt: Date.now() + (Math.max(Number(payload.expires_in || 0), 60) - 30) * 1000,
+  }
+
+  return paypalAccessTokenCache.token
+}
+
+async function paypalRequest(requestPath, { method = 'GET', body, idempotencyKey = '' } = {}) {
+  const accessToken = await getPayPalAccessToken()
+  const headers = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+  }
+
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  if (idempotencyKey) {
+    headers['PayPal-Request-Id'] = String(idempotencyKey).trim()
+  }
+
+  const response = await fetch(`${getPayPalApiBase()}${requestPath}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(payload?.message || payload?.error_description || `PayPal 请求失败（${response.status}）。`)
+  }
+
+  return payload
+}
+
+function extractPayPalApproveLink(payload) {
+  const links = Array.isArray(payload?.links) ? payload.links : []
+  return String(
+    links.find((item) => ['approve', 'payer-action'].includes(String(item?.rel || '').trim()))?.href || '',
+  ).trim()
+}
+
+async function verifyPayPalWebhook(event, headers) {
+  if (!PAYPAL_WEBHOOK_ID) {
+    return true
+  }
+
+  const accessToken = await getPayPalAccessToken()
+  const response = await fetch(`${getPayPalApiBase()}/v1/notifications/verify-webhook-signature`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      auth_algo: String(headers['paypal-auth-algo'] || '').trim(),
+      cert_url: String(headers['paypal-cert-url'] || '').trim(),
+      transmission_id: String(headers['paypal-transmission-id'] || '').trim(),
+      transmission_sig: String(headers['paypal-transmission-sig'] || '').trim(),
+      transmission_time: String(headers['paypal-transmission-time'] || '').trim(),
+      webhook_id: PAYPAL_WEBHOOK_ID,
+      webhook_event: event,
+    }),
+  })
+
+  const result = await response.json().catch(() => ({}))
+  return response.ok && String(result?.verification_status || '').trim().toUpperCase() === 'SUCCESS'
+}
+
+async function getPayPalSubscription(subscriptionId) {
+  return paypalRequest(`/v1/billing/subscriptions/${encodeURIComponent(String(subscriptionId || '').trim())}`)
+}
+
+async function syncMemberSubscriptionFromPayPal(member, subscriptionId, fallbackPlan = null) {
+  if (!member || !subscriptionId) {
+    return member
+  }
+
+  const subscription = await getPayPalSubscription(subscriptionId)
+  const resolvedPlan = fallbackPlan || findPlanByPayPalPlanId(String(subscription?.plan_id || '').trim())
+  const billingInfo = subscription?.billing_info || {}
+  const nextBillingTime = String(
+    billingInfo?.next_billing_time
+    || subscription?.start_time
+    || member.subscriptionCurrentPeriodEnd
+    || '',
+  ).trim()
+
+  return upsertMember({
+    ...member,
+    plan: resolvedPlan?.name || member.plan || '',
+    subscriptionPlanId: resolvedPlan?.id || member.subscriptionPlanId || '',
+    subscriptionStatus: String(subscription?.status || member.subscriptionStatus || '').trim().toLowerCase(),
+    subscriptionCurrentPeriodEnd: nextBillingTime,
+    paypalSubscriptionId: String(subscription?.id || subscriptionId).trim(),
+    subscriptionProvider: 'paypal',
+    updatedAt: nowIso(),
+  })
+}
+
+async function createPayPalCheckoutForPlan({ member, plan, order, locale }) {
+  if (!isPayPalConfigured()) {
+    throw new Error('PayPal 环境变量未配置完成。')
+  }
+
+  const planType = normalizePlanType(plan?.type, 'credit_pack')
+  const returnBase = PUBLIC_BASE_URL || `http://127.0.0.1:${PORT}`
+
+  if (planType === 'subscription') {
+    const paypalPlanId = String(plan?.paypalPlanId || '').trim()
+    if (!paypalPlanId) {
+      throw new Error('该订阅套餐尚未配置 PayPal Plan ID。')
+    }
+
+    const payload = await paypalRequest('/v1/billing/subscriptions', {
+      method: 'POST',
+      idempotencyKey: order.id,
+      body: {
+        plan_id: paypalPlanId,
+        custom_id: order.id,
+        application_context: {
+          brand_name: 'MelodyVow',
+          locale: locale === 'zh' ? 'zh-CN' : 'en-US',
+          shipping_preference: 'NO_SHIPPING',
+          user_action: 'SUBSCRIBE_NOW',
+          return_url: `${returnBase}/api/paypal/checkout/return?mode=subscription&orderId=${encodeURIComponent(order.id)}&locale=${encodeURIComponent(locale)}`,
+          cancel_url: `${returnBase}/api/paypal/checkout/cancel?mode=subscription&orderId=${encodeURIComponent(order.id)}&locale=${encodeURIComponent(locale)}`,
+        },
+        subscriber: {
+          email_address: normalizeEmail(member?.email),
+        },
+      },
+    })
+
+    const approveUrl = extractPayPalApproveLink(payload)
+    if (!approveUrl) {
+      throw new Error('PayPal 订阅链接为空。')
+    }
+
+    const savedOrder = updateOrder(order.id, {
+      source: 'paypal',
+      mode: 'subscription',
+      paypalSubscriptionId: String(payload?.id || '').trim(),
+    }) || order
+
+    return {
+      checkoutUrl: approveUrl,
+      paypalSubscriptionId: String(payload?.id || '').trim(),
+      order: savedOrder,
+    }
+  }
+
+  const payload = await paypalRequest('/v2/checkout/orders', {
+    method: 'POST',
+    idempotencyKey: order.id,
+    body: {
+      intent: 'CAPTURE',
+      purchase_units: [
+        {
+          reference_id: order.id,
+          invoice_id: order.id,
+          custom_id: order.id,
+          description: `${plan.name} (${plan.heartBeans} credits)`,
+          amount: {
+            currency_code: String(plan.currency || 'USD').trim() || 'USD',
+            value: Number(plan.price || 0).toFixed(2),
+          },
+        },
+      ],
+      payment_source: {
+        paypal: {
+          experience_context: {
+            brand_name: 'MelodyVow',
+            locale: locale === 'zh' ? 'zh-CN' : 'en-US',
+            shipping_preference: 'NO_SHIPPING',
+            user_action: 'PAY_NOW',
+            return_url: `${returnBase}/api/paypal/checkout/return?mode=payment&orderId=${encodeURIComponent(order.id)}&locale=${encodeURIComponent(locale)}`,
+            cancel_url: `${returnBase}/api/paypal/checkout/cancel?mode=payment&orderId=${encodeURIComponent(order.id)}&locale=${encodeURIComponent(locale)}`,
+          },
+        },
+      },
+    },
+  })
+
+  const approveUrl = extractPayPalApproveLink(payload)
+  if (!approveUrl) {
+    throw new Error('PayPal 支付链接为空。')
+  }
+
+  const savedOrder = updateOrder(order.id, {
+    source: 'paypal',
+    mode: 'payment',
+    paypalOrderId: String(payload?.id || '').trim(),
+  }) || order
+
+  return {
+    checkoutUrl: approveUrl,
+    paypalOrderId: String(payload?.id || '').trim(),
+    order: savedOrder,
+  }
+}
+
+async function reclaimOrderCredits(order, note = 'Order refunded') {
+  const email = normalizeEmail(order?.email)
+  const member = findMemberByEmail(email)
+  if (!member) {
+    return null
+  }
+
+  const credits = normalizePositiveNumber(order?.heartBeans, 0)
+  if (credits <= 0) {
+    return member
+  }
+
+  const balanceType = normalizeCreditBalanceType(order?.creditsBalanceType, order?.planType === 'subscription' ? 'subscription' : 'topup')
+  const currentBalance = buildMemberCreditSnapshot(member)
+  const available = balanceType === 'subscription' ? currentBalance.subscriptionHeartBeansBalance : currentBalance.topupHeartBeansBalance
+
+  if (available < credits) {
+    return null
+  }
+
+  const savedMember = upsertMember({
+    ...member,
+    topupHeartBeansBalance: currentBalance.topupHeartBeansBalance - (balanceType === 'topup' ? credits : 0),
+    subscriptionHeartBeansBalance: currentBalance.subscriptionHeartBeansBalance - (balanceType === 'subscription' ? credits : 0),
+    updatedAt: nowIso(),
+  })
+
+  appendCreditLedger({
+    memberEmail: savedMember.email,
+    delta: -credits,
+    balanceType,
+    sourceType: 'refund_reclaim',
+    sourceId: String(order?.id || '').trim(),
+    note,
+  })
+
+  return savedMember
 }
 
 function nowIso() {
@@ -1522,6 +2394,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     databaseEnabled: Boolean(persistence?.enabled),
     callbackEnabled: Boolean(PUBLIC_BASE_URL),
+    stripeConfigured: Boolean(stripe),
     deepseekConfigured: Boolean(getDeepSeekKey()),
     sunoConfigured: Boolean(getSunoAuthToken()),
     sunoProvider: SUNO_GENERATE_URL,
@@ -1608,15 +2481,19 @@ app.post('/api/member/signup', (req, res) => {
     email,
     partnerName,
     passwordHash: createPasswordHash(password),
-    heartBeansBalance: normalizePositiveNumber(existing?.heartBeansBalance, 0),
+    topupHeartBeansBalance: normalizePositiveNumber(
+      existing?.topupHeartBeansBalance,
+      normalizePositiveNumber(existing?.heartBeansBalance, 0),
+    ),
+    subscriptionHeartBeansBalance: normalizePositiveNumber(existing?.subscriptionHeartBeansBalance, 0),
     createdAt: existing?.createdAt || timestamp,
     updatedAt: timestamp,
     lastAuthAt: timestamp,
     disabled: false,
   }
 
-  upsertMember(nextMember)
-  res.status(existing ? 200 : 201).json(createMemberSession(nextMember))
+  const savedMember = upsertMember(nextMember)
+  res.status(existing ? 200 : 201).json(createMemberSession(savedMember))
 })
 
 app.post('/api/member/login', (req, res) => {
@@ -1655,16 +2532,25 @@ app.post('/api/member/login', (req, res) => {
     updatedAt: nowIso(),
   }
 
-  upsertMember(nextMember)
-  res.json(createMemberSession(nextMember))
+  const savedMember = upsertMember(nextMember)
+  res.json(createMemberSession(savedMember))
 })
 
 app.get('/api/member/session', requireMemberAuth, (req, res) => {
+  const creditSnapshot = buildMemberCreditSnapshot(req.member)
   res.json({
     email: normalizeEmail(req.member.email),
     partnerName: String(req.member.partnerName || '').trim(),
     plan: String(req.member.plan || '').trim(),
-    heartBeansBalance: normalizePositiveNumber(req.member.heartBeansBalance, 0),
+    heartBeansBalance: creditSnapshot.heartBeansBalance,
+    topupHeartBeansBalance: creditSnapshot.topupHeartBeansBalance,
+    subscriptionHeartBeansBalance: creditSnapshot.subscriptionHeartBeansBalance,
+    subscriptionStatus: String(req.member.subscriptionStatus || '').trim(),
+    subscriptionPlanId: String(req.member.subscriptionPlanId || '').trim(),
+    subscriptionCurrentPeriodEnd: String(req.member.subscriptionCurrentPeriodEnd || '').trim(),
+    stripeCustomerId: String(req.member.stripeCustomerId || '').trim(),
+    paypalSubscriptionId: String(req.member.paypalSubscriptionId || '').trim(),
+    subscriptionProvider: String(req.member.subscriptionProvider || '').trim(),
     lastAuthAt: req.member.lastAuthAt || '',
     avatarUrl: String(req.member.avatarUrl || '').trim(),
   })
@@ -1745,15 +2631,27 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
   const nextStatus = String(patch.status || current.status || '').trim()
   const currentStatus = String(current.status || '').trim()
   const nextEmail = normalizeEmail(patch.email || current.email)
+  const nextPlanId = String(patch.planId || current.planId || '').trim()
   const nextPlan = String(patch.plan || current.plan || '').trim()
-  const nextHeartBeans = normalizePositiveNumber(patch.heartBeans, normalizePositiveNumber(current.heartBeans, getDefaultHeartBeansForPlan({ name: nextPlan })))
+  const nextPlanType = normalizePlanType(patch.planType || current.planType, 'credit_pack')
+  const nextHeartBeans = normalizePositiveNumber(
+    patch.heartBeans,
+    normalizePositiveNumber(current.heartBeans, getDefaultHeartBeansForPlan({ id: nextPlanId, name: nextPlan, type: nextPlanType })),
+  )
+  const nextCreditsBalanceType = normalizeCreditBalanceType(
+    patch.creditsBalanceType || current.creditsBalanceType,
+    nextPlanType === 'subscription' ? 'subscription' : 'topup',
+  )
   const next = {
     ...current,
     ...patch,
     id: current.id,
     email: nextEmail,
+    planId: nextPlanId,
     plan: nextPlan,
     heartBeans: nextHeartBeans,
+    planType: nextPlanType,
+    creditsBalanceType: nextCreditsBalanceType,
   }
   const hasGrantedBefore = Boolean(String(current.heartBeansGrantedAt || '').trim())
 
@@ -1763,7 +2661,11 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
       return
     }
 
-    awardHeartBeansToMember(nextEmail, nextHeartBeans, nextPlan)
+    awardHeartBeansToMember(nextEmail, nextHeartBeans, nextPlan, nextCreditsBalanceType, {
+      sourceType: nextPlanType === 'subscription' ? 'subscription_manual' : 'topup_manual',
+      sourceId: current.id,
+      note: `Order ${current.id} marked paid by admin`,
+    })
     next.heartBeansGrantedAt = nowIso()
   }
 
@@ -1779,13 +2681,16 @@ app.patch('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
       return
     }
 
-    const currentBalance = normalizePositiveNumber(member.heartBeansBalance, 0)
-    if (currentBalance < nextHeartBeans) {
-      res.status(400).json({ message: `会员当前仅剩 ${currentBalance} 点服务额度，无法回收该订单的 ${nextHeartBeans} 点服务额度。` })
+    const creditSnapshot = buildMemberCreditSnapshot(member)
+    const available = nextCreditsBalanceType === 'subscription'
+      ? creditSnapshot.subscriptionHeartBeansBalance
+      : creditSnapshot.topupHeartBeansBalance
+    if (available < nextHeartBeans) {
+      res.status(400).json({ message: `会员当前仅剩 ${available} 点可回收额度，无法回收该订单的 ${nextHeartBeans} 点服务额度。` })
       return
     }
 
-    consumeHeartBeansFromMember(member, nextHeartBeans)
+    void reclaimOrderCredits(next, `Order ${current.id} reclaimed by admin`)
     next.heartBeansGrantedAt = ''
   }
 
@@ -1834,13 +2739,18 @@ app.get('/api/showcase/tracks', (_req, res) => {
   res.json({ items })
 })
 
-app.get('/api/payment/methods', (_req, res) => {
+app.get('/api/payment/methods', (req, res) => {
+  const requestedPlanId = String(req.query?.planId || '').trim()
+  const requestedPlan = requestedPlanId ? findPlanById(requestedPlanId) : null
   const items = adminData.paymentMethods
     .filter((method) => Boolean(method?.enabled))
+    .filter((method) => !requestedPlan || supportsPlanType(method, requestedPlan.type))
     .map((method) => ({
       id: String(method.id || ''),
       name: String(method.name || ''),
       description: String(method.description || ''),
+      provider: normalizePaymentProvider(method.provider, 'paypal'),
+      supportedPlanTypes: normalizePlanTypeList(method.supportedPlanTypes, ['credit_pack']),
     }))
   res.json({ items })
 })
@@ -1901,19 +2811,20 @@ app.post('/api/orders/lookup', (req, res) => {
   })
 })
 
-app.post('/api/payment/create-order', (req, res) => {
+app.post('/api/payment/create-order', async (req, res) => {
   const planId = String(req.body?.planId || '').trim()
   const methodId = String(req.body?.methodId || '').trim()
+  const locale = String(req.body?.locale || 'en').trim() === 'zh' ? 'zh' : 'en'
   const memberToken = readMemberToken(req)
-  const { session: memberSession, error, status } = getValidMemberFromToken(memberToken)
+  const { session: memberSession, member, error, status } = getValidMemberFromToken(memberToken)
 
-  if (!memberSession) {
+  if (!memberSession || !member) {
     res.status(status).json({ message: error })
     return
   }
 
   const email = normalizeEmail(memberSession.email)
-  const plan = adminData.plans.find((item) => String(item.id) === planId) || null
+  const plan = findPlanById(planId)
   if (!plan) {
     res.status(400).json({ message: '套餐不存在。' })
     return
@@ -1925,31 +2836,608 @@ app.post('/api/payment/create-order', (req, res) => {
     return
   }
 
-  const checkoutUrl = getPaymentCheckoutUrl(method)
-  if (!checkoutUrl) {
-    res.status(400).json({ message: '该支付方式未配置收款链接。' })
+  if (!supportsPlanType(method, plan.type)) {
+    res.status(400).json({ message: '该支付方式不支持当前套餐类型。' })
     return
   }
 
-  const orderId = `ord-${crypto.randomUUID()}`
-  const nextOrder = {
-    id: orderId,
+  const order = upsertOrder({
+    id: `ord-${crypto.randomUUID()}`,
     couple: '',
+    planId: plan.id,
     plan: plan.name,
+    planType: normalizePlanType(plan.type, 'credit_pack'),
     amount: plan.price,
     heartBeans: normalizePositiveNumber(plan.heartBeans, getDefaultHeartBeansForPlan(plan)),
+    creditsBalanceType: plan.type === 'subscription' ? 'subscription' : 'topup',
     status: 'pending',
     email,
     note: `${method.name} checkout`,
     paymentMethod: method.id,
+    source: normalizePaymentProvider(method.provider, 'paypal') === 'stripe_checkout' ? 'stripe' : normalizePaymentProvider(method.provider, 'paypal'),
+    mode: plan.type === 'subscription' ? 'subscription' : 'payment',
     createdAt: nowIso(),
+  })
+
+  try {
+    const provider = normalizePaymentProvider(method.provider, 'paypal')
+
+    if (provider === 'stripe_checkout') {
+      if (!String(plan.stripePriceId || '').trim()) {
+        res.status(400).json({ message: '当前 Stripe 套餐缺少 stripePriceId。' })
+        return
+      }
+
+      const stripeResult = await createStripeCheckoutForPlan({
+        member,
+        plan,
+        order,
+        locale,
+      })
+
+      res.json({
+        orderId: order.id,
+        checkoutUrl: stripeResult.checkoutUrl,
+        checkoutSessionId: stripeResult.checkoutSessionId,
+      })
+      return
+    }
+
+    if (provider === 'paypal') {
+      const paypalResult = await createPayPalCheckoutForPlan({
+        member,
+        plan,
+        order,
+        locale,
+      })
+
+      res.json({
+        orderId: order.id,
+        checkoutUrl: paypalResult.checkoutUrl,
+        paypalOrderId: paypalResult.paypalOrderId || '',
+        paypalSubscriptionId: paypalResult.paypalSubscriptionId || '',
+      })
+      return
+    }
+
+    const checkoutUrl = getPaymentCheckoutUrl(method)
+    if (!checkoutUrl) {
+      res.status(400).json({ message: '该支付方式未配置收款链接。' })
+      return
+    }
+
+    res.json({ orderId: order.id, checkoutUrl })
+  } catch (error) {
+    updateOrder(order.id, {
+      status: 'error',
+      note: error instanceof Error ? error.message : '创建支付会话失败。',
+    })
+    res.status(500).json({ message: error instanceof Error ? error.message : '创建支付会话失败。' })
   }
-  adminData = {
-    ...adminData,
-    orders: [nextOrder, ...adminData.orders].slice(0, 5000),
+})
+
+app.get('/api/paypal/checkout/return', async (req, res) => {
+  const locale = String(req.query?.locale || 'en').trim() === 'zh' ? 'zh' : 'en'
+  const mode = String(req.query?.mode || '').trim()
+  const localOrderId = String(req.query?.orderId || '').trim()
+  const token = String(req.query?.token || '').trim()
+  const subscriptionId = String(req.query?.subscription_id || req.query?.ba_token || '').trim()
+  const order = adminData.orders.find((item) => String(item.id || '').trim() === localOrderId) || findOrderByPayPalReference({
+    orderId: token,
+    subscriptionId,
+  })
+
+  try {
+    if (!order) {
+      res.redirect(buildFrontendHashUrl(locale, '/account', { checkout: 'error', provider: 'paypal' }))
+      return
+    }
+
+    if (mode === 'payment') {
+      const paypalOrderId = token || String(order.paypalOrderId || '').trim()
+      if (!paypalOrderId) {
+        throw new Error('缺少 PayPal order id。')
+      }
+
+      let captureId = String(order.paypalCaptureId || '').trim()
+      if (!captureId) {
+        const capturePayload = await paypalRequest(`/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}/capture`, {
+          method: 'POST',
+          idempotencyKey: `${order.id}-capture`,
+        })
+        const capture = capturePayload?.purchase_units?.[0]?.payments?.captures?.[0] || null
+        captureId = String(capture?.id || '').trim()
+        updateOrder(order.id, {
+          status: String(capture?.status || '').trim().toUpperCase() === 'COMPLETED' ? 'paid' : 'processing',
+          paypalOrderId,
+          paypalCaptureId: captureId,
+        })
+      }
+
+      const refreshedOrder = adminData.orders.find((item) => item.id === order.id) || order
+      if (!String(refreshedOrder.heartBeansGrantedAt || '').trim()) {
+        awardHeartBeansToMember(refreshedOrder.email, refreshedOrder.heartBeans, refreshedOrder.plan, 'topup', {
+          sourceType: 'paypal_topup',
+          sourceId: captureId || paypalOrderId,
+          note: `PayPal top-up order ${refreshedOrder.id}`,
+        })
+        updateOrder(refreshedOrder.id, {
+          status: 'paid',
+          heartBeansGrantedAt: nowIso(),
+          paypalOrderId,
+          paypalCaptureId: captureId,
+        })
+      }
+
+      res.redirect(buildFrontendHashUrl(locale, '/account', {
+        checkout: 'success',
+        provider: 'paypal',
+        planId: refreshedOrder.planId,
+      }))
+      return
+    }
+
+    if (mode === 'subscription') {
+      const effectiveSubscriptionId = subscriptionId || token || String(order.paypalSubscriptionId || '').trim()
+      updateOrder(order.id, {
+        status: 'processing',
+        paypalSubscriptionId: effectiveSubscriptionId,
+      })
+
+      const member = findMemberByEmail(order.email)
+      if (member && effectiveSubscriptionId) {
+        try {
+          await syncMemberSubscriptionFromPayPal(member, effectiveSubscriptionId, findPlanById(order.planId))
+        } catch {
+          // Wait for webhook confirmation if the subscription is not queryable yet.
+        }
+      }
+
+      res.redirect(buildFrontendHashUrl(locale, '/account', {
+        checkout: 'success',
+        provider: 'paypal',
+        subscription: 'pending',
+        planId: order.planId,
+      }))
+      return
+    }
+
+    res.redirect(buildFrontendHashUrl(locale, '/account', { checkout: 'success', provider: 'paypal' }))
+  } catch {
+    res.redirect(buildFrontendHashUrl(locale, '/account', { checkout: 'error', provider: 'paypal', planId: order?.planId || '' }))
   }
-  saveAdminData()
-  res.json({ orderId, checkoutUrl })
+})
+
+app.get('/api/paypal/checkout/cancel', (req, res) => {
+  const locale = String(req.query?.locale || 'en').trim() === 'zh' ? 'zh' : 'en'
+  const planId = String(req.query?.planId || '').trim()
+  res.redirect(buildFrontendHashUrl(locale, '/checkout', {
+    checkout: 'cancel',
+    provider: 'paypal',
+    planId,
+  }))
+})
+
+app.post('/api/stripe/create-billing-portal', requireMemberAuth, async (req, res) => {
+  try {
+    const customerId = String(req.member?.stripeCustomerId || '').trim()
+    if (!customerId) {
+      res.status(400).json({ message: '当前会员还没有 Stripe 订阅记录。' })
+      return
+    }
+
+    const stripeClient = getStripeClient()
+    const locale = String(req.body?.locale || 'en').trim() === 'zh' ? 'zh' : 'en'
+    const portalSession = await stripeClient.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: buildFrontendHashUrl(locale, '/account', { portal: 'returned' }),
+    })
+
+    res.json({ url: portalSession.url })
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : '创建订阅管理入口失败。' })
+  }
+})
+
+app.post('/api/stripe/webhook', async (req, res) => {
+  if (!STRIPE_WEBHOOK_SECRET) {
+    res.status(400).json({ message: '缺少 STRIPE_WEBHOOK_SECRET。' })
+    return
+  }
+
+  let event
+
+  try {
+    const stripeClient = getStripeClient()
+    const signatureHeader = req.headers['stripe-signature']
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader
+    event = stripeClient.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET)
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : 'Webhook 验签失败。' })
+    return
+  }
+
+  if (hasProcessedStripeEvent(event.id)) {
+    res.json({ received: true, duplicated: true })
+    return
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object
+      const orderId = String(session.metadata?.orderId || '').trim()
+      const planId = String(session.metadata?.planId || '').trim()
+      const memberEmail = normalizeEmail(session.metadata?.memberEmail)
+      const plan = findPlanById(planId)
+      const order = findOrderByStripeReference({ checkoutSessionId: session.id }) || adminData.orders.find((item) => item.id === orderId) || null
+
+      if (order) {
+        const patch = {
+          status: plan?.type === 'subscription' ? 'active' : (session.payment_status === 'paid' ? 'paid' : order.status),
+          stripeCheckoutSessionId: session.id,
+          stripeCustomerId: String(session.customer || order.stripeCustomerId || '').trim(),
+          stripePaymentIntentId: String(session.payment_intent || '').trim(),
+          stripeInvoiceId: String(session.invoice || '').trim(),
+          stripeSubscriptionId: String(session.subscription || '').trim(),
+          mode: String(session.mode || order.mode || '').trim(),
+          source: 'stripe',
+        }
+        updateOrder(order.id, patch)
+      }
+
+      if (plan?.type === 'credit_pack' && session.payment_status === 'paid' && order && !String(order.heartBeansGrantedAt || '').trim()) {
+        awardHeartBeansToMember(memberEmail, order.heartBeans, order.plan, 'topup', {
+          sourceType: 'stripe_topup',
+          sourceId: session.id,
+          note: `Stripe top-up order ${order.id}`,
+        })
+        updateOrder(order.id, {
+          status: 'paid',
+          heartBeansGrantedAt: nowIso(),
+        })
+      }
+
+      if (plan?.type === 'subscription' && memberEmail && session.subscription) {
+        const member = findMemberByEmail(memberEmail)
+        if (member) {
+          await syncMemberSubscriptionFromStripe(member, String(session.subscription).trim(), plan)
+        }
+      }
+    }
+
+    if (event.type === 'invoice.paid') {
+      const invoice = event.data.object
+      const subscriptionId = String(invoice.subscription || '').trim()
+      const customerId = String(invoice.customer || '').trim()
+      const invoiceId = String(invoice.id || '').trim()
+      const priceId = String(invoice.lines?.data?.[0]?.price?.id || '').trim()
+      const member = adminData.members.find((item) => String(item?.stripeCustomerId || '').trim() === customerId) || null
+      const plan = findPlanByStripePriceId(priceId)
+
+      if (member && plan && subscriptionId) {
+        const existingLedger = (adminData.creditLedger || []).some((entry) =>
+          String(entry?.sourceType || '').trim() === 'subscription_cycle'
+          && String(entry?.sourceId || '').trim() === invoiceId,
+        )
+
+        const savedMember = await syncMemberSubscriptionFromStripe(member, subscriptionId, plan)
+
+        if (!existingLedger) {
+          awardHeartBeansToMember(savedMember.email, plan.heartBeans, plan.name, 'subscription', {
+            sourceType: 'subscription_cycle',
+            sourceId: invoiceId,
+            note: `Stripe subscription invoice ${invoiceId}`,
+          })
+        }
+
+        const existingOrder = findOrderByStripeReference({ invoiceId, subscriptionId })
+        const periodEnd = invoice.lines?.data?.[0]?.period?.end
+          ? new Date(invoice.lines.data[0].period.end * 1000).toISOString()
+          : savedMember.subscriptionCurrentPeriodEnd || ''
+        if (existingOrder) {
+          updateOrder(existingOrder.id, {
+            status: 'paid',
+            stripeInvoiceId: invoiceId,
+            stripeSubscriptionId: subscriptionId,
+            stripeCustomerId: customerId,
+            heartBeansGrantedAt: existingOrder.heartBeansGrantedAt || nowIso(),
+            subscriptionCurrentPeriodEnd: periodEnd,
+          })
+        } else {
+          upsertOrder({
+            id: `ord-${crypto.randomUUID()}`,
+            couple: '',
+            planId: plan.id,
+            plan: plan.name,
+            planType: 'subscription',
+            amount: normalizePositiveNumber(invoice.amount_paid, 0) / 100,
+            heartBeans: normalizePositiveNumber(plan.heartBeans, 0),
+            creditsBalanceType: 'subscription',
+            status: 'paid',
+            email: savedMember.email,
+            note: 'Stripe subscription renewal',
+            paymentMethod: 'stripe_checkout',
+            source: 'stripe',
+            mode: 'subscription',
+            stripeInvoiceId: invoiceId,
+            stripeSubscriptionId: subscriptionId,
+            stripeCustomerId: customerId,
+            heartBeansGrantedAt: nowIso(),
+            subscriptionCurrentPeriodEnd: periodEnd,
+            createdAt: nowIso(),
+          })
+        }
+      }
+    }
+
+    if (event.type === 'invoice.payment_failed') {
+      const invoice = event.data.object
+      const customerId = String(invoice.customer || '').trim()
+      const subscriptionId = String(invoice.subscription || '').trim()
+      const member = adminData.members.find((item) => String(item?.stripeCustomerId || '').trim() === customerId) || null
+      if (member) {
+        upsertMember({
+          ...member,
+          subscriptionStatus: 'past_due',
+          subscriptionProvider: 'stripe',
+          updatedAt: nowIso(),
+        })
+      }
+
+      const order = findOrderByStripeReference({ invoiceId: invoice.id, subscriptionId })
+      if (order) {
+        updateOrder(order.id, {
+          status: 'payment_failed',
+          stripeInvoiceId: String(invoice.id || '').trim(),
+          stripeSubscriptionId: subscriptionId,
+        })
+      }
+    }
+
+    if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object
+      const customerId = String(subscription.customer || '').trim()
+      const priceId = String(subscription.items?.data?.[0]?.price?.id || '').trim()
+      const member = adminData.members.find((item) => String(item?.stripeCustomerId || '').trim() === customerId) || null
+      const plan = findPlanByStripePriceId(priceId)
+      if (member) {
+        upsertMember({
+          ...member,
+          plan: plan?.name || member.plan || '',
+          subscriptionPlanId: plan?.id || member.subscriptionPlanId || '',
+          subscriptionStatus: String(subscription.status || '').trim(),
+          subscriptionProvider: 'stripe',
+          subscriptionCurrentPeriodEnd: subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000).toISOString()
+            : '',
+          updatedAt: nowIso(),
+        })
+      }
+
+      const order = findOrderByStripeReference({ subscriptionId: subscription.id })
+      if (order) {
+        updateOrder(order.id, {
+          status: event.type === 'customer.subscription.deleted' ? 'cancelled' : String(subscription.status || order.status || '').trim(),
+          stripeSubscriptionId: String(subscription.id || '').trim(),
+          subscriptionCurrentPeriodEnd: subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000).toISOString()
+            : '',
+        })
+      }
+    }
+
+    if (event.type === 'charge.refunded') {
+      const charge = event.data.object
+      const invoiceId = String(charge.invoice || '').trim()
+      const paymentIntentId = String(charge.payment_intent || '').trim()
+      const order = adminData.orders.find((item) =>
+        String(item?.stripeInvoiceId || '').trim() === invoiceId
+        || String(item?.stripePaymentIntentId || '').trim() === paymentIntentId,
+      ) || null
+
+      if (order) {
+        await reclaimOrderCredits(order, `Stripe refund ${String(charge.id || '').trim()}`)
+        updateOrder(order.id, {
+          status: 'refunded',
+        })
+      }
+    }
+
+    markProcessedStripeEvent(event.id)
+    res.json({ received: true })
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : 'Webhook 处理失败。' })
+  }
+})
+
+app.post('/api/paypal/webhook', async (req, res) => {
+  const event = req.body && typeof req.body === 'object' ? req.body : null
+  if (!event) {
+    res.status(400).json({ message: 'Webhook payload 无效。' })
+    return
+  }
+
+  try {
+    const verified = await verifyPayPalWebhook(event, req.headers)
+    if (!verified) {
+      res.status(400).json({ message: 'PayPal webhook 验签失败。' })
+      return
+    }
+
+    const eventType = String(event.event_type || '').trim()
+    const resource = event.resource || {}
+
+    if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
+      const captureId = String(resource.id || '').trim()
+      const orderId = String(resource.supplementary_data?.related_ids?.order_id || '').trim()
+      const order = findOrderByPayPalReference({ captureId, orderId })
+
+      if (order) {
+        updateOrder(order.id, {
+          status: 'paid',
+          paypalOrderId: orderId || order.paypalOrderId || '',
+          paypalCaptureId: captureId,
+        })
+
+        const latestOrder = adminData.orders.find((item) => item.id === order.id) || order
+        if (!String(latestOrder.heartBeansGrantedAt || '').trim()) {
+          awardHeartBeansToMember(latestOrder.email, latestOrder.heartBeans, latestOrder.plan, 'topup', {
+            sourceType: 'paypal_topup',
+            sourceId: captureId || orderId,
+            note: `PayPal top-up capture ${captureId || orderId}`,
+          })
+          updateOrder(latestOrder.id, {
+            heartBeansGrantedAt: nowIso(),
+          })
+        }
+      }
+    }
+
+    if (eventType === 'PAYMENT.CAPTURE.REFUNDED') {
+      const captureId = String(resource.id || resource.capture_id || '').trim()
+      const order = findOrderByPayPalReference({ captureId })
+      if (order) {
+        await reclaimOrderCredits(order, `PayPal refund ${captureId}`)
+        updateOrder(order.id, {
+          status: 'refunded',
+        })
+      }
+    }
+
+    if (eventType === 'BILLING.SUBSCRIPTION.ACTIVATED' || eventType === 'BILLING.SUBSCRIPTION.UPDATED') {
+      const paypalSubscriptionId = String(resource.id || '').trim()
+      const plan = findPlanByPayPalPlanId(String(resource.plan_id || '').trim())
+      const order = findOrderByPayPalReference({ subscriptionId: paypalSubscriptionId })
+        || adminData.orders.find((item) => String(item.id || '').trim() === String(resource.custom_id || '').trim())
+        || null
+      const member = order ? findMemberByEmail(order.email) : null
+
+      if (order) {
+        updateOrder(order.id, {
+          status: String(resource.status || '').trim().toLowerCase() || 'active',
+          paypalSubscriptionId,
+          subscriptionCurrentPeriodEnd: String(resource.billing_info?.next_billing_time || '').trim(),
+        })
+      }
+
+      if (member && paypalSubscriptionId) {
+        const syncedMember = await syncMemberSubscriptionFromPayPal(member, paypalSubscriptionId, plan || findPlanById(order?.planId || ''))
+        const initialSourceId = `paypal-subscription-activation:${paypalSubscriptionId}`
+        const alreadyGranted = (adminData.creditLedger || []).some((entry) =>
+          String(entry?.sourceId || '').trim() === initialSourceId,
+        )
+
+        if (!alreadyGranted && plan) {
+          awardHeartBeansToMember(syncedMember.email, plan.heartBeans, plan.name, 'subscription', {
+            sourceType: 'subscription_cycle',
+            sourceId: initialSourceId,
+            note: `PayPal subscription activation ${paypalSubscriptionId}`,
+          })
+          if (order) {
+            updateOrder(order.id, {
+              heartBeansGrantedAt: order.heartBeansGrantedAt || nowIso(),
+              status: 'active',
+            })
+          }
+        }
+      }
+    }
+
+    if (eventType === 'PAYMENT.SALE.COMPLETED') {
+      const billingAgreementId = String(resource.billing_agreement_id || '').trim()
+      const transactionId = String(resource.id || '').trim()
+      const amountValue = normalizePositiveNumber(resource.amount?.total, 0)
+      const plan = adminData.plans.find((item) =>
+        String(item.paypalPlanId || '').trim() && findOrderByPayPalReference({ subscriptionId: billingAgreementId })?.planId === item.id,
+      ) || null
+      const order = findOrderByPayPalReference({ subscriptionId: billingAgreementId })
+      const member = order ? findMemberByEmail(order.email) : null
+
+      if (member && order) {
+        const sourceId = `paypal-subscription-cycle:${transactionId}`
+        const alreadyGranted = (adminData.creditLedger || []).some((entry) =>
+          String(entry?.sourceId || '').trim() === sourceId,
+        )
+
+        if (!alreadyGranted) {
+          awardHeartBeansToMember(member.email, order.heartBeans, order.plan, 'subscription', {
+            sourceType: 'subscription_cycle',
+            sourceId,
+            note: `PayPal subscription renewal ${transactionId}`,
+          })
+        }
+
+        upsertOrder({
+          id: `ord-${crypto.randomUUID()}`,
+          couple: '',
+          planId: order.planId,
+          plan: order.plan,
+          planType: 'subscription',
+          amount: amountValue || order.amount,
+          heartBeans: order.heartBeans,
+          creditsBalanceType: 'subscription',
+          status: 'paid',
+          email: member.email,
+          note: 'PayPal subscription renewal',
+          paymentMethod: 'paypal',
+          source: 'paypal',
+          mode: 'subscription',
+          paypalSubscriptionId: billingAgreementId,
+          heartBeansGrantedAt: nowIso(),
+          subscriptionCurrentPeriodEnd: String(resource.next_payment_date || '').trim(),
+          createdAt: nowIso(),
+        })
+      }
+    }
+
+    if (eventType === 'BILLING.SUBSCRIPTION.CANCELLED' || eventType === 'BILLING.SUBSCRIPTION.SUSPENDED' || eventType === 'BILLING.SUBSCRIPTION.EXPIRED') {
+      const paypalSubscriptionId = String(resource.id || '').trim()
+      const order = findOrderByPayPalReference({ subscriptionId: paypalSubscriptionId })
+      const member = order ? findMemberByEmail(order.email) : adminData.members.find((item) => String(item?.paypalSubscriptionId || '').trim() === paypalSubscriptionId) || null
+
+      if (member) {
+        upsertMember({
+          ...member,
+          subscriptionStatus: String(resource.status || eventType.split('.').pop() || '').trim().toLowerCase(),
+          subscriptionProvider: 'paypal',
+          updatedAt: nowIso(),
+        })
+      }
+
+      if (order) {
+        updateOrder(order.id, {
+          status: String(resource.status || '').trim().toLowerCase() || 'cancelled',
+          paypalSubscriptionId,
+        })
+      }
+    }
+
+    if (eventType === 'BILLING.SUBSCRIPTION.PAYMENT.FAILED') {
+      const paypalSubscriptionId = String(resource.id || resource.subscription_id || '').trim()
+      const order = findOrderByPayPalReference({ subscriptionId: paypalSubscriptionId })
+      const member = order ? findMemberByEmail(order.email) : adminData.members.find((item) => String(item?.paypalSubscriptionId || '').trim() === paypalSubscriptionId) || null
+
+      if (member) {
+        upsertMember({
+          ...member,
+          subscriptionStatus: 'payment_failed',
+          subscriptionProvider: 'paypal',
+          updatedAt: nowIso(),
+        })
+      }
+
+      if (order) {
+        updateOrder(order.id, {
+          status: 'payment_failed',
+          paypalSubscriptionId,
+        })
+      }
+    }
+
+    res.json({ received: true })
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : 'PayPal webhook 处理失败。' })
+  }
 })
 
 app.get('/api/admin/payment-methods', requireAdminAuth, (_req, res) => {
@@ -1965,7 +3453,15 @@ app.put('/api/admin/payment-methods', requireAdminAuth, (req, res) => {
 
   adminData = {
     ...adminData,
-    paymentMethods: items,
+    paymentMethods: items.map((item) => ({
+      id: String(item?.id || '').trim(),
+      name: String(item?.name || '').trim(),
+      enabled: normalizeBoolean(item?.enabled, false),
+      provider: normalizePaymentProvider(item?.provider, String(item?.id || '').trim() === 'stripe_checkout' ? 'stripe_checkout' : 'paypal'),
+      envKey: String(item?.envKey || '').trim(),
+      supportedPlanTypes: normalizePlanTypeList(item?.supportedPlanTypes, ['credit_pack']),
+      description: String(item?.description || '').trim(),
+    })),
   }
   saveAdminData()
   res.json({ items: adminData.paymentMethods })
@@ -2049,12 +3545,8 @@ app.patch('/api/admin/members/:email', requireAdminAuth, (req, res) => {
     email,
   }
 
-  adminData = {
-    ...adminData,
-    members: [next, ...adminData.members.filter((item) => String(item.email || '').trim().toLowerCase() !== email)].slice(0, 5000),
-  }
-  saveAdminData()
-  res.json(next)
+  const savedMember = upsertMember(next)
+  res.json(savedMember)
 })
 
 app.get('/api/admin/plans', requireAdminAuth, (_req, res) => {
@@ -2070,7 +3562,20 @@ app.put('/api/admin/plans', requireAdminAuth, (req, res) => {
 
   adminData = {
     ...adminData,
-    plans: items,
+    plans: items.map((item) => ({
+      ...item,
+      id: String(item?.id || '').trim(),
+      name: String(item?.name || '').trim(),
+      type: normalizePlanType(item?.type, String(item?.billingInterval || '').trim() ? 'subscription' : 'credit_pack'),
+      billingInterval: normalizeBillingInterval(item?.billingInterval),
+      stripePriceId: String(item?.stripePriceId || '').trim(),
+      paypalPlanId: String(item?.paypalPlanId || '').trim(),
+      price: normalizePositiveNumber(item?.price, 0),
+      heartBeans: normalizePositiveNumber(item?.heartBeans, getDefaultHeartBeansForPlan(item)),
+      currency: String(item?.currency || 'USD').trim() || 'USD',
+      badge: String(item?.badge || '').trim(),
+      features: Array.isArray(item?.features) ? item.features.map((feature) => String(feature || '').trim()).filter(Boolean) : [],
+    })),
   }
   saveAdminData()
   res.json({ items: adminData.plans })
@@ -2134,55 +3639,78 @@ app.delete('/api/admin/songs/:songId', requireAdminAuth, (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/paypal/create-order', (req, res) => {
+app.post('/api/paypal/create-order', async (req, res) => {
   const planId = String(req.body?.planId || '').trim()
+  const locale = String(req.body?.locale || 'en').trim() === 'zh' ? 'zh' : 'en'
   const memberToken = readMemberToken(req)
-  const { session: memberSession, error, status } = getValidMemberFromToken(memberToken)
+  const { session: memberSession, member, error, status } = getValidMemberFromToken(memberToken)
 
-  if (!memberSession) {
+  if (!memberSession || !member) {
     res.status(status).json({ message: error })
     return
   }
 
   const email = normalizeEmail(memberSession.email)
-  const plan = adminData.plans.find((item) => String(item.id) === planId) || null
+  const plan = findPlanById(planId)
   if (!plan) {
     res.status(400).json({ message: '套餐不存在。' })
     return
   }
 
-  const method = adminData.paymentMethods.find((item) => String(item.id) === 'paypal') || {
+  const method = adminData.paymentMethods.find((item) => String(item.id) === 'paypal' && Boolean(item.enabled)) || {
     id: 'paypal',
     name: 'PayPal',
     enabled: true,
     envKey: 'PAYPAL_CHECKOUT_URL',
-    description: 'PayPal Checkout',
+    provider: 'paypal',
+    supportedPlanTypes: ['subscription', 'credit_pack'],
+    description: 'PayPal Checkout & Subscriptions',
   }
-  const checkoutUrl = getPaymentCheckoutUrl(method)
-  if (!checkoutUrl) {
-    res.status(400).json({ message: '未配置 PayPal 收费链接。' })
+
+  if (!supportsPlanType(method, plan.type)) {
+    res.status(400).json({ message: 'PayPal 不支持当前套餐类型。' })
     return
   }
 
-  const orderId = `ord-${crypto.randomUUID()}`
-  const nextOrder = {
-    id: orderId,
+  const nextOrder = upsertOrder({
+    id: `ord-${crypto.randomUUID()}`,
     couple: '',
+    planId: plan.id,
     plan: plan.name,
+    planType: normalizePlanType(plan.type, 'credit_pack'),
     amount: plan.price,
     heartBeans: normalizePositiveNumber(plan.heartBeans, getDefaultHeartBeansForPlan(plan)),
+    creditsBalanceType: normalizePlanType(plan.type, 'credit_pack') === 'subscription' ? 'subscription' : 'topup',
     status: 'pending',
     email,
     note: 'PayPal checkout',
     paymentMethod: 'paypal',
+    source: 'paypal',
+    mode: normalizePlanType(plan.type, 'credit_pack') === 'subscription' ? 'subscription' : 'payment',
     createdAt: nowIso(),
+  })
+
+  try {
+    const paypalResult = await createPayPalCheckoutForPlan({
+      member,
+      plan,
+      order: nextOrder,
+      locale,
+    })
+
+    res.json({
+      orderId: nextOrder.id,
+      checkoutUrl: paypalResult.checkoutUrl,
+      paypalOrderId: paypalResult.paypalOrderId || '',
+      paypalSubscriptionId: paypalResult.paypalSubscriptionId || '',
+    })
+  } catch (error) {
+    updateOrder(nextOrder.id, {
+      status: 'error',
+      note: error instanceof Error ? error.message : '创建 PayPal 会话失败。',
+    })
+    res.status(500).json({ message: error instanceof Error ? error.message : '创建 PayPal 会话失败。' })
   }
-  adminData = {
-    ...adminData,
-    orders: [nextOrder, ...adminData.orders].slice(0, 5000),
-  }
-  saveAdminData()
-  res.json({ orderId, checkoutUrl })
 })
 
 app.post('/api/generate-song', async (req, res) => {
@@ -2254,7 +3782,11 @@ app.post('/api/generate-song', async (req, res) => {
     })
   } catch (error) {
     if (debitedMember) {
-      refundHeartBeansToMember(debitedMember, heartBeansPerGeneration)
+      refundHeartBeansToMember(debitedMember, debitedMember.debited, {
+        sourceType: 'generation_refund',
+        sourceId: job.id,
+        note: 'Generation failed, credits refunded',
+      })
     }
 
     updateJob(job.id, {
