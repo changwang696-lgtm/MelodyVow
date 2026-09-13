@@ -3575,6 +3575,41 @@ app.patch('/api/admin/members/:email', requireAdminAuth, (req, res) => {
   res.json(savedMember)
 })
 
+app.delete('/api/admin/members/:email', requireAdminAuth, (req, res) => {
+  const email = normalizeEmail(req.params.email)
+  if (!email) {
+    res.status(400).json({ message: '缺少会员邮箱。' })
+    return
+  }
+
+  const hasMemberData = adminData.members.some((item) => normalizeEmail(item.email) === email)
+    || adminData.orders.some((item) => normalizeEmail(item.email) === email)
+    || adminData.songs.some((item) => normalizeEmail(item.email) === email)
+    || adminData.creditLedger.some((item) => normalizeEmail(item.memberEmail) === email)
+
+  if (!hasMemberData) {
+    res.status(404).json({ message: '会员不存在。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    members: adminData.members.filter((item) => normalizeEmail(item.email) !== email),
+    orders: adminData.orders.filter((item) => normalizeEmail(item.email) !== email),
+    songs: adminData.songs.filter((item) => normalizeEmail(item.email) !== email),
+    creditLedger: adminData.creditLedger.filter((item) => normalizeEmail(item.memberEmail) !== email),
+  }
+
+  Array.from(memberSessions.entries()).forEach(([token, session]) => {
+    if (normalizeEmail(session?.email) === email) {
+      memberSessions.delete(token)
+    }
+  })
+
+  saveAdminData()
+  res.json({ ok: true })
+})
+
 app.get('/api/admin/plans', requireAdminAuth, (_req, res) => {
   res.json({ items: adminData.plans })
 })
@@ -3607,6 +3642,27 @@ app.put('/api/admin/plans', requireAdminAuth, (req, res) => {
   res.json({ items: adminData.plans })
 })
 
+app.delete('/api/admin/plans/:planId', requireAdminAuth, (req, res) => {
+  const planId = String(req.params.planId || '').trim()
+  if (!planId) {
+    res.status(400).json({ message: '缺少套餐 ID。' })
+    return
+  }
+
+  const exists = adminData.plans.some((item) => String(item.id || '').trim() === planId)
+  if (!exists) {
+    res.status(404).json({ message: '套餐不存在。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    plans: adminData.plans.filter((item) => String(item.id || '').trim() !== planId),
+  }
+  saveAdminData()
+  res.json({ ok: true })
+})
+
 app.get('/api/admin/showcase-tracks', requireAdminAuth, (_req, res) => {
   res.json({ items: adminData.showcaseTracks })
 })
@@ -3624,6 +3680,27 @@ app.put('/api/admin/showcase-tracks', requireAdminAuth, (req, res) => {
   }
   saveAdminData()
   res.json({ items: adminData.showcaseTracks })
+})
+
+app.delete('/api/admin/showcase-tracks/:trackId', requireAdminAuth, (req, res) => {
+  const trackId = String(req.params.trackId || '').trim()
+  if (!trackId) {
+    res.status(400).json({ message: '缺少样片 ID。' })
+    return
+  }
+
+  const exists = adminData.showcaseTracks.some((item) => String(item?.id || '').trim() === trackId)
+  if (!exists) {
+    res.status(404).json({ message: '样片不存在。' })
+    return
+  }
+
+  adminData = {
+    ...adminData,
+    showcaseTracks: adminData.showcaseTracks.filter((item) => String(item?.id || '').trim() !== trackId),
+  }
+  saveAdminData()
+  res.json({ ok: true })
 })
 
 app.patch('/api/admin/songs/:songId', requireAdminAuth, (req, res) => {
