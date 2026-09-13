@@ -1608,12 +1608,12 @@ function App() {
     })
   }, [])
 
-  function handleAuthSuccess(session: AuthSession) {
+  const handleAuthSuccess = useCallback((session: AuthSession) => {
     setSongHistory([])
     setAuthSession(session)
-  }
+  }, [])
 
-  function handleLogout() {
+  const handleLogout = useCallback(() => {
     const currentSession = authSession
     if (currentSession?.authToken) {
       void fetch(apiUrl('/api/member/logout'), {
@@ -1624,15 +1624,15 @@ function App() {
 
     setAuthSession(null)
     setSongHistory([])
-  }
+  }, [authSession])
 
-  function handleAdminLogin(session: AdminSession) {
+  const handleAdminLogin = useCallback((session: AdminSession) => {
     setAdminSession(session)
-  }
+  }, [])
 
-  function handleAdminLogout() {
+  const handleAdminLogout = useCallback(() => {
     setAdminSession(null)
-  }
+  }, [])
 
   const upsertFloatingPlayer = useCallback((payload: FloatingPhonePlayerPayload) => {
     setFloatingPlayer((current) => ({
