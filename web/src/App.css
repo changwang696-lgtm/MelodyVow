@@ -3122,6 +3122,39 @@
   gap: 12px;
 }
 
+.pricing-group-section {
+  display: grid;
+  gap: 6px;
+}
+
+.pricing-group-head {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  text-align: center;
+}
+
+.pricing-group-head .mini-eyebrow {
+  margin: 0;
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: rgba(189, 91, 157, 0.76);
+}
+
+.pricing-group-head h2 {
+  margin: 0;
+  max-width: 520px;
+  font-family: var(--font-ui);
+  font-size: 0.62rem;
+  line-height: 1.45;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(88, 49, 82, 0.58);
+}
+
 .pricing-action-button {
   width: 100%;
   min-height: 38px;
@@ -3273,6 +3306,10 @@
 .styles-page-grid .style-card p {
   font-size: 0.82rem;
   line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .styles-page-meta {
@@ -3292,6 +3329,7 @@
 .styles-page-meta-row {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .styles-page-meta-row span {
@@ -3302,10 +3340,16 @@
 }
 
 .styles-page-meta-row strong {
+  display: -webkit-box;
+  min-width: 0;
   font-size: 0.74rem;
   line-height: 1.45;
   color: rgba(24, 12, 24, 0.84);
   font-weight: 800;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .styles-page-grid .style-card .compact {
@@ -6608,6 +6652,26 @@
     padding: 1px 2px 4px;
     margin-top: 6px;
     align-items: stretch;
+  }
+
+  .pricing-group-section {
+    gap: 4px;
+  }
+
+  .pricing-group-head {
+    gap: 1px;
+  }
+
+  .pricing-group-head .mini-eyebrow {
+    font-size: 0.46rem;
+    letter-spacing: 0.14em;
+  }
+
+  .pricing-group-head h2 {
+    max-width: 260px;
+    font-size: 0.54rem;
+    line-height: 1.38;
+    color: rgba(86, 51, 82, 0.52);
   }
 
   .pricing-page-grid .pricing-card {

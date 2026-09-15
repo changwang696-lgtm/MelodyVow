@@ -1057,6 +1057,68 @@ function getStyleCollectionIds(styleId: string) {
   return styleCollectionsByStyleId[styleId] || ['wedding']
 }
 
+type StyleMetaField =
+  | 'area'
+  | 'community'
+  | 'region'
+  | 'weddingMusicType'
+  | 'proposalMusicType'
+  | 'coreFeature'
+  | 'signatureForm'
+
+function getStyleMetaLabel(locale: Locale, field: StyleMetaField, compact = false) {
+  const labels = {
+    area: compact
+      ? copy(locale, { zh: '区域', en: 'Area' })
+      : copy(locale, { zh: '区域', en: 'Area' }),
+    community: compact
+      ? copy(locale, { zh: '社群', en: 'Community' })
+      : copy(locale, { zh: '部落 / 社群', en: 'Tribe / Community' }),
+    region: compact
+      ? copy(locale, { zh: '地区', en: 'Region' })
+      : copy(locale, { zh: '国家 / 地区', en: 'Country / Region' }),
+    weddingMusicType: compact
+      ? copy(locale, { zh: '婚礼类型', en: 'Wedding Type' })
+      : copy(locale, { zh: '婚礼音乐类型', en: 'Wedding Music Type' }),
+    proposalMusicType: compact
+      ? copy(locale, { zh: '求婚类型', en: 'Proposal Type' })
+      : copy(locale, { zh: '求婚歌曲类型', en: 'Proposal Song Type' }),
+    coreFeature: compact
+      ? copy(locale, { zh: '特征', en: 'Feature' })
+      : copy(locale, { zh: '核心特征', en: 'Core Feature' }),
+    signatureForm: compact
+      ? copy(locale, { zh: '曲式', en: 'Forms' })
+      : copy(locale, { zh: '代表性曲目 / 形式', en: 'Signature Form' }),
+  } satisfies Record<StyleMetaField, string>
+
+  return labels[field]
+}
+
+function getStyleMetaPreview(value: string, locale: Locale, field: StyleMetaField) {
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (!text) {
+    return ''
+  }
+
+  const limit = locale === 'zh'
+    ? (field === 'signatureForm' ? 22 : 18)
+    : (field === 'signatureForm' ? 34 : 28)
+
+  if (text.length <= limit) {
+    return text
+  }
+
+  const parts = text.split(/\s*[，,；;。]\s*/).filter(Boolean)
+  if (parts.length > 1) {
+    const summary = parts.slice(0, 2).join(' / ')
+    if (summary.length <= limit + 8) {
+      return `${summary}...`
+    }
+  }
+
+  return `${text.slice(0, limit).trim()}...`
+}
+
 function buildStyleGenerationRequest(style: WeddingStyleOption | null, occasion: Occasion) {
   if (!style?.area && !style?.continent && !style?.region && !style?.community && !style?.weddingMusicType && !style?.proposalMusicType && !style?.coreFeature && !style?.signatureForm) {
     return ''
@@ -4356,15 +4418,21 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
 
       <section className="styles-grid styles-page-grid">
         {filteredStyles.map((card, index) => {
-          const metaRows = [
-            { label: copy(locale, { zh: '区域', en: 'Area' }), value: card.area || card.continent },
-            { label: copy(locale, { zh: '部落 / 社群', en: 'Tribe / Community' }), value: card.community },
-            { label: copy(locale, { zh: '国家 / 地区', en: 'Country / Region' }), value: card.region },
-            { label: copy(locale, { zh: '婚礼音乐类型', en: 'Wedding Music Type' }), value: card.weddingMusicType },
-            { label: copy(locale, { zh: '求婚歌曲类型', en: 'Proposal Song Type' }), value: card.proposalMusicType },
-            { label: copy(locale, { zh: '核心特征', en: 'Core Feature' }), value: card.coreFeature },
-            { label: copy(locale, { zh: '代表性曲目 / 形式', en: 'Signature Form' }), value: card.signatureForm },
-          ].filter((item) => item.value && item.value.trim())
+          const baseMetaRows: Array<{ field: StyleMetaField, value?: string }> = [
+            { field: 'area', value: card.area || card.continent },
+            { field: 'community', value: card.community },
+            { field: 'region', value: card.region },
+            { field: 'weddingMusicType', value: card.weddingMusicType },
+            { field: 'proposalMusicType', value: card.proposalMusicType },
+            { field: 'coreFeature', value: card.coreFeature },
+            { field: 'signatureForm', value: card.signatureForm },
+          ]
+          const metaRows = baseMetaRows.filter((item): item is { field: StyleMetaField, value: string } => Boolean(item.value && item.value.trim())).map((item) => ({
+            ...item,
+            label: getStyleMetaLabel(locale, item.field, true),
+            fullLabel: getStyleMetaLabel(locale, item.field),
+            previewValue: getStyleMetaPreview(item.value, locale, item.field),
+          }))
 
           return (
             <article
@@ -4377,9 +4445,13 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
               {metaRows.length ? (
                 <div className="styles-page-meta">
                   {metaRows.map((item) => (
-                    <div key={`${card.id}-${item.label}`} className="styles-page-meta-row">
-                      <span>{item.label}</span>
-                      <strong>{item.value}</strong>
+                    <div
+                      key={`${card.id}-${item.field}`}
+                      className="styles-page-meta-row"
+                      title={`${item.fullLabel}: ${item.value}`}
+                    >
+                      <span title={item.fullLabel}>{item.label}</span>
+                      <strong>{item.previewValue}</strong>
                     </div>
                   ))}
                 </div>
@@ -4571,7 +4643,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
           },
           {
             key: 'topup',
-            title: copy(locale, { zh: '充值包', en: 'Top Up Packs' }),
+            title: copy(locale, { zh: '充值包', en: 'TOP UP PACKS' }),
             subtitle: copy(locale, {
               zh: '一次性购买，额度立即到账，不自动续费。',
               en: 'One-time purchase with instant credits and no auto-renewal.',
