@@ -51,9 +51,9 @@
 
 .site-shell[data-background-theme='elegant_dark'] {
   --site-grad-spot-1: rgba(7, 8, 3, 0.92);
-  --site-grad-spot-2: rgba(245, 195, 134, 0.82);
-  --site-grad-spot-3: rgba(79, 9, 7, 0.72);
-  --site-grad-spot-4: rgba(87, 45, 23, 0.78);
+  --site-grad-spot-2: rgba(227, 174, 134, 0.72);
+  --site-grad-spot-3: rgba(7, 8, 3, 0.76);
+  --site-grad-spot-4: rgba(87, 45, 23, 0.74);
   --site-grad-spot-1-position: 8% 8%;
   --site-grad-spot-2-position: 29% 16%;
   --site-grad-spot-3-position: 84% 84%;
@@ -62,7 +62,7 @@
   --site-grad-spot-2-size: 28%;
   --site-grad-spot-3-size: 24%;
   --site-grad-spot-4-size: 30%;
-  --site-grad-base: linear-gradient(135deg, #070803 0%, #572d17 24%, #e3ae86 48%, #f5c386 70%, #4f0907 100%);
+  --site-grad-base: linear-gradient(135deg, #070803 0%, #572d17 24%, #e3ae86 48%, #070803 74%, #572d17 100%);
 }
 
 .site-shell[data-locale='zh'] {

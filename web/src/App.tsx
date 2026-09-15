@@ -101,6 +101,11 @@ type Copy = {
 type BackgroundThemeId =
   | 'vivid_rainbow'
   | 'elegant_dark'
+  | 'auto_beijing'
+
+type ResolvedBackgroundThemeId =
+  | 'vivid_rainbow'
+  | 'elegant_dark'
 
 type HistoryItem = {
   id: string
@@ -504,11 +509,42 @@ const backgroundThemeOptions: Array<{
     label: '欧美黑金',
     description: '延续绚彩渐变的流动感，但改为深酒红与黑金调，更适合欧美高定婚礼气质。',
   },
+  {
+    id: 'auto_beijing',
+    label: '自动时区（北京时间）',
+    description: '按北京时间自动切换：白天使用绚彩渐变，晚上切换为欧美黑金。',
+  },
 ]
 
 function normalizeBackgroundTheme(value: unknown): BackgroundThemeId {
   const normalized = String(value || '').trim() as BackgroundThemeId
   return backgroundThemeOptions.some((item) => item.id === normalized) ? normalized : DEFAULT_BACKGROUND_THEME
+}
+
+function getBeijingHour(date = new Date()) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      hour12: false,
+    })
+    return Number(formatter.format(date))
+  } catch {
+    return (date.getUTCHours() + 8 + 24) % 24
+  }
+}
+
+function resolveBackgroundTheme(theme: BackgroundThemeId, date = new Date()): ResolvedBackgroundThemeId {
+  if (theme !== 'auto_beijing') {
+    return theme
+  }
+
+  const beijingHour = getBeijingHour(date)
+  return beijingHour >= 6 && beijingHour < 18 ? 'vivid_rainbow' : 'elegant_dark'
+}
+
+function getBackgroundThemeOption(theme: BackgroundThemeId | ResolvedBackgroundThemeId) {
+  return backgroundThemeOptions.find((item) => item.id === theme) ?? null
 }
 
 const defaultPublicSiteConfig: PublicSiteConfig = {
@@ -2506,6 +2542,7 @@ function SiteLayout({
   const isMobileViewport = useIsMobileViewport()
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
+  const [resolvedBackgroundTheme, setResolvedBackgroundTheme] = useState<ResolvedBackgroundThemeId>(() => resolveBackgroundTheme(siteConfig.backgroundTheme))
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
   const useHomeMobileChrome = ['home', 'how', 'styles', 'pricing', 'account'].includes(active)
@@ -2518,6 +2555,21 @@ function SiteLayout({
   useEffect(() => {
     setMemberMenuOpen(false)
   }, [active])
+
+  useEffect(() => {
+    const syncResolvedTheme = () => {
+      setResolvedBackgroundTheme(resolveBackgroundTheme(siteConfig.backgroundTheme))
+    }
+
+    syncResolvedTheme()
+
+    if (siteConfig.backgroundTheme !== 'auto_beijing' || typeof window === 'undefined') {
+      return
+    }
+
+    const timer = window.setInterval(syncResolvedTheme, 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [siteConfig.backgroundTheme])
 
   useEffect(() => {
     if (!memberMenuOpen) {
@@ -2570,7 +2622,8 @@ function SiteLayout({
     <div
       className={`site-shell ${active === 'home' ? 'site-shell-home' : ''} ${active === 'how' ? 'site-shell-showcase' : ''} ${active === 'styles' ? 'site-shell-styles' : ''} ${active === 'pricing' ? 'site-shell-pricing' : ''} ${active === 'account' ? 'site-shell-account' : ''}`.trim()}
       data-locale={locale}
-      data-background-theme={siteConfig.backgroundTheme}
+      data-background-theme={resolvedBackgroundTheme}
+      data-background-theme-mode={siteConfig.backgroundTheme}
     >
       <div className="site-gradient" />
       <div className="site-noise" />
@@ -5727,6 +5780,8 @@ function AdminDashboardPage({
     notes: '',
   })
   const [savingConfig, setSavingConfig] = useState(false)
+  const selectedBackgroundTheme = getBackgroundThemeOption(config.backgroundTheme)
+  const effectiveBackgroundThemeOption = getBackgroundThemeOption(resolveBackgroundTheme(config.backgroundTheme))
 
   useEffect(() => {
     if (!activeSession) {
@@ -7282,8 +7337,11 @@ function AdminDashboardPage({
                 </label>
                 <div className="glass-card admin-theme-preview form-span-2">
                   <p className="mini-eyebrow">当前背景方案说明</p>
-                  <h3>{backgroundThemeOptions.find((item) => item.id === config.backgroundTheme)?.label || '网站背景方案'}</h3>
-                  <p>{backgroundThemeOptions.find((item) => item.id === config.backgroundTheme)?.description || '保存后前台会立即使用这套底图配色。'}</p>
+                  <h3>{selectedBackgroundTheme?.label || '网站背景方案'}</h3>
+                  <p>{selectedBackgroundTheme?.description || '保存后前台会立即使用这套底图配色。'}</p>
+                  {config.backgroundTheme === 'auto_beijing' && effectiveBackgroundThemeOption ? (
+                    <p>{`当前北京时间实际生效：${effectiveBackgroundThemeOption.label}`}</p>
+                  ) : null}
                 </div>
               </div>
               <label className="admin-switch">
