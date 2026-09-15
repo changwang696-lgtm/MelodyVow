@@ -1,4 +1,4 @@
-import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import {
   NavLink,
@@ -24,7 +24,8 @@ import sparkImage from '../images/10.png'
 import heroTitleImage from '../images/11.png'
 import phoneDiscImage from '../images/12.png'
 import { songLanguages } from './data/songLanguages'
-import { vocalOptions, weddingStyleOptions } from './data/weddingMusicOptions'
+import { styleCollectionOptions, styleCollectionsByStyleId, vocalOptions, weddingStyleOptions } from './data/weddingMusicOptions'
+import type { StyleCollectionId } from './data/weddingMusicOptions'
 import { readJsonSafe } from './readJsonSafe'
 
 type Locale = 'zh' | 'en'
@@ -1031,6 +1032,10 @@ function getStyleLabel(locale: Locale, id: string) {
   }
 
   return locale === 'zh' ? style.zhLabel : style.enLabel
+}
+
+function getStyleCollectionIds(styleId: string) {
+  return styleCollectionsByStyleId[styleId] || ['wedding']
 }
 
 function getVocalLabel(locale: Locale, code: string) {
@@ -2959,10 +2964,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                   )
                 })}
               </div>
-              <p className="home-app-voice-status">
-                {copy(locale, { zh: '当前已选声音', en: 'Selected Voice' })}
-                <strong>{getHomeVoiceChipLabel(draft.vocal || 'female')}</strong>
-              </p>
 
             </div>
 
@@ -4088,6 +4089,21 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
 
 function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPageProps) {
   const navigate = useNavigate()
+  const [activeCollection, setActiveCollection] = useState<StyleCollectionId>(() => {
+    if (draft.style) {
+      const matchedCollections = getStyleCollectionIds(draft.style)
+      return matchedCollections.includes('proposal')
+        ? 'proposal'
+        : matchedCollections[0]
+    }
+
+    return draft.occasion === 'proposal' ? 'proposal' : 'wedding'
+  })
+
+  const filteredStyles = useMemo(
+    () => weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(activeCollection)),
+    [activeCollection],
+  )
 
   return (
     <SiteLayout
@@ -4101,8 +4117,31 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
       authSession={authSession}
       hideHero
     >
+      <section className="styles-page-toolbar glass-card">
+        <div className="styles-page-switcher" role="tablist" aria-label={copy(locale, { zh: '曲风分类切换', en: 'Style category switcher' })}>
+          {styleCollectionOptions.map((collection) => {
+            const count = weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(collection.id)).length
+            const active = activeCollection === collection.id
+
+            return (
+              <button
+                key={collection.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`styles-page-switch ${active ? 'is-active' : ''}`}
+                onClick={() => setActiveCollection(collection.id)}
+              >
+                <span>{locale === 'zh' ? collection.zhLabel : collection.enLabel}</span>
+                <strong>{count}</strong>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
       <section className="styles-grid styles-page-grid">
-        {weddingStyleOptions.map((card, index) => (
+        {filteredStyles.map((card, index) => (
           <article
             key={card.id}
             className={`glass-card style-card ${draft.style === card.id ? 'selected' : ''}`}
@@ -4122,6 +4161,15 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
             </button>
           </article>
         ))}
+        {!filteredStyles.length ? (
+          <article className="glass-card styles-page-empty">
+            <h3>{copy(locale, { zh: '该分类还没有曲风', en: 'No styles in this category yet' })}</h3>
+            <p>{copy(locale, {
+              zh: '后续新增模型后，会自动出现在这个切换分类里。',
+              en: 'Once new models are added, they will appear in this category automatically.',
+            })}</p>
+          </article>
+        ) : null}
       </section>
     </SiteLayout>
   )

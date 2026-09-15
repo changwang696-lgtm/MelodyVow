@@ -6,6 +6,22 @@ export type WeddingStyleOption = {
   enDescription: string
 }
 
+export type StyleCollectionId =
+  | 'wedding'
+  | 'proposal'
+  | 'asia'
+  | 'africa'
+  | 'europe'
+  | 'middle_east'
+  | 'latin'
+  | 'north_america'
+
+export type StyleCollectionOption = {
+  id: StyleCollectionId
+  zhLabel: string
+  enLabel: string
+}
+
 export type VocalOption = {
   code: string
   zhLabel: string
@@ -240,6 +256,52 @@ export const weddingStyleOptions: WeddingStyleOption[] = [
     enDescription: 'Epic and sweeping for films, trailers and grand finales.',
   },
 ]
+
+export const styleCollectionOptions: StyleCollectionOption[] = [
+  { id: 'wedding', zhLabel: '婚礼', enLabel: 'Wedding' },
+  { id: 'proposal', zhLabel: '求婚', enLabel: 'Proposal' },
+  { id: 'asia', zhLabel: '亚洲', enLabel: 'Asia' },
+  { id: 'africa', zhLabel: '非洲', enLabel: 'Africa' },
+  { id: 'europe', zhLabel: '欧洲', enLabel: 'Europe' },
+  { id: 'middle_east', zhLabel: '中东', enLabel: 'Middle East' },
+  { id: 'latin', zhLabel: '拉美', enLabel: 'Latin' },
+  { id: 'north_america', zhLabel: '北美', enLabel: 'North America' },
+]
+
+export const styleCollectionsByStyleId: Record<string, StyleCollectionId[]> = {
+  soft_pop: ['wedding'],
+  proposal_confession_pop: ['proposal'],
+  proposal_piano_serenade: ['proposal'],
+  proposal_cinematic_build: ['proposal'],
+  proposal_acoustic_serenade: ['proposal'],
+  romantic_ballad: ['wedding', 'proposal'],
+  sweet_pop: ['wedding'],
+  acoustic_folk: ['wedding'],
+  piano_ballad: ['wedding'],
+  jazz_swing: ['wedding', 'europe', 'north_america'],
+  soul_rnb: ['wedding', 'north_america'],
+  motown_love: ['wedding', 'north_america'],
+  country_waltz: ['wedding', 'north_america'],
+  latin_romance: ['wedding', 'latin'],
+  bossa_nova: ['wedding', 'latin'],
+  bollywood_romance: ['wedding', 'asia'],
+  punjabi_bhangra_wedding: ['wedding', 'asia'],
+  kpop_love: ['wedding', 'asia'],
+  jpop_wedding: ['wedding', 'asia'],
+  jpop_citypop_romance: ['wedding', 'asia'],
+  french_chanson: ['wedding', 'europe'],
+  oriental_romance: ['wedding', 'asia'],
+  cantopop_classic: ['wedding', 'asia'],
+  minnan_ballad: ['wedding', 'asia'],
+  gospel_choir: ['wedding', 'north_america'],
+  arabic_dabke_wedding: ['wedding', 'middle_east'],
+  arabic_pop_romance: ['wedding', 'middle_east'],
+  afrobeats_wedding: ['wedding', 'africa'],
+  amapiano_romance: ['wedding', 'africa'],
+  celtic_ceilidh_wedding: ['wedding', 'europe'],
+  mariachi_serenade: ['proposal', 'latin'],
+  cinematic_orchestra: ['wedding', 'proposal'],
+}
 
 export const vocalOptions: VocalOption[] = [
   {

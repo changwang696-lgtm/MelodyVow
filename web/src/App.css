@@ -1533,15 +1533,15 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 4px;
     width: 100%;
     min-width: 0;
     min-height: 31px;
-    padding: 0 11px;
+    padding: 0 6px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.38);
     font-family: var(--font-ui);
-    font-size: 0.66rem;
+    font-size: 0.5rem;
     font-weight: 900;
     line-height: 1.05;
     text-align: center;
@@ -1561,19 +1561,22 @@
   }
 
   .site-shell-home .home-app-voice-chip-label {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-align: center;
   }
 
   .site-shell-home .home-app-voice-chip-check {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
     border-radius: 999px;
-    flex: 0 0 15px;
-    font-size: 0.6rem;
+    flex: 0 0 14px;
+    font-size: 0.56rem;
     font-weight: 900;
     color: rgba(255, 255, 255, 0.98);
     background: rgba(255, 255, 255, 0.18);
@@ -1619,32 +1622,6 @@
       0 12px 22px rgba(0, 0, 0, 0.08),
       inset 0 1px 0 rgba(255, 255, 255, 0.68);
     outline: none;
-  }
-
-  .site-shell-home .home-app-voice-status {
-    margin: 8px 2px 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 26px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    font-family: var(--font-ui);
-    font-size: 0.64rem;
-    font-weight: 800;
-    color: rgba(34, 18, 30, 0.76);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.18));
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.56),
-      0 10px 18px rgba(0, 0, 0, 0.04);
-  }
-
-  .site-shell-home .home-app-voice-status strong {
-    padding: 3px 8px;
-    border-radius: 999px;
-    color: rgba(136, 21, 74, 0.96);
-    background: rgba(255, 255, 255, 0.64);
   }
 
   .site-shell-home .home-app-shortcuts {
@@ -3157,6 +3134,125 @@
   max-width: 1320px;
   margin-inline: auto;
   margin-top: 8px;
+}
+
+.styles-page-toolbar {
+  margin: 0 auto 14px;
+  max-width: 1320px;
+  padding: 10px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.16)) padding-box,
+    linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.55)) border-box;
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 0 24px rgba(255, 255, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.styles-page-switcher {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.styles-page-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.styles-page-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.16));
+  color: rgba(24, 12, 24, 0.76);
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.44);
+  backdrop-filter: blur(14px);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.styles-page-switch strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: rgba(115, 26, 76, 0.94);
+  font-size: 0.72rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.64);
+}
+
+.styles-page-switch:hover,
+.styles-page-switch:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.42);
+  box-shadow:
+    0 14px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 2px rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  outline: none;
+}
+
+.styles-page-switch.is-active {
+  color: rgba(255, 255, 255, 0.98);
+  border-color: rgba(255, 255, 255, 0.32);
+  background:
+    linear-gradient(135deg, rgba(255, 85, 152, 0.96), rgba(140, 82, 255, 0.92)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.12));
+  box-shadow:
+    0 18px 28px rgba(247, 59, 136, 0.24),
+    0 0 0 2px rgba(255, 255, 255, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.styles-page-switch.is-active strong {
+  background: rgba(255, 255, 255, 0.26);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.styles-page-empty {
+  display: grid;
+  gap: 8px;
+  min-height: 180px;
+  align-content: center;
+  text-align: center;
+}
+
+.styles-page-empty h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: rgba(20, 12, 24, 0.92);
+}
+
+.styles-page-empty p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: rgba(36, 18, 33, 0.68);
 }
 
 .styles-page-grid .style-card {
@@ -6126,13 +6222,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 4px;
     min-height: 34px;
-    padding: 0 10px;
+    padding: 0 6px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.38);
     font-family: var(--font-ui);
-    font-size: 0.66rem;
+    font-size: 0.56rem;
     font-weight: 900;
     line-height: 1.05;
     color: rgba(20, 12, 24, 0.86);
@@ -6148,19 +6244,22 @@
   }
 
   .home-app-voice-chip-label {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-align: center;
   }
 
   .home-app-voice-chip-check {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
     border-radius: 999px;
-    flex: 0 0 15px;
-    font-size: 0.6rem;
+    flex: 0 0 14px;
+    font-size: 0.56rem;
     font-weight: 900;
     color: rgba(255, 255, 255, 0.98);
     background: rgba(255, 255, 255, 0.18);
@@ -6207,31 +6306,6 @@
     outline: none;
   }
 
-  .home-app-voice-status {
-    margin: 8px 2px 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 28px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    font-family: var(--font-ui);
-    font-size: 0.72rem;
-    font-weight: 800;
-    color: rgba(34, 18, 30, 0.76);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.18));
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.56),
-      0 10px 18px rgba(0, 0, 0, 0.04);
-  }
-
-  .home-app-voice-status strong {
-    padding: 3px 8px;
-    border-radius: 999px;
-    color: rgba(136, 21, 74, 0.96);
-    background: rgba(255, 255, 255, 0.64);
-  }
 
   .home-app-hint {
     margin: 0;
@@ -6376,6 +6450,28 @@
     pointer-events: none;
   }
 
+  .styles-page-toolbar {
+    margin-bottom: 10px;
+    padding: 8px;
+    border-radius: 24px;
+  }
+
+  .styles-page-switcher {
+    gap: 8px;
+  }
+
+  .styles-page-switch {
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 0.76rem;
+  }
+
+  .styles-page-switch strong {
+    min-width: 20px;
+    height: 20px;
+    font-size: 0.66rem;
+  }
+
   .styles-page-grid .style-card > * {
     position: relative;
     z-index: 1;
@@ -6438,6 +6534,20 @@
     box-shadow:
       0 14px 26px rgba(247, 59, 136, 0.24),
       inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  }
+
+  .styles-page-empty {
+    min-height: 150px;
+    padding: 18px 14px;
+    border-radius: 24px;
+  }
+
+  .styles-page-empty h3 {
+    font-size: 0.92rem;
+  }
+
+  .styles-page-empty p {
+    font-size: 0.76rem;
   }
 
   .pricing-page-grid {
