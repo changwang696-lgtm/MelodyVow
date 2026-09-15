@@ -2615,17 +2615,41 @@ function SiteLayout({
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const [memberInboxPanelOpen, setMemberInboxPanelOpen] = useState(false)
+  const [memberInboxLoading, setMemberInboxLoading] = useState(false)
   const [memberInbox, setMemberInbox] = useState<MemberInboxMessage[]>([])
   const [resolvedBackgroundTheme, setResolvedBackgroundTheme] = useState<ResolvedBackgroundThemeId>(() => resolveBackgroundTheme(siteConfig.backgroundTheme))
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
   const useHomeMobileChrome = ['home', 'how', 'styles', 'pricing', 'account'].includes(active)
   const currentAuthSession = authSession ?? loadAuthSession()
+  const currentMemberEmail = currentAuthSession?.email?.trim() || ''
+  const currentMemberToken = currentAuthSession?.authToken?.trim() || ''
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
   const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
   const memberAvatarUrl = currentAuthSession?.avatarUrl?.trim()
   const memberReplyCount = memberInbox.length
   const showHeroEyebrow = Boolean(eyebrow) && !(active !== 'home' && eyebrow === 'MelodyVow')
+
+  const loadMemberInbox = useCallback(async () => {
+    if (!currentMemberEmail || !currentMemberToken) {
+      setMemberInbox([])
+      return
+    }
+
+    setMemberInboxLoading(true)
+
+    try {
+      const response = await fetch(apiUrl('/api/member/messages'), {
+        headers: currentMemberToken ? { 'x-member-token': currentMemberToken } : {},
+      })
+      const result = await readJsonSafe(response) as { items?: MemberInboxMessage[] }
+      setMemberInbox(Array.isArray(result.items) ? result.items : [])
+    } catch {
+      setMemberInbox([])
+    } finally {
+      setMemberInboxLoading(false)
+    }
+  }, [currentMemberEmail, currentMemberToken])
 
   useEffect(() => {
     setMemberMenuOpen(false)
@@ -2633,36 +2657,8 @@ function SiteLayout({
   }, [active])
 
   useEffect(() => {
-    let disposed = false
-
-    async function loadMemberInbox() {
-      if (!currentAuthSession?.email || !currentAuthSession?.authToken) {
-        setMemberInbox([])
-        return
-      }
-
-      try {
-        const response = await fetch(apiUrl('/api/member/messages'), {
-          headers: getMemberAuthHeaders(currentAuthSession),
-        })
-        const result = await readJsonSafe(response) as { items?: MemberInboxMessage[] }
-
-        if (!disposed) {
-          setMemberInbox(Array.isArray(result.items) ? result.items : [])
-        }
-      } catch {
-        if (!disposed) {
-          setMemberInbox([])
-        }
-      }
-    }
-
     void loadMemberInbox()
-
-    return () => {
-      disposed = true
-    }
-  }, [currentAuthSession?.email, currentAuthSession?.authToken])
+  }, [loadMemberInbox])
 
   useEffect(() => {
     const syncResolvedTheme = () => {
@@ -2805,6 +2801,9 @@ function SiteLayout({
                 onClick={() => {
                   setMemberMenuOpen((value) => {
                     const next = !value
+                    if (next) {
+                      void loadMemberInbox()
+                    }
                     if (!next) {
                       setMemberInboxPanelOpen(false)
                     }
@@ -2832,6 +2831,7 @@ function SiteLayout({
                     role="menuitem"
                     aria-expanded={memberInboxPanelOpen}
                     onClick={() => {
+                      void loadMemberInbox()
                       setMemberInboxPanelOpen((value) => !value)
                     }}
                   >
@@ -2859,7 +2859,12 @@ function SiteLayout({
                       <div className="member-inbox-panel-head">
                         <strong>{copy(locale, { zh: '后台回复', en: 'Admin Replies' })}</strong>
                         <span>
-                          {memberReplyCount
+                          {memberInboxLoading
+                            ? copy(locale, {
+                                zh: '同步中...',
+                                en: 'Refreshing...',
+                              })
+                            : memberReplyCount
                             ? copy(locale, {
                                 zh: `共 ${memberReplyCount} 条`,
                                 en: `${memberReplyCount} total`,
@@ -2870,7 +2875,17 @@ function SiteLayout({
                               })}
                         </span>
                       </div>
-                      {memberInbox.length ? memberInbox.slice(0, 3).map((item) => {
+                      {memberInboxLoading ? (
+                        <div className="member-inbox-empty">
+                          <strong>{copy(locale, { zh: '正在同步回复', en: 'Refreshing replies' })}</strong>
+                          <p>
+                            {copy(locale, {
+                              zh: '我们正在重新获取后台最新回复。',
+                              en: 'We are fetching the latest replies from the admin desk.',
+                            })}
+                          </p>
+                        </div>
+                      ) : memberInbox.length ? memberInbox.slice(0, 3).map((item) => {
                         const repliedTime = item.repliedAt
                           ? new Date(item.repliedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
                           : '-'
