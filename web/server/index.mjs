@@ -1882,6 +1882,13 @@ function validateGenerateInput(body) {
   const occasion = body.occasion === 'proposal' ? 'proposal' : 'wedding'
   const style = typeof body.style === 'string' ? body.style.trim() : ''
   const styleLabel = typeof body.styleLabel === 'string' ? body.styleLabel.trim() : ''
+  const styleContinent = typeof body.styleContinent === 'string' ? body.styleContinent.trim() : ''
+  const styleRegion = typeof body.styleRegion === 'string' ? body.styleRegion.trim() : ''
+  const styleWeddingMusicType = typeof body.styleWeddingMusicType === 'string' ? body.styleWeddingMusicType.trim() : ''
+  const styleProposalMusicType = typeof body.styleProposalMusicType === 'string' ? body.styleProposalMusicType.trim() : ''
+  const styleSignatureForm = typeof body.styleSignatureForm === 'string' ? body.styleSignatureForm.trim() : ''
+  const styleGenerationRequest = typeof body.styleGenerationRequest === 'string' ? body.styleGenerationRequest.trim() : ''
+  const styleLyricsRequest = typeof body.styleLyricsRequest === 'string' ? body.styleLyricsRequest.trim() : ''
   const languageCode = typeof body.languageCode === 'string' ? body.languageCode.trim() : ''
   const languageLabel = typeof body.languageLabel === 'string' ? body.languageLabel.trim() : ''
   const vocal = typeof body.vocal === 'string' ? body.vocal.trim() : ''
@@ -1905,6 +1912,13 @@ function validateGenerateInput(body) {
     occasion,
     style: safeStyle,
     styleLabel: safeStyleLabel,
+    styleContinent,
+    styleRegion,
+    styleWeddingMusicType,
+    styleProposalMusicType,
+    styleSignatureForm,
+    styleGenerationRequest,
+    styleLyricsRequest,
     languageCode: safeLanguageCode,
     languageLabel: safeLanguageLabel,
     vocal: safeVocal,
@@ -1973,9 +1987,30 @@ function buildStyleTags(stylePrompt) {
     .join(' ')
 }
 
-async function generateLyrics(jobId, { groom, bride, occasion, style, styleLabel, languageLabel, vocalLabel, loveStory, meetingStory, vowKeywords }) {
+async function generateLyrics(jobId, {
+  groom,
+  bride,
+  occasion,
+  style,
+  styleLabel,
+  styleContinent,
+  styleRegion,
+  styleWeddingMusicType,
+  styleProposalMusicType,
+  styleSignatureForm,
+  styleGenerationRequest,
+  styleLyricsRequest,
+  languageLabel,
+  vocalLabel,
+  loveStory,
+  meetingStory,
+  vowKeywords,
+}) {
   const isProposal = occasion === 'proposal'
   const sceneLabel = isProposal ? '求婚' : '婚礼'
+  const sceneMusicType = isProposal
+    ? styleProposalMusicType || styleWeddingMusicType
+    : styleWeddingMusicType || styleProposalMusicType
   const prompt = [
     isProposal ? '你是顶级求婚词作人和音乐制作统筹。' : '你是顶级婚礼词作人和音乐制作统筹。',
     `请为一对恋人创作一首${sceneLabel}歌曲歌词：男主角 ${groom}，女主角 ${bride}。`,
@@ -1983,6 +2018,14 @@ async function generateLyrics(jobId, { groom, bride, occasion, style, styleLabel
     isProposal
       ? `曲风为 ${styleLabel || style}，歌唱声音为 ${vocalLabel}，整体要适合求婚现场播放，情绪层层推进，先告白、再承诺、最后落到“想和你结婚”。`
       : `曲风为 ${styleLabel || style}，歌唱声音为 ${vocalLabel}，整体要适合婚礼现场播放，浪漫、真诚、易于演唱。`,
+    styleContinent ? `洲别参考：${styleContinent}` : '',
+    styleRegion ? `国家 / 地区参考：${styleRegion}` : '',
+    styleWeddingMusicType ? `婚礼音乐类型参考：${styleWeddingMusicType}` : '',
+    styleProposalMusicType ? `求婚歌曲类型参考：${styleProposalMusicType}` : '',
+    sceneMusicType ? `本次主导音乐类型请明确体现：${sceneMusicType}` : '',
+    styleSignatureForm ? `代表性曲目 / 形式参考：${styleSignatureForm}` : '',
+    styleGenerationRequest ? `生成歌曲明确要求：${styleGenerationRequest}` : '',
+    styleLyricsRequest ? `歌词明确要求：${styleLyricsRequest}` : '',
     loveStory
       ? `爱情故事参考：${loveStory}`
       : isProposal
@@ -2002,6 +2045,7 @@ async function generateLyrics(jobId, { groom, bride, occasion, style, styleLabel
     'title：歌曲标题。',
     'lyrics：完整歌词，按 [Verse] [Chorus] [Bridge] 分段。',
     `stylePrompt：给 SUNO 的英文风格标签，简短、可直接塞进 tags，需包含 ${isProposal ? 'proposal' : 'wedding'}、love、romantic、声线提示以及曲风关键词。`,
+    'stylePrompt 不能只写 generic pop / world music，必须体现明确地区文化、代表乐器、节奏或仪式音乐特征。',
   ].join('\n')
 
   const requestPayload = {
