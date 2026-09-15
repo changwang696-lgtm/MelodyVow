@@ -255,6 +255,30 @@ type PublicSiteConfig = {
   backgroundTheme: BackgroundThemeId
 }
 
+type PublicMessageBoardItem = {
+  id: string
+  name: string
+  message: string
+  adminReply: string
+  createdAt: string
+  repliedAt?: string
+  status: string
+}
+
+type AdminContactMessage = {
+  id: string
+  name: string
+  email: string
+  message: string
+  status: string
+  adminReply?: string
+  adminReplyBy?: string
+  publicVisible?: boolean
+  createdAt: string
+  updatedAt: string
+  repliedAt?: string
+}
+
 type PlanItem = {
   id: string
   name: string
@@ -2931,11 +2955,192 @@ function HomeSocialLinksSection({ locale }: { locale: Locale }) {
   )
 }
 
+function HomeMessageBoardSection({
+  locale,
+  name,
+  email,
+  message,
+  recentReplies,
+  loading,
+  submitting,
+  onNameChange,
+  onEmailChange,
+  onMessageChange,
+  onSubmit,
+}: {
+  locale: Locale
+  name: string
+  email: string
+  message: string
+  recentReplies: PublicMessageBoardItem[]
+  loading: boolean
+  submitting: boolean
+  onNameChange: (value: string) => void
+  onEmailChange: (value: string) => void
+  onMessageChange: (value: string) => void
+  onSubmit: () => void
+}) {
+  return (
+    <section className="home-trust-section" aria-label={copy(locale, { zh: '留言与支持', en: 'Messages and support' })}>
+      <div className="glass-card home-message-board">
+        <div className="home-trust-head">
+          <p className="mini-eyebrow">{copy(locale, { zh: 'SUPPORT', en: 'SUPPORT' })}</p>
+          <h3>{copy(locale, { zh: '留言板', en: 'Message Board' })}</h3>
+          <p>
+            {copy(locale, {
+              zh: '如需人工协助、订单核对或合作沟通，可以在这里留言。后台会看到并回复。',
+              en: 'Leave a note here for manual support, order checks, or partnership inquiries. Your message appears in the admin desk for reply.',
+            })}
+          </p>
+        </div>
+
+        <div className="home-message-form">
+          <label className="field">
+            <span>{copy(locale, { zh: '称呼', en: 'Name' })}</span>
+            <input
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder={copy(locale, { zh: '可选，例如：Luna', en: 'Optional, for example: Luna' })}
+            />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder="hello@melodyvow.com"
+            />
+          </label>
+          <label className="field form-span-2">
+            <span>{copy(locale, { zh: '留言内容', en: 'Your Message' })}</span>
+            <textarea
+              value={message}
+              onChange={(event) => onMessageChange(event.target.value)}
+              rows={3}
+              placeholder={copy(locale, {
+                zh: '例如：我已付款但想确认订单、想咨询婚礼歌曲交付时间、或想合作。',
+                en: 'For example: I paid and want to confirm the order, ask about delivery timing, or discuss collaboration.',
+              })}
+            />
+          </label>
+          <button type="button" className="primary-button compact home-message-submit" disabled={submitting} onClick={onSubmit}>
+            {submitting
+              ? copy(locale, { zh: '提交中...', en: 'Sending...' })
+              : copy(locale, { zh: '提交留言', en: 'Send Message' })}
+          </button>
+        </div>
+
+        <div className="home-message-replies">
+          <div className="home-message-replies-head">
+            <strong>{copy(locale, { zh: '最近回复', en: 'Recent Replies' })}</strong>
+            <span>{loading ? copy(locale, { zh: '加载中', en: 'Loading' }) : `${recentReplies.length}`}</span>
+          </div>
+          {recentReplies.length ? recentReplies.slice(0, 3).map((item) => (
+            <article key={item.id} className="home-message-reply-item">
+              <p className="home-message-reply-meta">
+                <strong>{item.name || (locale === 'zh' ? '访客' : 'Guest')}</strong>
+                <span>{item.repliedAt ? new Date(item.repliedAt).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US') : '-'}</span>
+              </p>
+              <p className="home-message-reply-question">{item.message}</p>
+              <p className="home-message-reply-answer">{item.adminReply}</p>
+            </article>
+          )) : (
+            <p className="empty-state compact">
+              {copy(locale, {
+                zh: '目前还没有公开回复，新的留言提交后可在后台处理并选择展示。',
+                en: 'No public replies yet. New messages can be handled in admin and optionally shown here.',
+              })}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function HomeTrustFooterSection({
+  locale,
+  health,
+}: {
+  locale: Locale
+  health: null | {
+    ok?: boolean
+    databaseEnabled?: boolean
+    callbackEnabled?: boolean
+    stripeConfigured?: boolean
+  }
+}) {
+  const releaseLabel = 'Release 2026.09'
+  const serviceState = health?.ok
+    ? copy(locale, { zh: '站点在线', en: 'Site Online' })
+    : copy(locale, { zh: '持续监控中', en: 'Under Monitoring' })
+  const deliveryState = health?.callbackEnabled
+    ? copy(locale, { zh: '自动回调交付', en: 'Auto Callback Delivery' })
+    : copy(locale, { zh: '人工复核兜底', en: 'Manual Review Backup' })
+  const persistenceState = health?.databaseEnabled
+    ? copy(locale, { zh: '订单与留言持久化', en: 'Persistent Orders & Messages' })
+    : copy(locale, { zh: '本地持久化模式', en: 'Local Persistence Mode' })
+  const paymentState = health?.stripeConfigured
+    ? copy(locale, { zh: '在线支付可用', en: 'Online Payments Ready' })
+    : copy(locale, { zh: '支付通道已接入', en: 'Payment Channels Connected' })
+
+  return (
+    <section className="home-trust-section" aria-label={copy(locale, { zh: '站点可信信息', en: 'Site trust information' })}>
+      <div className="glass-card home-trust-card">
+        <div className="home-trust-head">
+          <p className="mini-eyebrow">{copy(locale, { zh: 'TRUST', en: 'TRUST' })}</p>
+          <h3>{copy(locale, { zh: '正规站点信息', en: 'Trust Signals' })}</h3>
+          <p>
+            {copy(locale, {
+              zh: '我们提供数字化婚礼歌曲服务、政策页面、订单查询、会员中心与后台工单处理，让交易与交付路径更清晰。',
+              en: 'MelodyVow includes policy pages, order lookup, member records, and admin follow-up so the purchase and delivery flow feels clear and dependable.',
+            })}
+          </p>
+        </div>
+
+        <div className="home-trust-metrics">
+          {[serviceState, deliveryState, persistenceState, paymentState].map((item) => (
+            <span key={item} className="soft-pill home-trust-pill">{item}</span>
+          ))}
+        </div>
+
+        <div className="home-trust-legal">
+          <NavLink to={withLocale(locale, '/legal')} className="home-trust-link">Policies</NavLink>
+          <NavLink to={withLocale(locale, '/find-my-order')} className="home-trust-link">
+            {copy(locale, { zh: '订单查询', en: 'Order Lookup' })}
+          </NavLink>
+          <NavLink to={withLocale(locale, '/auth')} className="home-trust-link">
+            {copy(locale, { zh: '会员中心', en: 'Member Access' })}
+          </NavLink>
+        </div>
+
+        <div className="home-trust-version">
+          <span>MelodyVow</span>
+          <span>{releaseLabel}</span>
+          <span>{copy(locale, { zh: 'Digital Delivery Only', en: 'Digital Delivery Only' })}</span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer, onLogout, authSession, onAddPendingMemberSongs }: HomePageProps) {
   const navigate = useNavigate()
   const isMobileViewport = useIsMobileViewport()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showMobileStoryPrompt, setShowMobileStoryPrompt] = useState(false)
+  const [boardName, setBoardName] = useState('')
+  const [boardEmail, setBoardEmail] = useState('')
+  const [boardMessage, setBoardMessage] = useState('')
+  const [boardSubmitting, setBoardSubmitting] = useState(false)
+  const [boardLoading, setBoardLoading] = useState(true)
+  const [boardReplies, setBoardReplies] = useState<PublicMessageBoardItem[]>([])
+  const [siteHealth, setSiteHealth] = useState<null | {
+    ok?: boolean
+    databaseEnabled?: boolean
+    callbackEnabled?: boolean
+    stripeConfigured?: boolean
+  }>(null)
   const memberEmail = authSession?.email?.trim() || ''
   const memberToken = authSession?.authToken?.trim() || ''
   const fallbackLanguageCode = locale === 'zh' ? 'zh' : 'en'
@@ -2944,6 +3149,50 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   const fallbackVocal = vocalOptions.find((item) => item.code === 'female') ?? vocalOptions[0]
 
   useEffect(() => launchHomepageFireworks(), [])
+
+  useEffect(() => {
+    let disposed = false
+
+    async function loadBoardData() {
+      setBoardLoading(true)
+
+      try {
+        const [messageResponse, healthResponse] = await Promise.all([
+          fetch(apiUrl('/api/messages')),
+          fetch(apiUrl('/api/health')),
+        ])
+
+        const messageResult = await readJsonSafe(messageResponse) as { items?: PublicMessageBoardItem[]; message?: string }
+        const healthResult = await readJsonSafe(healthResponse) as {
+          ok?: boolean
+          databaseEnabled?: boolean
+          callbackEnabled?: boolean
+          stripeConfigured?: boolean
+        }
+
+        if (disposed) {
+          return
+        }
+
+        setBoardReplies(Array.isArray(messageResult.items) ? messageResult.items : [])
+        setSiteHealth(healthResult || null)
+      } catch {
+        if (!disposed) {
+          setBoardReplies([])
+        }
+      } finally {
+        if (!disposed) {
+          setBoardLoading(false)
+        }
+      }
+    }
+
+    void loadBoardData()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   const collectVisibleDraftValues = useCallback(() => {
     if (typeof document === 'undefined') {
@@ -3030,6 +3279,60 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   function handleCreateSongEntry() {
     syncVisibleDraftIntoState()
     setShowMobileStoryPrompt(true)
+  }
+
+  async function handleSubmitBoardMessage() {
+    const nextEmail = boardEmail.trim()
+    const nextMessage = boardMessage.trim()
+
+    if (!nextEmail) {
+      onOpenModal(copy(locale, {
+        zh: '请先填写一个可联系的邮箱，这样我们才能在后台定位并回复你的留言。',
+        en: 'Please provide a contact email so the admin team can identify and reply to your note.',
+      }))
+      return
+    }
+
+    if (!nextMessage) {
+      onOpenModal(copy(locale, {
+        zh: '请先写下你的留言内容。',
+        en: 'Please enter your message first.',
+      }))
+      return
+    }
+
+    setBoardSubmitting(true)
+    try {
+      const response = await fetch(apiUrl('/api/messages'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: boardName.trim(),
+          email: nextEmail,
+          message: nextMessage,
+        }),
+      })
+
+      const result = await readJsonSafe(response) as { message?: string }
+
+      if (!response.ok) {
+        throw new Error(result.message || copy(locale, { zh: '留言提交失败。', en: 'Failed to send your message.' }))
+      }
+
+      setBoardName('')
+      setBoardEmail('')
+      setBoardMessage('')
+      onOpenModal(copy(locale, {
+        zh: '留言已提交。后台现在可以看到这条信息，并在处理后给出回复。',
+        en: 'Your message has been submitted. The admin team can now review it and reply from the dashboard.',
+      }))
+    } catch (error) {
+      onOpenModal(error instanceof Error ? error.message : copy(locale, { zh: '留言提交失败。', en: 'Failed to send your message.' }))
+    } finally {
+      setBoardSubmitting(false)
+    }
   }
 
   async function handleGenerateSong() {
@@ -3578,6 +3881,20 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           en: 'Support & Orders',
         })}
       />
+      <HomeMessageBoardSection
+        locale={locale}
+        name={boardName}
+        email={boardEmail}
+        message={boardMessage}
+        recentReplies={boardReplies}
+        loading={boardLoading}
+        submitting={boardSubmitting}
+        onNameChange={setBoardName}
+        onEmailChange={setBoardEmail}
+        onMessageChange={setBoardMessage}
+        onSubmit={() => void handleSubmitBoardMessage()}
+      />
+      <HomeTrustFooterSection locale={locale} health={siteHealth} />
       <HomeSocialLinksSection locale={locale} />
     </SiteLayout>
   )
@@ -5006,7 +5323,14 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   const [authError, setAuthError] = useState('')
   const [captchaInput, setCaptchaInput] = useState('')
   const [captchaChallenge, setCaptchaChallenge] = useState(createCaptchaChallenge)
+  const [acceptedAccountPolicy, setAcceptedAccountPolicy] = useState(false)
+  const [acceptedTransactionPolicy, setAcceptedTransactionPolicy] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const signupPolicyComplete = acceptedAccountPolicy && acceptedTransactionPolicy
+
+  function getPolicyHref(path: string) {
+    return `#${withLocale(locale, path)}`
+  }
 
   if (authSession?.email) {
     return <Navigate to={withLocale(locale, '/account')} replace />
@@ -5042,6 +5366,14 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
     if (tab === 'signup') {
       if (!partnerName.trim()) {
         setAuthError(copy(locale, { zh: '注册时请填写伴侣姓名。', en: 'Please enter your partner name for sign up.' }))
+        return
+      }
+
+      if (!signupPolicyComplete) {
+        setAuthError(copy(locale, {
+          zh: '请先勾选并同意注册所需的隐私政策、服务条款及相关交易政策。',
+          en: 'Please agree to the required privacy, terms, and transaction policies before creating your account.',
+        }))
         return
       }
 
@@ -5221,6 +5553,65 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
                 />
               </label>
             </div>
+            {tab === 'signup' ? (
+              <div className="policy-consent-box">
+                <div className="policy-consent-head">
+                  <strong>{copy(locale, { zh: '注册前确认', en: 'Before You Sign Up' })}</strong>
+                  <p>
+                    {copy(locale, {
+                      zh: '为了保持社区与交易流程的正规、透明，创建账户前需完成以下政策确认。',
+                      en: 'To keep the community and checkout flow clear and compliant, please confirm the policies below before creating an account.',
+                    })}
+                  </p>
+                </div>
+                <label className="policy-consent-item">
+                  <input
+                    type="checkbox"
+                    checked={acceptedAccountPolicy}
+                    onChange={(event) => setAcceptedAccountPolicy(event.target.checked)}
+                  />
+                  <span className="policy-consent-copy">
+                    {copy(locale, { zh: '我已阅读并同意', en: 'I have read and agree to the' })}{' '}
+                    <a href={getPolicyHref('/terms-of-service')} target="_blank" rel="noreferrer">
+                      {copy(locale, { zh: '服务条款', en: 'Terms of Service' })}
+                    </a>
+                    {' '}&{' '}
+                    <a href={getPolicyHref('/privacy-policy')} target="_blank" rel="noreferrer">
+                      {copy(locale, { zh: '隐私政策', en: 'Privacy Policy' })}
+                    </a>
+                    。
+                  </span>
+                </label>
+                <label className="policy-consent-item">
+                  <input
+                    type="checkbox"
+                    checked={acceptedTransactionPolicy}
+                    onChange={(event) => setAcceptedTransactionPolicy(event.target.checked)}
+                  />
+                  <span className="policy-consent-copy">
+                    {copy(locale, { zh: '我已知悉并接受', en: 'I understand and accept the' })}{' '}
+                    <a href={getPolicyHref('/refund-policy')} target="_blank" rel="noreferrer">
+                      {copy(locale, { zh: '退款政策', en: 'Refund Policy' })}
+                    </a>
+                    {' '}/ {' '}
+                    <a href={getPolicyHref('/cancellation-policy')} target="_blank" rel="noreferrer">
+                      {copy(locale, { zh: '取消政策', en: 'Cancellation Policy' })}
+                    </a>
+                    {' '}/ {' '}
+                    <a href={getPolicyHref('/delivery-fulfillment')} target="_blank" rel="noreferrer">
+                      {copy(locale, { zh: '交付说明', en: 'Delivery & Fulfillment' })}
+                    </a>
+                    。
+                  </span>
+                </label>
+                <p className="policy-consent-tip">
+                  {copy(locale, {
+                    zh: '未完成勾选前，注册按钮会保持不可提交状态。',
+                    en: 'The sign-up button stays unavailable until both confirmations are checked.',
+                  })}
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {authError ? <p className="form-error">{authError}</p> : null}
@@ -5228,7 +5619,7 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
           <button
             type="button"
             className="primary-button wide"
-            disabled={isSubmitting}
+            disabled={isSubmitting || (tab === 'signup' && !signupPolicyComplete)}
             onClick={() => void handleAuthSubmit()}
           >
             {isSubmitting
@@ -5810,7 +6201,7 @@ function AdminDashboardPage({
 }) {
   const navigate = useNavigate()
   const activeSession = session
-  const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'config'>('overview')
+  const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'messages' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [metrics, setMetrics] = useState({
@@ -5819,6 +6210,8 @@ function AdminDashboardPage({
     totalOrders: 0,
     paidOrders: 0,
     totalRevenue: 0,
+    totalMessages: 0,
+    pendingMessages: 0,
   })
   const [songs, setSongs] = useState<AdminSong[]>([])
   const [members, setMembers] = useState<AdminMember[]>([])
@@ -5832,6 +6225,8 @@ function AdminDashboardPage({
   const [plans, setPlans] = useState<PlanItem[]>([])
   const [showcaseTracks, setShowcaseTracks] = useState<ShowcaseTrack[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodAdmin[]>([])
+  const [messages, setMessages] = useState<AdminContactMessage[]>([])
+  const [selectedMessage, setSelectedMessage] = useState<AdminContactMessage | null>(null)
   const [config, setConfig] = useState<AdminConfig>({
     deepseekProvider: '',
     sunoProvider: '',
@@ -5872,6 +6267,7 @@ function AdminDashboardPage({
           { key: 'plans', path: '/api/admin/plans', label: '套餐' },
           { key: 'payments', path: '/api/admin/payment-methods', label: '支付方式' },
           { key: 'orders', path: '/api/admin/orders', label: '订单' },
+          { key: 'messages', path: '/api/admin/messages', label: '留言' },
           { key: 'config', path: '/api/admin/config', label: '配置' },
         ] as const
 
@@ -5909,6 +6305,7 @@ function AdminDashboardPage({
         let nextPlans: PlanItem[] | null = null
         let nextPayments: PaymentMethodAdmin[] | null = null
         let nextOrders: AdminOrder[] | null = null
+        let nextMessages: AdminContactMessage[] | null = null
         let nextConfig: AdminConfig | null = null
 
         settled.forEach((result) => {
@@ -5950,6 +6347,9 @@ function AdminDashboardPage({
               break
             case 'orders':
               nextOrders = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'messages':
+              nextMessages = Array.isArray(data?.items) ? data.items : []
               break
             case 'config':
               nextConfig = data as AdminConfig
@@ -6005,6 +6405,17 @@ function AdminDashboardPage({
               return ordersData.find((item) => item.id === current.id) ?? ordersData[0] ?? null
             }
             return ordersData[0] ?? null
+          })
+        }
+
+        if (nextMessages) {
+          const messageData: AdminContactMessage[] = nextMessages
+          setMessages(messageData)
+          setSelectedMessage((current) => {
+            if (current) {
+              return messageData.find((item) => item.id === current.id) ?? messageData[0] ?? null
+            }
+            return messageData[0] ?? null
           })
         }
 
@@ -6313,6 +6724,32 @@ function AdminDashboardPage({
     }
   }
 
+  async function handleSaveMessage() {
+    if (!selectedMessage) {
+      return
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/admin/messages/${selectedMessage.id}`), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify(selectedMessage),
+      })
+      const result = (await readJsonSafe(response)) as AdminContactMessage | { message?: string }
+      if (!response.ok) {
+        throw new Error('message' in result && result.message ? result.message : '留言保存失败。')
+      }
+      const saved = result as AdminContactMessage
+      setSelectedMessage(saved)
+      setMessages((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '留言保存失败。')
+    }
+  }
+
   async function handleSaveSong() {
     if (!selectedSong) {
       return
@@ -6367,6 +6804,7 @@ function AdminDashboardPage({
     { key: 'plans', label: '套餐管理' },
     { key: 'payments', label: '支付方式' },
     { key: 'orders', label: '订单' },
+    { key: 'messages', label: '留言管理' },
     { key: 'config', label: '配置' },
   ] as const
 
@@ -6450,6 +6888,14 @@ function AdminDashboardPage({
               <article className="glass-card admin-metric-card">
                 <strong>¥{metrics.totalRevenue}</strong>
                 <span>已支付金额</span>
+              </article>
+              <article className="glass-card admin-metric-card">
+                <strong>{metrics.totalMessages}</strong>
+                <span>留言总数</span>
+              </article>
+              <article className="glass-card admin-metric-card">
+                <strong>{metrics.pendingMessages}</strong>
+                <span>待回复留言</span>
               </article>
             </section>
           ) : null}
@@ -7340,6 +7786,94 @@ function AdminDashboardPage({
                   </div>
                 ) : (
                   <p className="empty-state">请选择一条订单查看详情。</p>
+                )}
+              </aside>
+            </section>
+          ) : null}
+
+          {!loading && tab === 'messages' ? (
+            <section className="admin-detail-layout">
+              <section className="admin-table glass-card">
+                <div className="admin-table-head">
+                  <strong>留言列表</strong>
+                  <span>{messages.length} 条</span>
+                </div>
+                <div className="admin-table-list">
+                  {messages.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`admin-table-row admin-select-row ${selectedMessage?.id === item.id ? 'is-active' : ''}`}
+                      onClick={() => setSelectedMessage(item)}
+                    >
+                      <div>
+                        <h3>{item.name || 'Guest'}</h3>
+                        <p>{item.email || '-'}</p>
+                      </div>
+                      <div>{item.status || 'new'}</div>
+                      <div>{item.publicVisible ? '公开' : '私有'}</div>
+                      <div>{new Date(item.updatedAt || item.createdAt).toLocaleDateString('zh-CN')}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <aside className="glass-card admin-detail-card">
+                <div className="admin-table-head">
+                  <strong>留言详情</strong>
+                  <span>{selectedMessage?.id ?? '未选择'}</span>
+                </div>
+                {selectedMessage ? (
+                  <div className="admin-detail-stack">
+                    <label className="field">
+                      <span>称呼</span>
+                      <input value={selectedMessage.name || ''} readOnly />
+                    </label>
+                    <label className="field">
+                      <span>Email</span>
+                      <input value={selectedMessage.email || ''} readOnly />
+                    </label>
+                    <label className="field">
+                      <span>状态</span>
+                      <select
+                        value={selectedMessage.status || 'new'}
+                        onChange={(event) => setSelectedMessage((current) => current ? { ...current, status: event.target.value } : current)}
+                      >
+                        <option value="new">new</option>
+                        <option value="replied">replied</option>
+                        <option value="archived">archived</option>
+                      </select>
+                    </label>
+                    <label className="admin-switch">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedMessage.publicVisible)}
+                        onChange={(event) => setSelectedMessage((current) => current ? { ...current, publicVisible: event.target.checked } : current)}
+                      />
+                      <span>在首页公开展示回复</span>
+                    </label>
+                    <label className="field form-span-2">
+                      <span>用户留言</span>
+                      <textarea value={selectedMessage.message || ''} rows={4} readOnly />
+                    </label>
+                    <label className="field form-span-2">
+                      <span>后台回复</span>
+                      <textarea
+                        value={selectedMessage.adminReply || ''}
+                        onChange={(event) => setSelectedMessage((current) => current ? { ...current, adminReply: event.target.value } : current)}
+                        rows={5}
+                        placeholder="在这里写回复，保存后可选择是否公开展示到首页。"
+                      />
+                    </label>
+                    <p><strong>提交时间：</strong>{selectedMessage.createdAt ? new Date(selectedMessage.createdAt).toLocaleString('zh-CN') : '-'}</p>
+                    <p><strong>最后更新：</strong>{selectedMessage.updatedAt ? new Date(selectedMessage.updatedAt).toLocaleString('zh-CN') : '-'}</p>
+                    <p><strong>回复人：</strong>{selectedMessage.adminReplyBy || '未回复'}</p>
+                    <button type="button" className="primary-button" onClick={() => void handleSaveMessage()}>
+                      保存留言回复
+                    </button>
+                  </div>
+                ) : (
+                  <p className="empty-state">请选择一条留言查看详情。</p>
                 )}
               </aside>
             </section>
