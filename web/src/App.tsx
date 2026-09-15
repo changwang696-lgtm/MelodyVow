@@ -1099,6 +1099,54 @@ type StyleMetaField =
   | 'coreFeature'
   | 'signatureForm'
 
+const STYLE_META_EN_OVERRIDES: Record<string, string> = {
+  '—': '-',
+  '中东': 'Middle East',
+  '东亚': 'East Asia',
+  '东南亚': 'Southeast Asia',
+  '南亚': 'South Asia',
+  '欧洲': 'Europe',
+  '北美洲': 'North America',
+  '非洲': 'Africa',
+  '大洋洲': 'Oceania',
+  '跨区域': 'Cross-region',
+  '沙特阿拉伯': 'Saudi Arabia',
+  '巴勒斯坦 / 黎凡特': 'Palestine / Levant',
+  '伊拉克 / 叙利亚（犹太-阿拉伯社群）': 'Iraq / Syria (Jewish-Arabic communities)',
+  '海湾国家（科威特 / 巴林 / 卡塔尔）': 'Gulf States (Kuwait / Bahrain / Qatar)',
+  '中东·库尔德': 'Middle East · Kurdish',
+  '库尔德地区（伊拉克 / 土耳其 / 叙利亚 / 伊朗）': 'Kurdish regions (Iraq / Turkey / Syria / Iran)',
+  '库尔德社群': 'Kurdish community',
+  '爱情诗吟唱': 'Love-poetry chant',
+  '传统爱情诗': 'Traditional love poetry',
+  '阿拉伯语情歌': 'Arabic love song',
+  '海湾婚礼歌、女性鼓乐队': 'Gulf wedding songs, women’s drum ensemble',
+  '女性鼓乐 band 演奏 Hadar 和 Khammāri 曲目': 'Women’s drum ensemble performing Hadar and Khammari repertoire',
+  '犹太-阿拉伯婚礼歌': 'Jewish-Arabic wedding song',
+  'Govend / Halparke 线舞、zurna + davul 婚礼乐': 'Govend / Halparke line-dance wedding music with zurna and davul',
+  '库尔德情歌': 'Kurdish love song',
+  '亲友连手排成长队起舞，zurna 高亢旋律与 davul 大鼓强节奏推进，带有高原史诗感': 'Guests join hands in long dance lines as zurna leads over driving davul drums with a highland-epic feel',
+  '适合婚礼进场、长队圆舞、集体庆典与高能婚礼现场': 'Great for entrances, line dances, communal celebrations, and high-energy wedding moments',
+}
+
+function getLocalizedStyleMetaValue(locale: Locale, value?: string) {
+  const text = value?.replace(/\s+/g, ' ').trim() || ''
+  if (!text || locale === 'zh') {
+    return text
+  }
+
+  const override = STYLE_META_EN_OVERRIDES[text]
+  if (override) {
+    return override
+  }
+
+  if (/\p{Script=Han}/u.test(text)) {
+    return ''
+  }
+
+  return text
+}
+
 function getStyleMetaLabel(locale: Locale, field: StyleMetaField, compact = false) {
   const labels = {
     area: compact
@@ -4482,12 +4530,28 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
             { field: 'coreFeature', value: card.coreFeature },
             { field: 'signatureForm', value: card.signatureForm },
           ]
-          const metaRows = baseMetaRows.filter((item): item is { field: StyleMetaField, value: string } => Boolean(item.value && item.value.trim())).map((item) => ({
-            ...item,
-            label: getStyleMetaLabel(locale, item.field, true),
-            fullLabel: getStyleMetaLabel(locale, item.field),
-            previewValue: getStyleMetaPreview(item.value, locale, item.field),
-          }))
+          const metaRows = baseMetaRows
+            .map((item) => {
+              const localizedValue = getLocalizedStyleMetaValue(locale, item.value)
+              if (!localizedValue) {
+                return null
+              }
+
+              return {
+                field: item.field,
+                value: localizedValue,
+                label: getStyleMetaLabel(locale, item.field, true),
+                fullLabel: getStyleMetaLabel(locale, item.field),
+                previewValue: getStyleMetaPreview(localizedValue, locale, item.field),
+              }
+            })
+            .filter((item): item is {
+              field: StyleMetaField
+              value: string
+              label: string
+              fullLabel: string
+              previewValue: string
+            } => Boolean(item))
 
           return (
             <article
