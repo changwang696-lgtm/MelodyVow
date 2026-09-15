@@ -1447,7 +1447,8 @@
   }
 
   .site-shell-home .home-app-field input,
-  .site-shell-home .home-app-field select {
+  .site-shell-home .home-app-field select,
+  .site-shell-home .home-app-field .home-app-field-trigger {
     display: block;
     width: 100%;
     min-width: 0;
@@ -1470,6 +1471,17 @@
   .site-shell-home .home-app-field select {
     appearance: none;
     padding-right: 20px;
+  }
+
+  .site-shell-home .home-app-field .home-app-field-trigger {
+    padding-right: 24px;
+    font-family: var(--font-ui);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .site-shell-home .home-app-field .home-app-field-trigger.is-placeholder {
+    color: rgba(20, 12, 24, 0.58);
   }
 
   .site-shell-home .home-app-field input::placeholder {
@@ -1509,35 +1521,63 @@
   .site-shell-home .home-app-voice-row {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
+    gap: 8px;
     width: 100%;
     min-width: 0;
-    padding: 2px 2px 0;
+    padding: 4px 2px 0;
     box-sizing: border-box;
   }
 
   .site-shell-home .home-app-voice-chip {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     width: 100%;
     min-width: 0;
-    min-height: 21px;
-    padding: 0 4px;
+    min-height: 31px;
+    padding: 0 11px;
     border-radius: 999px;
-    border: 0;
+    border: 1px solid rgba(255, 255, 255, 0.38);
     font-family: var(--font-ui);
-    font-size: 0.58rem;
+    font-size: 0.66rem;
     font-weight: 900;
     line-height: 1.05;
     text-align: center;
     white-space: nowrap;
     box-sizing: border-box;
+    cursor: pointer;
     color: rgba(20, 12, 24, 0.86);
     background: linear-gradient(90deg, rgba(255, 233, 238, 0.96), rgba(255, 207, 220, 0.94));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.56),
       0 8px 16px rgba(0, 0, 0, 0.05);
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease,
+      filter 160ms ease;
+  }
+
+  .site-shell-home .home-app-voice-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .site-shell-home .home-app-voice-chip-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 999px;
+    flex: 0 0 15px;
+    font-size: 0.6rem;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.98);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
 
   .site-shell-home .home-app-voice-chip:nth-child(2) {
@@ -1554,10 +1594,57 @@
 
   .site-shell-home .home-app-voice-chip.is-active {
     color: rgba(20, 12, 24, 0.96);
-    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.82);
+    transform: translateY(-2px) scale(1.01);
+    filter: saturate(1.08);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.62),
-      0 10px 18px rgba(0, 0, 0, 0.08);
+      0 0 0 2px rgba(255, 255, 255, 0.38),
+      0 16px 30px rgba(247, 59, 136, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  }
+
+  .site-shell-home .home-app-voice-chip.is-active .home-app-voice-chip-check {
+    background: linear-gradient(135deg, rgba(255, 82, 147, 0.98), rgba(255, 142, 196, 0.98));
+    box-shadow:
+      0 6px 14px rgba(247, 59, 136, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  }
+
+  .site-shell-home .home-app-voice-chip:hover,
+  .site-shell-home .home-app-voice-chip:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.62);
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 0.24),
+      0 12px 22px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.68);
+    outline: none;
+  }
+
+  .site-shell-home .home-app-voice-status {
+    margin: 8px 2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 26px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    font-family: var(--font-ui);
+    font-size: 0.64rem;
+    font-weight: 800;
+    color: rgba(34, 18, 30, 0.76);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.56),
+      0 10px 18px rgba(0, 0, 0, 0.04);
+  }
+
+  .site-shell-home .home-app-voice-status strong {
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: rgba(136, 21, 74, 0.96);
+    background: rgba(255, 255, 255, 0.64);
   }
 
   .site-shell-home .home-app-shortcuts {
@@ -5782,7 +5869,8 @@
   }
 
   .home-app-field input,
-  .home-app-field select {
+  .home-app-field select,
+  .home-app-field .home-app-field-trigger {
     width: 100%;
     height: 34px;
     min-height: 34px;
@@ -5822,6 +5910,17 @@
   .home-app-field select {
     appearance: none;
     padding-right: 20px;
+  }
+
+  .home-app-field .home-app-field-trigger {
+    padding-right: 24px;
+    font-family: var(--font-ui);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .home-app-field .home-app-field-trigger.is-placeholder {
+    color: rgba(20, 12, 24, 0.58);
   }
 
   .home-app-field-select::after {
@@ -6018,17 +6117,22 @@
   .home-app-voice-row {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    padding: 2px 2px 0;
+    gap: 8px;
+    padding: 4px 2px 0;
   }
 
   .home-app-voice-chip {
-    min-height: 21px;
-    padding: 0 4px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 10px;
     border-radius: 999px;
-    border: 0;
+    border: 1px solid rgba(255, 255, 255, 0.38);
     font-family: var(--font-ui);
-    font-size: 0.62rem;
+    font-size: 0.66rem;
     font-weight: 900;
     line-height: 1.05;
     color: rgba(20, 12, 24, 0.86);
@@ -6036,6 +6140,31 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.56),
       0 8px 16px rgba(0, 0, 0, 0.05);
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      border-color 160ms ease,
+      filter 160ms ease;
+  }
+
+  .home-app-voice-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .home-app-voice-chip-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 999px;
+    flex: 0 0 15px;
+    font-size: 0.6rem;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.98);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
 
   .home-app-voice-chip:nth-child(2) {
@@ -6052,10 +6181,56 @@
 
   .home-app-voice-chip.is-active {
     color: rgba(20, 12, 24, 0.96);
-    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.82);
+    transform: translateY(-2px) scale(1.01);
+    filter: saturate(1.08);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.62),
-      0 10px 18px rgba(0, 0, 0, 0.08);
+      0 0 0 2px rgba(255, 255, 255, 0.38),
+      0 16px 30px rgba(247, 59, 136, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  }
+
+  .home-app-voice-chip.is-active .home-app-voice-chip-check {
+    background: linear-gradient(135deg, rgba(255, 82, 147, 0.98), rgba(255, 142, 196, 0.98));
+    box-shadow:
+      0 6px 14px rgba(247, 59, 136, 0.24),
+      inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  }
+
+  .home-app-voice-chip:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.62);
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 0.24),
+      0 12px 22px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.68);
+    outline: none;
+  }
+
+  .home-app-voice-status {
+    margin: 8px 2px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: rgba(34, 18, 30, 0.76);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.18));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.56),
+      0 10px 18px rgba(0, 0, 0, 0.04);
+  }
+
+  .home-app-voice-status strong {
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: rgba(136, 21, 74, 0.96);
+    background: rgba(255, 255, 255, 0.64);
   }
 
   .home-app-hint {

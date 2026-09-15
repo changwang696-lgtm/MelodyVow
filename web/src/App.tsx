@@ -1042,6 +1042,22 @@ function getVocalLabel(locale: Locale, code: string) {
   return locale === 'zh' ? vocal.zhLabel : vocal.enLabel
 }
 
+function getHomeVoiceChipLabel(code: string) {
+  if (code === 'female') {
+    return 'Female'
+  }
+
+  if (code === 'duet') {
+    return 'Male & Female'
+  }
+
+  if (code === 'male') {
+    return 'Male'
+  }
+
+  return 'Child'
+}
+
 function getOccasionLabel(locale: Locale, occasion: Occasion) {
   return copy(locale, {
     zh: occasion === 'proposal' ? '求婚' : '婚礼',
@@ -2905,17 +2921,14 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                   </select>
                 </label>
                 <label className="home-app-field home-app-field-select">
-                  <select
-                    value={draft.style}
-                    onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
+                  <button
+                    type="button"
+                    className={`home-app-field-trigger ${draft.style ? '' : 'is-placeholder'}`.trim()}
+                    onClick={() => navigate(withLocale(locale, '/styles'))}
+                    aria-label={copy(locale, { zh: '选择曲风偏好', en: 'Choose music style' })}
                   >
-                    <option value="">Music Style</option>
-                    {weddingStyleOptions.map((style) => (
-                      <option key={style.id} value={style.id}>
-                        {locale === 'zh' ? style.zhLabel : style.enLabel}
-                      </option>
-                    ))}
-                  </select>
+                    {draft.style ? getStyleLabel(locale, draft.style) : 'Music Style'}
+                  </button>
                 </label>
               </div>
 
@@ -2930,26 +2943,26 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
 
               <div className="home-app-voice-row" role="group" aria-label={copy(locale, { zh: '歌唱声音', en: 'Singing voice' })}>
                 {vocalOptions.map((vocal) => {
-                  const label = vocal.code === 'female'
-                    ? 'Female'
-                    : vocal.code === 'duet'
-                      ? 'Male & Female'
-                      : vocal.code === 'male'
-                        ? 'Male'
-                        : 'Child'
+                  const label = getHomeVoiceChipLabel(vocal.code)
                   const active = draft.vocal === vocal.code
                   return (
                     <button
                       key={vocal.code}
                       type="button"
                       className={`home-app-voice-chip ${active ? 'is-active' : ''}`}
+                      aria-pressed={active}
                       onClick={() => setDraft((current) => ({ ...current, vocal: vocal.code, vocalLabel: getVocalLabel(locale, vocal.code) }))}
                     >
-                      {label}
+                      <span className="home-app-voice-chip-label">{label}</span>
+                      <span className="home-app-voice-chip-check" aria-hidden="true">{active ? '✓' : ''}</span>
                     </button>
                   )
                 })}
               </div>
+              <p className="home-app-voice-status">
+                {copy(locale, { zh: '当前已选声音', en: 'Selected Voice' })}
+                <strong>{getHomeVoiceChipLabel(draft.vocal || 'female')}</strong>
+              </p>
 
             </div>
 
@@ -3051,19 +3064,16 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
 
                 <label className="field">
                   <span>{copy(locale, { zh: '曲风偏好', en: 'Music Style' })}</span>
-                  <select
-                    value={draft.style}
-                    onChange={(event) => setDraft((current) => ({ ...current, style: event.target.value }))}
+                  <button
+                    type="button"
+                    className={`home-app-field-trigger ${draft.style ? '' : 'is-placeholder'}`.trim()}
+                    onClick={() => navigate(withLocale(locale, '/styles'))}
+                    aria-label={copy(locale, { zh: '选择曲风偏好', en: 'Choose music style' })}
                   >
-                    <option value="">
-                      {copy(locale, { zh: '请选择曲风偏好', en: 'Please select a style' })}
-                    </option>
-                    {weddingStyleOptions.map((style) => (
-                      <option key={style.id} value={style.id}>
-                        {locale === 'zh' ? style.zhLabel : style.enLabel}
-                      </option>
-                    ))}
-                  </select>
+                    {draft.style
+                      ? getStyleLabel(locale, draft.style)
+                      : copy(locale, { zh: '请选择曲风偏好', en: 'Please select a style' })}
+                  </button>
                 </label>
 
                 <label className="field form-span-2">
