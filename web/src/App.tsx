@@ -484,6 +484,7 @@ type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
 }
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
+const SONG_DRAFT_SESSION_KEY = 'melodyvow-song-draft'
 const SHOWCASE_SESSION_KEY = 'melodyvow-showcase-context'
 const SHOWCASE_GENERATING_SESSION_KEY = 'melodyvow-showcase-generating-context'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
@@ -532,6 +533,20 @@ const HOME_FIREWORK_GLOW_COLORS = ['#ffffff', '#fff8e7', '#ffeec4', '#f6d98b']
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const DEBUG_SERVER_URL = 'http://127.0.0.1:7777/event'
 const DEBUG_SESSION_ID = 'audio-stops-early'
+
+const EMPTY_SONG_DRAFT: SongDraft = {
+  groom: '',
+  bride: '',
+  occasion: 'wedding',
+  languageCode: '',
+  languageLabel: '',
+  style: '',
+  vocal: '',
+  vocalLabel: '',
+  loveStory: '',
+  meetingStory: '',
+  vowKeywords: '',
+}
 
 function apiUrl(path: string) {
   return API_BASE_URL ? `${API_BASE_URL}${path}` : path
@@ -1132,6 +1147,59 @@ function loadSongHistory() {
   }
 }
 
+function normalizeSongDraft(value: unknown): SongDraft {
+  if (!value || typeof value !== 'object') {
+    return { ...EMPTY_SONG_DRAFT }
+  }
+
+  const raw = value as Partial<SongDraft>
+
+  return {
+    groom: typeof raw.groom === 'string' ? raw.groom : '',
+    bride: typeof raw.bride === 'string' ? raw.bride : '',
+    occasion: raw.occasion === 'proposal' ? 'proposal' : 'wedding',
+    languageCode: typeof raw.languageCode === 'string' ? raw.languageCode : '',
+    languageLabel: typeof raw.languageLabel === 'string' ? raw.languageLabel : '',
+    style: typeof raw.style === 'string' ? raw.style : '',
+    vocal: typeof raw.vocal === 'string' ? raw.vocal : '',
+    vocalLabel: typeof raw.vocalLabel === 'string' ? raw.vocalLabel : '',
+    loveStory: typeof raw.loveStory === 'string' ? raw.loveStory : '',
+    meetingStory: typeof raw.meetingStory === 'string' ? raw.meetingStory : '',
+    vowKeywords: typeof raw.vowKeywords === 'string' ? raw.vowKeywords : '',
+  }
+}
+
+function areSongDraftsEqual(left: SongDraft, right: SongDraft) {
+  return left.groom === right.groom
+    && left.bride === right.bride
+    && left.occasion === right.occasion
+    && left.languageCode === right.languageCode
+    && left.languageLabel === right.languageLabel
+    && left.style === right.style
+    && left.vocal === right.vocal
+    && left.vocalLabel === right.vocalLabel
+    && left.loveStory === right.loveStory
+    && left.meetingStory === right.meetingStory
+    && left.vowKeywords === right.vowKeywords
+}
+
+function loadSongDraft() {
+  if (typeof window === 'undefined') {
+    return { ...EMPTY_SONG_DRAFT }
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SONG_DRAFT_SESSION_KEY)
+    if (!raw) {
+      return { ...EMPTY_SONG_DRAFT }
+    }
+
+    return normalizeSongDraft(JSON.parse(raw))
+  } catch {
+    return { ...EMPTY_SONG_DRAFT }
+  }
+}
+
 function loadAuthSession() {
   if (typeof window === 'undefined') {
     return null as AuthSession | null
@@ -1357,19 +1425,7 @@ function ScrollManager() {
 function App() {
   const location = useLocation()
   const isMobileViewport = useIsMobileViewport()
-  const [draft, setDraft] = useState<SongDraft>({
-    groom: '',
-    bride: '',
-    occasion: 'wedding',
-    languageCode: '',
-    languageLabel: '',
-    style: '',
-    vocal: '',
-    vocalLabel: '',
-    loveStory: '',
-    meetingStory: '',
-    vowKeywords: '',
-  })
+  const [draft, setDraft] = useState<SongDraft>(() => loadSongDraft())
   const [selectedPlan, setSelectedPlan] = useState('Pro Monthly')
   const [modalMessage, setModalMessage] = useState('')
   const [songHistory, setSongHistory] = useState<HistoryItem[]>(() => loadSongHistory())
@@ -1431,6 +1487,14 @@ function App() {
 
     window.localStorage.setItem(SONG_HISTORY_KEY, JSON.stringify(songHistory))
   }, [songHistory])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.sessionStorage.setItem(SONG_DRAFT_SESSION_KEY, JSON.stringify(normalizeSongDraft(draft)))
+  }, [draft])
 
   useEffect(() => {
     if (!activeMemberToken || !activeMemberEmail) {
@@ -2721,11 +2785,96 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
 
   useEffect(() => launchHomepageFireworks(), [])
 
+  const collectVisibleDraftValues = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return {} as Partial<SongDraft>
+    }
+
+    const readFieldValue = (field: string) => {
+      const elements = Array.from(
+        document.querySelectorAll(`[data-home-draft-field="${field}"]`),
+      ) as Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+
+      const firstNonEmpty = elements
+        .map((element) => String(element.value || ''))
+        .find((value) => value.trim())
+
+      if (firstNonEmpty) {
+        return firstNonEmpty
+      }
+
+      return elements.length ? String(elements[0].value || '') : ''
+    }
+
+    const languageCode = readFieldValue('languageCode').trim()
+    const languageLabel = languageCode
+      ? songLanguages.find((item) => item.code === languageCode)?.label ?? ''
+      : ''
+
+    return {
+      groom: readFieldValue('groom'),
+      bride: readFieldValue('bride'),
+      loveStory: readFieldValue('loveStory'),
+      languageCode,
+      languageLabel,
+    } as Partial<SongDraft>
+  }, [])
+
+  const buildEffectiveDraft = useCallback(() => {
+    const visibleValues = collectVisibleDraftValues()
+    const mergedDraft = normalizeSongDraft({
+      ...draft,
+      ...Object.fromEntries(
+        Object.entries(visibleValues).filter(([, value]) => typeof value !== 'string' || value !== ''),
+      ),
+    })
+
+    if (mergedDraft.languageCode && !mergedDraft.languageLabel) {
+      mergedDraft.languageLabel = songLanguages.find((item) => item.code === mergedDraft.languageCode)?.label ?? ''
+    }
+
+    if (mergedDraft.vocal && !mergedDraft.vocalLabel) {
+      mergedDraft.vocalLabel = getVocalLabel(locale, mergedDraft.vocal)
+    }
+
+    return mergedDraft
+  }, [collectVisibleDraftValues, draft, locale])
+
+  const syncVisibleDraftIntoState = useCallback(() => {
+    const nextDraft = buildEffectiveDraft()
+    if (!areSongDraftsEqual(nextDraft, draft)) {
+      setDraft(nextDraft)
+    }
+    return nextDraft
+  }, [buildEffectiveDraft, draft, setDraft])
+
+  useEffect(() => {
+    const syncFromVisibleInputs = () => {
+      syncVisibleDraftIntoState()
+    }
+
+    syncFromVisibleInputs()
+
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.addEventListener('pageshow', syncFromVisibleInputs)
+    window.addEventListener('focus', syncFromVisibleInputs)
+    return () => {
+      window.removeEventListener('pageshow', syncFromVisibleInputs)
+      window.removeEventListener('focus', syncFromVisibleInputs)
+    }
+  }, [syncVisibleDraftIntoState])
+
   function handleCreateSongEntry() {
+    syncVisibleDraftIntoState()
     setShowMobileStoryPrompt(true)
   }
 
   async function handleGenerateSong() {
+    const effectiveDraft = syncVisibleDraftIntoState()
+
     if (!memberEmail || !memberToken) {
       const message = copy(locale, {
         zh: '请先登录会员后再生成歌曲，这样新生成的歌曲才能自动绑定到你的会员中心。',
@@ -2738,18 +2887,18 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
     }
 
     setIsSubmitting(true)
-    const groomName = draft.groom.trim() || copy(locale, { zh: '新郎', en: 'Groom' })
-    const brideName = draft.bride.trim() || copy(locale, { zh: '新娘', en: 'Bride' })
-    const languageCode = draft.languageCode.trim() || fallbackLanguage.code
-    const languageLabel = draft.languageLabel.trim() || fallbackLanguage.label
-    const style = draft.style.trim() || fallbackStyle.id
+    const groomName = effectiveDraft.groom.trim() || copy(locale, { zh: '新郎', en: 'Groom' })
+    const brideName = effectiveDraft.bride.trim() || copy(locale, { zh: '新娘', en: 'Bride' })
+    const languageCode = effectiveDraft.languageCode.trim() || fallbackLanguage.code
+    const languageLabel = effectiveDraft.languageLabel.trim() || fallbackLanguage.label
+    const style = effectiveDraft.style.trim() || fallbackStyle.id
     const selectedStyle = getStyleOption(style) ?? fallbackStyle
-    const styleLabel = draft.style.trim() ? getStyleLabel(locale, draft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
-    const styleGenerationRequest = buildStyleGenerationRequest(selectedStyle, draft.occasion)
-    const styleLyricsRequest = buildStyleLyricsRequest(selectedStyle, draft.occasion)
-    const vocal = draft.vocal.trim() || fallbackVocal.code
-    const vocalLabel = draft.vocal.trim() ? getVocalLabel(locale, draft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
-    const initialLyrics = [draft.loveStory, draft.meetingStory, draft.vowKeywords].filter(Boolean).join('\n\n').trim()
+    const styleLabel = effectiveDraft.style.trim() ? getStyleLabel(locale, effectiveDraft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
+    const styleGenerationRequest = buildStyleGenerationRequest(selectedStyle, effectiveDraft.occasion)
+    const styleLyricsRequest = buildStyleLyricsRequest(selectedStyle, effectiveDraft.occasion)
+    const vocal = effectiveDraft.vocal.trim() || fallbackVocal.code
+    const vocalLabel = effectiveDraft.vocal.trim() ? getVocalLabel(locale, effectiveDraft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
+    const initialLyrics = [effectiveDraft.loveStory, effectiveDraft.meetingStory, effectiveDraft.vowKeywords].filter(Boolean).join('\n\n').trim()
 
     const pendingPlayerKey = `pending-generate-${locale}`
     if (!isMobileViewport) {
@@ -2771,7 +2920,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           zh: '悬浮播放器已经打开，后续生成进度会持续显示在这里。',
           en: 'The floating player is open and will keep showing progress here.',
         }),
-        lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+        lyrics: effectiveDraft.loveStory || effectiveDraft.meetingStory || effectiveDraft.vowKeywords,
         error: '',
         autoPlay: false,
       })
@@ -2788,7 +2937,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           groom: groomName,
           bride: brideName,
           userEmail: memberEmail,
-          occasion: draft.occasion,
+          occasion: effectiveDraft.occasion,
           style,
           styleLabel,
           styleContinent: selectedStyle.continent || '',
@@ -2802,9 +2951,9 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           languageLabel,
           vocal,
           vocalLabel,
-          loveStory: draft.loveStory,
-          meetingStory: draft.meetingStory,
-          vowKeywords: draft.vowKeywords,
+          loveStory: effectiveDraft.loveStory,
+          meetingStory: effectiveDraft.meetingStory,
+          vowKeywords: effectiveDraft.vowKeywords,
         }),
       })
 
@@ -2874,7 +3023,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
             zh: '歌曲生成中，完成后两首版本会直接出现在这个悬浮播放器里。',
             en: 'Your song is generating. Both versions will appear in this floating player.',
           }),
-          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          lyrics: effectiveDraft.loveStory || effectiveDraft.meetingStory || effectiveDraft.vowKeywords,
           error: '',
           autoPlay: false,
         })
@@ -2898,7 +3047,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
             zh: '请求没有成功发送，请检查提示信息后再试一次。',
             en: 'The request could not be sent. Please review the message and try again.',
           }),
-          lyrics: draft.loveStory || draft.meetingStory || draft.vowKeywords,
+          lyrics: effectiveDraft.loveStory || effectiveDraft.meetingStory || effectiveDraft.vowKeywords,
           error: message,
           autoPlay: false,
         })
@@ -2945,6 +3094,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
               <div className="home-app-form">
                 <label className="home-app-field">
                   <input
+                    data-home-draft-field="groom"
                     value={draft.groom}
                     onChange={(event) => setDraft((current) => ({ ...current, groom: event.target.value }))}
                     placeholder="Groom Name"
@@ -2952,6 +3102,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 </label>
                 <label className="home-app-field">
                   <input
+                    data-home-draft-field="bride"
                     value={draft.bride}
                     onChange={(event) => setDraft((current) => ({ ...current, bride: event.target.value }))}
                     placeholder="Bride Name"
@@ -2959,6 +3110,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 </label>
                 <label className="home-app-field home-app-field-select">
                   <select
+                    data-home-draft-field="languageCode"
                     value={draft.languageCode}
                     onChange={(event) =>
                       setDraft((current) => {
@@ -3056,6 +3208,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <label className="field">
                   <span>{copy(locale, { zh: '新郎姓名', en: 'Groom Name' })}</span>
                   <input
+                    data-home-draft-field="groom"
                     value={draft.groom}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, groom: event.target.value }))
@@ -3067,6 +3220,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <label className="field">
                   <span>{copy(locale, { zh: '新娘姓名', en: 'Bride Name' })}</span>
                   <input
+                    data-home-draft-field="bride"
                     value={draft.bride}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, bride: event.target.value }))
@@ -3078,6 +3232,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <label className="field form-span-2">
                   <span>{copy(locale, { zh: '爱情故事', en: 'Love Story' })}</span>
                   <textarea
+                    data-home-draft-field="loveStory"
                     value={draft.loveStory}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, loveStory: event.target.value }))
@@ -3093,6 +3248,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                 <label className="field">
                   <span>{copy(locale, { zh: '歌曲语言', en: 'Song Language' })}</span>
                   <select
+                    data-home-draft-field="languageCode"
                     value={draft.languageCode}
                     onChange={(event) =>
                       setDraft((current) => {
@@ -3231,6 +3387,7 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
                   <label className="home-story-prompt-field">
                     <span>Love Story</span>
                     <textarea
+                      data-home-draft-field="loveStory"
                       value={draft.loveStory}
                       onChange={(event) => setDraft((current) => ({ ...current, loveStory: event.target.value }))}
                       placeholder="Add a short story to make the lyrics feel personal"
