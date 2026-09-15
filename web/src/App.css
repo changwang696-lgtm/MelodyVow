@@ -5157,6 +5157,9 @@
   .site-shell-account .site-header {
     position: sticky;
     top: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     padding: 10px 0 8px;
     gap: 10px;
     width: min(100% - 18px, 1180px);
@@ -5164,19 +5167,14 @@
 
   .site-shell-home .brand-mark,
   .site-shell-home .nav-toggle,
-  .site-shell-home .header-actions,
   .site-shell-showcase .brand-mark,
   .site-shell-showcase .nav-toggle,
-  .site-shell-showcase .header-actions,
   .site-shell-styles .brand-mark,
   .site-shell-styles .nav-toggle,
-  .site-shell-styles .header-actions,
   .site-shell-pricing .brand-mark,
   .site-shell-pricing .nav-toggle,
-  .site-shell-pricing .header-actions,
   .site-shell-account .brand-mark,
-  .site-shell-account .nav-toggle,
-  .site-shell-account .header-actions {
+  .site-shell-account .nav-toggle {
     display: none;
   }
 
@@ -5201,12 +5199,95 @@
     justify-content: center;
     align-items: center;
     width: min(100%, 318px);
-    max-width: calc(100vw - 18px);
-    margin: 0 auto;
+    max-width: calc(100vw - 72px);
+    margin: 0;
+    justify-self: stretch;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
+  }
+
+  .site-shell-home .header-actions,
+  .site-shell-showcase .header-actions,
+  .site-shell-styles .header-actions,
+  .site-shell-pricing .header-actions,
+  .site-shell-account .header-actions {
+    display: none;
+    flex-direction: row;
+    margin-left: 0;
+    justify-self: end;
+    align-items: center;
+    gap: 0;
+  }
+
+  .site-shell-home .header-actions.has-member-menu,
+  .site-shell-showcase .header-actions.has-member-menu,
+  .site-shell-styles .header-actions.has-member-menu,
+  .site-shell-pricing .header-actions.has-member-menu,
+  .site-shell-account .header-actions.has-member-menu {
+    display: flex;
+  }
+
+  .site-shell-home .header-actions .locale-switch,
+  .site-shell-showcase .header-actions .locale-switch,
+  .site-shell-styles .header-actions .locale-switch,
+  .site-shell-pricing .header-actions .locale-switch,
+  .site-shell-account .header-actions .locale-switch {
+    display: none;
+  }
+
+  .site-shell-home .member-avatar-button,
+  .site-shell-showcase .member-avatar-button,
+  .site-shell-styles .member-avatar-button,
+  .site-shell-pricing .member-avatar-button,
+  .site-shell-account .member-avatar-button {
+    width: 30px;
+    height: 30px;
+    border-width: 1px;
+    box-shadow: 0 6px 18px rgba(87, 30, 121, 0.16);
+  }
+
+  .site-shell-home .member-avatar-button.has-alert,
+  .site-shell-showcase .member-avatar-button.has-alert,
+  .site-shell-styles .member-avatar-button.has-alert,
+  .site-shell-pricing .member-avatar-button.has-alert,
+  .site-shell-account .member-avatar-button.has-alert {
+    box-shadow:
+      0 0 0 2px rgba(255, 78, 136, 0.12),
+      0 8px 20px rgba(195, 54, 120, 0.14);
+  }
+
+  .site-shell-home .member-avatar-initial,
+  .site-shell-showcase .member-avatar-initial,
+  .site-shell-styles .member-avatar-initial,
+  .site-shell-pricing .member-avatar-initial,
+  .site-shell-account .member-avatar-initial {
+    font-size: 0.82rem;
+  }
+
+  .site-shell-home .member-avatar-badge,
+  .site-shell-showcase .member-avatar-badge,
+  .site-shell-styles .member-avatar-badge,
+  .site-shell-pricing .member-avatar-badge,
+  .site-shell-account .member-avatar-badge {
+    top: -2px;
+    right: -2px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    font-size: 0.52rem;
+  }
+
+  .site-shell-home .member-menu-popover,
+  .site-shell-showcase .member-menu-popover,
+  .site-shell-styles .member-menu-popover,
+  .site-shell-pricing .member-menu-popover,
+  .site-shell-account .member-menu-popover {
+    right: 0;
+    min-width: 236px;
+    max-width: min(300px, calc(100vw - 18px));
+    padding: 8px;
   }
 
   .site-shell-home .site-nav::-webkit-scrollbar,

@@ -2775,7 +2775,7 @@ function SiteLayout({
           ))}
         </nav>
 
-        <div className="header-actions">
+        <div className={`header-actions ${currentAuthSession?.email ? 'has-member-menu' : ''}`.trim()}>
           {siteConfig.enableChineseSite ? (
             <button
               type="button"
