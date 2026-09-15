@@ -2716,6 +2716,24 @@ app.get('/api/member/session', requireMemberAuth, (req, res) => {
   })
 })
 
+app.get('/api/member/messages', requireMemberAuth, (req, res) => {
+  const email = normalizeEmail(req.member.email)
+  const items = adminData.contactMessages
+    .filter((item) => normalizeEmail(item.email) === email && String(item.adminReply || '').trim())
+    .sort((left, right) => new Date(right.repliedAt || right.updatedAt || right.createdAt || 0).getTime() - new Date(left.repliedAt || left.updatedAt || left.createdAt || 0).getTime())
+    .map((item) => ({
+      id: item.id,
+      message: item.message,
+      adminReply: item.adminReply,
+      status: item.status,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      repliedAt: item.repliedAt,
+    }))
+
+  res.json({ items })
+})
+
 app.post('/api/member/logout', requireMemberAuth, (req, res) => {
   memberSessions.delete(readMemberToken(req))
   queuePersistenceSync('member session removed')
@@ -2797,8 +2815,8 @@ app.patch('/api/admin/messages/:messageId', requireAdminAuth, (req, res) => {
     ...current,
     status: nextStatus,
     adminReply,
-    adminReplyBy: adminReply ? String(req.adminSession?.profile?.username || '').trim() : '',
-    publicVisible: normalizeBoolean(patch.publicVisible, current.publicVisible),
+    adminReplyBy: adminReply ? String(req.adminSession?.username || '').trim() : '',
+    publicVisible: false,
     repliedAt,
     updatedAt: nowIso(),
   }
