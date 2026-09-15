@@ -255,14 +255,14 @@ type PublicSiteConfig = {
   backgroundTheme: BackgroundThemeId
 }
 
-type PublicMessageBoardItem = {
+type MemberInboxMessage = {
   id: string
-  name: string
   message: string
   adminReply: string
-  createdAt: string
-  repliedAt?: string
   status: string
+  createdAt: string
+  updatedAt: string
+  repliedAt?: string
 }
 
 type AdminContactMessage = {
@@ -2614,6 +2614,8 @@ function SiteLayout({
   const isMobileViewport = useIsMobileViewport()
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
+  const [memberInboxPanelOpen, setMemberInboxPanelOpen] = useState(false)
+  const [memberInbox, setMemberInbox] = useState<MemberInboxMessage[]>([])
   const [resolvedBackgroundTheme, setResolvedBackgroundTheme] = useState<ResolvedBackgroundThemeId>(() => resolveBackgroundTheme(siteConfig.backgroundTheme))
   const memberMenuRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
@@ -2622,11 +2624,45 @@ function SiteLayout({
   const accountPath = currentAuthSession?.email ? withLocale(locale, '/account') : withLocale(locale, '/auth')
   const memberInitial = (currentAuthSession?.email?.trim()?.[0] ?? 'M').toUpperCase()
   const memberAvatarUrl = currentAuthSession?.avatarUrl?.trim()
+  const memberReplyCount = memberInbox.length
   const showHeroEyebrow = Boolean(eyebrow) && !(active !== 'home' && eyebrow === 'MelodyVow')
 
   useEffect(() => {
     setMemberMenuOpen(false)
+    setMemberInboxPanelOpen(false)
   }, [active])
+
+  useEffect(() => {
+    let disposed = false
+
+    async function loadMemberInbox() {
+      if (!currentAuthSession?.email || !currentAuthSession?.authToken) {
+        setMemberInbox([])
+        return
+      }
+
+      try {
+        const response = await fetch(apiUrl('/api/member/messages'), {
+          headers: getMemberAuthHeaders(currentAuthSession),
+        })
+        const result = await readJsonSafe(response) as { items?: MemberInboxMessage[] }
+
+        if (!disposed) {
+          setMemberInbox(Array.isArray(result.items) ? result.items : [])
+        }
+      } catch {
+        if (!disposed) {
+          setMemberInbox([])
+        }
+      }
+    }
+
+    void loadMemberInbox()
+
+    return () => {
+      disposed = true
+    }
+  }, [currentAuthSession?.email, currentAuthSession?.authToken])
 
   useEffect(() => {
     const syncResolvedTheme = () => {
@@ -2656,6 +2692,7 @@ function SiteLayout({
 
       if (memberMenuRef.current && !memberMenuRef.current.contains(target)) {
         setMemberMenuOpen(false)
+        setMemberInboxPanelOpen(false)
       }
     }
 
@@ -2764,8 +2801,16 @@ function SiteLayout({
             <div className="member-menu" ref={memberMenuRef}>
               <button
                 type="button"
-                className="member-avatar-button"
-                onClick={() => setMemberMenuOpen((value) => !value)}
+                className={`member-avatar-button ${memberReplyCount ? 'has-alert' : ''}`.trim()}
+                onClick={() => {
+                  setMemberMenuOpen((value) => {
+                    const next = !value
+                    if (!next) {
+                      setMemberInboxPanelOpen(false)
+                    }
+                    return next
+                  })
+                }}
                 aria-label={copy(locale, { zh: '打开会员菜单', en: 'Open member menu' })}
                 aria-haspopup="menu"
                 aria-expanded={memberMenuOpen}
@@ -2775,9 +2820,83 @@ function SiteLayout({
                 ) : (
                   <span className="member-avatar-initial">{memberInitial}</span>
                 )}
+                {memberReplyCount ? (
+                  <span className="member-avatar-badge">{memberReplyCount > 9 ? '9+' : memberReplyCount}</span>
+                ) : null}
               </button>
               {memberMenuOpen ? (
                 <div className="member-menu-popover" role="menu">
+                  <button
+                    type="button"
+                    className={`member-menu-item member-menu-item-inbox ${memberReplyCount ? 'is-highlighted' : ''} ${memberInboxPanelOpen ? 'is-open' : ''}`.trim()}
+                    role="menuitem"
+                    aria-expanded={memberInboxPanelOpen}
+                    onClick={() => {
+                      setMemberInboxPanelOpen((value) => !value)
+                    }}
+                  >
+                    <span className="member-menu-item-copy">
+                      <span>{copy(locale, { zh: '留言回复', en: 'Replies' })}</span>
+                      <span className="member-menu-item-subtle">
+                        {memberReplyCount
+                          ? copy(locale, {
+                              zh: `${memberReplyCount} 条新回复`,
+                              en: `${memberReplyCount} new replies`,
+                            })
+                          : copy(locale, {
+                              zh: '查看后台私密回复',
+                              en: 'Private admin replies',
+                            })}
+                      </span>
+                    </span>
+                    <span className="member-menu-item-meta">
+                      {memberReplyCount ? <span className="member-menu-item-dot" aria-hidden="true" /> : null}
+                      <span className="member-menu-item-count">{memberReplyCount > 9 ? '9+' : memberReplyCount || ''}</span>
+                    </span>
+                  </button>
+                  {memberInboxPanelOpen ? (
+                    <section className="member-inbox-panel" aria-label={copy(locale, { zh: '留言回复面板', en: 'Reply panel' })}>
+                      <div className="member-inbox-panel-head">
+                        <strong>{copy(locale, { zh: '后台回复', en: 'Admin Replies' })}</strong>
+                        <span>
+                          {memberReplyCount
+                            ? copy(locale, {
+                                zh: `共 ${memberReplyCount} 条`,
+                                en: `${memberReplyCount} total`,
+                              })
+                            : copy(locale, {
+                                zh: '暂无回复',
+                                en: 'No replies yet',
+                              })}
+                        </span>
+                      </div>
+                      {memberInbox.length ? memberInbox.slice(0, 3).map((item) => {
+                        const repliedTime = item.repliedAt
+                          ? new Date(item.repliedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')
+                          : '-'
+
+                        return (
+                          <article key={item.id} className="member-inbox-card">
+                            <p className="member-inbox-label">{copy(locale, { zh: '你的留言', en: 'Your message' })}</p>
+                            <p className="member-inbox-question">{item.message}</p>
+                            <p className="member-inbox-label">{copy(locale, { zh: '后台回复', en: 'Admin reply' })}</p>
+                            <p className="member-inbox-answer">{item.adminReply}</p>
+                            <p className="member-inbox-time">{repliedTime}</p>
+                          </article>
+                        )
+                      }) : (
+                        <div className="member-inbox-empty">
+                          <strong>{copy(locale, { zh: '还没有新回复', en: 'No replies yet' })}</strong>
+                          <p>
+                            {copy(locale, {
+                              zh: '你在首页提交留言后，后台回复会出现在这里。',
+                              en: 'Replies from the admin team will appear here after you send a message from the homepage.',
+                            })}
+                          </p>
+                        </div>
+                      )}
+                    </section>
+                  ) : null}
                   <button
                     type="button"
                     className="member-menu-item"
@@ -2960,8 +3079,6 @@ function HomeMessageBoardSection({
   name,
   email,
   message,
-  recentReplies,
-  loading,
   submitting,
   onNameChange,
   onEmailChange,
@@ -2972,8 +3089,6 @@ function HomeMessageBoardSection({
   name: string
   email: string
   message: string
-  recentReplies: PublicMessageBoardItem[]
-  loading: boolean
   submitting: boolean
   onNameChange: (value: string) => void
   onEmailChange: (value: string) => void
@@ -3029,30 +3144,12 @@ function HomeMessageBoardSection({
               : copy(locale, { zh: '提交留言', en: 'Send Message' })}
           </button>
         </div>
-
-        <div className="home-message-replies">
-          <div className="home-message-replies-head">
-            <strong>{copy(locale, { zh: '最近回复', en: 'Recent Replies' })}</strong>
-            <span>{loading ? copy(locale, { zh: '加载中', en: 'Loading' }) : `${recentReplies.length}`}</span>
-          </div>
-          {recentReplies.length ? recentReplies.slice(0, 3).map((item) => (
-            <article key={item.id} className="home-message-reply-item">
-              <p className="home-message-reply-meta">
-                <strong>{item.name || (locale === 'zh' ? '访客' : 'Guest')}</strong>
-                <span>{item.repliedAt ? new Date(item.repliedAt).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US') : '-'}</span>
-              </p>
-              <p className="home-message-reply-question">{item.message}</p>
-              <p className="home-message-reply-answer">{item.adminReply}</p>
-            </article>
-          )) : (
-            <p className="empty-state compact">
-              {copy(locale, {
-                zh: '目前还没有公开回复，新的留言提交后可在后台处理并选择展示。',
-                en: 'No public replies yet. New messages can be handled in admin and optionally shown here.',
-              })}
-            </p>
-          )}
-        </div>
+        <p className="form-hint">
+          {copy(locale, {
+            zh: '出于隐私保护，后台回复不会在首页公开展示。登录会员后，可在右上角头像菜单中的“留言回复”查看。',
+            en: 'For privacy, admin replies are not shown publicly on the homepage. After logging in, you can view them from the top-right avatar menu.',
+          })}
+        </p>
       </div>
     </section>
   )
@@ -3133,8 +3230,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
   const [boardEmail, setBoardEmail] = useState('')
   const [boardMessage, setBoardMessage] = useState('')
   const [boardSubmitting, setBoardSubmitting] = useState(false)
-  const [boardLoading, setBoardLoading] = useState(true)
-  const [boardReplies, setBoardReplies] = useState<PublicMessageBoardItem[]>([])
   const [siteHealth, setSiteHealth] = useState<null | {
     ok?: boolean
     databaseEnabled?: boolean
@@ -3154,15 +3249,8 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
     let disposed = false
 
     async function loadBoardData() {
-      setBoardLoading(true)
-
       try {
-        const [messageResponse, healthResponse] = await Promise.all([
-          fetch(apiUrl('/api/messages')),
-          fetch(apiUrl('/api/health')),
-        ])
-
-        const messageResult = await readJsonSafe(messageResponse) as { items?: PublicMessageBoardItem[]; message?: string }
+        const healthResponse = await fetch(apiUrl('/api/health'))
         const healthResult = await readJsonSafe(healthResponse) as {
           ok?: boolean
           databaseEnabled?: boolean
@@ -3174,15 +3262,10 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           return
         }
 
-        setBoardReplies(Array.isArray(messageResult.items) ? messageResult.items : [])
         setSiteHealth(healthResult || null)
       } catch {
         if (!disposed) {
-          setBoardReplies([])
-        }
-      } finally {
-        if (!disposed) {
-          setBoardLoading(false)
+          setSiteHealth(null)
         }
       }
     }
@@ -3886,8 +3969,6 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
         name={boardName}
         email={boardEmail}
         message={boardMessage}
-        recentReplies={boardReplies}
-        loading={boardLoading}
         submitting={boardSubmitting}
         onNameChange={setBoardName}
         onEmailChange={setBoardEmail}
@@ -7811,7 +7892,6 @@ function AdminDashboardPage({
                         <p>{item.email || '-'}</p>
                       </div>
                       <div>{item.status || 'new'}</div>
-                      <div>{item.publicVisible ? '公开' : '私有'}</div>
                       <div>{new Date(item.updatedAt || item.createdAt).toLocaleDateString('zh-CN')}</div>
                     </button>
                   ))}
@@ -7844,14 +7924,6 @@ function AdminDashboardPage({
                         <option value="archived">archived</option>
                       </select>
                     </label>
-                    <label className="admin-switch">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(selectedMessage.publicVisible)}
-                        onChange={(event) => setSelectedMessage((current) => current ? { ...current, publicVisible: event.target.checked } : current)}
-                      />
-                      <span>在首页公开展示回复</span>
-                    </label>
                     <label className="field form-span-2">
                       <span>用户留言</span>
                       <textarea value={selectedMessage.message || ''} rows={4} readOnly />
@@ -7862,7 +7934,7 @@ function AdminDashboardPage({
                         value={selectedMessage.adminReply || ''}
                         onChange={(event) => setSelectedMessage((current) => current ? { ...current, adminReply: event.target.value } : current)}
                         rows={5}
-                        placeholder="在这里写回复，保存后可选择是否公开展示到首页。"
+                        placeholder="在这里写回复。保存后，该回复只会提供给对应会员在头像菜单中查看。"
                       />
                     </label>
                     <p><strong>提交时间：</strong>{selectedMessage.createdAt ? new Date(selectedMessage.createdAt).toLocaleString('zh-CN') : '-'}</p>
