@@ -228,6 +228,7 @@ function getDefaultHeartBeansForPlan(input) {
 function createDefaultAdminData() {
   return {
     members: [],
+    contactMessages: [],
     plans: [
       {
         id: 'starter-monthly',
@@ -419,6 +420,21 @@ function normalizeLoadedAdminData(parsed) {
           subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
         }))
       : [],
+    contactMessages: Array.isArray(parsed?.contactMessages)
+      ? parsed.contactMessages.map((item) => ({
+          id: String(item?.id || '').trim() || crypto.randomUUID(),
+          name: String(item?.name || '').trim(),
+          email: normalizeEmail(item?.email),
+          message: String(item?.message || '').trim(),
+          status: String(item?.status || 'new').trim() || 'new',
+          adminReply: String(item?.adminReply || '').trim(),
+          adminReplyBy: String(item?.adminReplyBy || '').trim(),
+          publicVisible: normalizeBoolean(item?.publicVisible, false),
+          createdAt: String(item?.createdAt || nowIso()).trim(),
+          updatedAt: String(item?.updatedAt || item?.createdAt || nowIso()).trim(),
+          repliedAt: String(item?.repliedAt || '').trim(),
+        }))
+      : [],
     plans: Array.isArray(parsed?.plans) && parsed.plans.length
       ? parsed.plans.map((plan) => ({
           ...plan,
@@ -521,6 +537,7 @@ function buildPersistenceSnapshot() {
   return {
     settings: [
       { key: 'config', value: adminData.config, updatedAt: timestamp },
+      { key: 'contactMessages', value: adminData.contactMessages, updatedAt: timestamp },
       { key: 'plans', value: adminData.plans, updatedAt: timestamp },
       { key: 'paymentMethods', value: adminData.paymentMethods, updatedAt: timestamp },
       { key: 'showcaseTracks', value: adminData.showcaseTracks, updatedAt: timestamp },
@@ -573,6 +590,7 @@ function restoreStateFromSnapshot(snapshot) {
   const settingsMap = new Map(snapshot.settings.map((item) => [item.key, item.value]))
   adminData = normalizeLoadedAdminData({
     members: snapshot.members,
+    contactMessages: settingsMap.get('contactMessages'),
     orders: snapshot.orders,
     songs: snapshot.songs,
     config: settingsMap.get('config'),
@@ -882,6 +900,14 @@ function readMemberToken(req) {
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase()
+}
+
+function sanitizeCompactText(value, maxLength = 120) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function sanitizeMultilineText(value, maxLength = 800) {
+  return String(value || '').replace(/\r\n/g, '\n').trim().slice(0, maxLength)
 }
 
 function findMemberByEmail(email) {
@@ -2471,6 +2497,70 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
+app.get('/api/messages', (_req, res) => {
+  const items = adminData.contactMessages
+    .filter((item) => Boolean(item.publicVisible) && String(item.adminReply || '').trim())
+    .sort((left, right) => new Date(right.repliedAt || right.updatedAt || right.createdAt || 0).getTime() - new Date(left.repliedAt || left.updatedAt || left.createdAt || 0).getTime())
+    .slice(0, 6)
+    .map((item) => ({
+      id: item.id,
+      name: item.name || 'Guest',
+      message: item.message,
+      adminReply: item.adminReply,
+      createdAt: item.createdAt,
+      repliedAt: item.repliedAt,
+      status: item.status,
+    }))
+
+  res.json({ items })
+})
+
+app.post('/api/messages', (req, res) => {
+  const name = sanitizeCompactText(req.body?.name, 80)
+  const email = normalizeEmail(req.body?.email)
+  const message = sanitizeMultilineText(req.body?.message, 600)
+
+  if (!email) {
+    res.status(400).json({ message: '请填写可联系的邮箱。' })
+    return
+  }
+
+  if (!message) {
+    res.status(400).json({ message: '请填写留言内容。' })
+    return
+  }
+
+  const timestamp = nowIso()
+  const entry = {
+    id: crypto.randomUUID(),
+    name,
+    email,
+    message,
+    status: 'new',
+    adminReply: '',
+    adminReplyBy: '',
+    publicVisible: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    repliedAt: '',
+  }
+
+  adminData = {
+    ...adminData,
+    contactMessages: [entry, ...adminData.contactMessages].slice(0, 500),
+  }
+  saveAdminData()
+
+  res.status(201).json({
+    ok: true,
+    item: {
+      id: entry.id,
+      createdAt: entry.createdAt,
+      status: entry.status,
+    },
+  })
+})
+
 app.post('/api/admin/login', (req, res) => {
   const username = String(req.body?.username || '').trim()
   const password = String(req.body?.password || '').trim()
@@ -2635,6 +2725,7 @@ app.post('/api/member/logout', requireMemberAuth, (req, res) => {
 app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
   const songs = adminData.songs
   const orders = adminData.orders
+  const contactMessages = adminData.contactMessages
   const readySongs = songs.filter((item) => item.status === 'ready').length
   const totalRevenue = orders
     .filter((item) => item.status === 'paid')
@@ -2648,6 +2739,8 @@ app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
       totalOrders: orders.length,
       paidOrders: orders.filter((item) => item.status === 'paid').length,
       totalRevenue,
+      totalMessages: contactMessages.length,
+      pendingMessages: contactMessages.filter((item) => !String(item.adminReply || '').trim() && item.status !== 'archived').length,
     },
     latestSongs: songs.slice(0, 8),
     latestOrders: orders.slice(0, 8),
@@ -2675,6 +2768,44 @@ app.get('/api/admin/orders', requireAdminAuth, (_req, res) => {
   res.json({
     items: adminData.orders,
   })
+})
+
+app.get('/api/admin/messages', requireAdminAuth, (_req, res) => {
+  res.json({
+    items: [...adminData.contactMessages]
+      .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime()),
+  })
+})
+
+app.patch('/api/admin/messages/:messageId', requireAdminAuth, (req, res) => {
+  const messageIndex = adminData.contactMessages.findIndex((item) => item.id === req.params.messageId)
+
+  if (messageIndex === -1) {
+    res.status(404).json({ message: '留言不存在。' })
+    return
+  }
+
+  const current = adminData.contactMessages[messageIndex]
+  const patch = req.body && typeof req.body === 'object' ? req.body : {}
+  const adminReply = sanitizeMultilineText(patch.adminReply ?? current.adminReply, 1000)
+  const explicitStatus = sanitizeCompactText(patch.status ?? current.status, 40) || current.status || 'new'
+  const nextStatus = adminReply ? (explicitStatus === 'archived' ? 'archived' : 'replied') : explicitStatus
+  const repliedAt = adminReply
+    ? String(current.repliedAt || nowIso()).trim()
+    : ''
+  const next = {
+    ...current,
+    status: nextStatus,
+    adminReply,
+    adminReplyBy: adminReply ? String(req.adminSession?.profile?.username || '').trim() : '',
+    publicVisible: normalizeBoolean(patch.publicVisible, current.publicVisible),
+    repliedAt,
+    updatedAt: nowIso(),
+  }
+
+  adminData.contactMessages[messageIndex] = next
+  saveAdminData()
+  res.json(next)
 })
 
 app.get('/api/admin/orders/:orderId', requireAdminAuth, (req, res) => {
