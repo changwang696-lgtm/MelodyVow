@@ -3275,6 +3275,39 @@
   line-height: 1.5;
 }
 
+.styles-page-meta {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.14));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 10px 20px rgba(0, 0, 0, 0.05);
+}
+
+.styles-page-meta-row {
+  display: grid;
+  gap: 4px;
+}
+
+.styles-page-meta-row span {
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: rgba(109, 50, 86, 0.82);
+}
+
+.styles-page-meta-row strong {
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(24, 12, 24, 0.84);
+  font-weight: 800;
+}
+
 .styles-page-grid .style-card .compact {
   min-height: 38px;
   padding: 0 12px;
@@ -6534,6 +6567,23 @@
     box-shadow:
       0 14px 26px rgba(247, 59, 136, 0.24),
       inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  }
+
+  .styles-page-meta {
+    gap: 5px;
+    margin-top: 7px;
+    margin-bottom: 9px;
+    padding: 9px;
+    border-radius: 16px;
+  }
+
+  .styles-page-meta-row span {
+    font-size: 0.58rem;
+  }
+
+  .styles-page-meta-row strong {
+    font-size: 0.68rem;
+    line-height: 1.38;
   }
 
   .styles-page-empty {

@@ -25,7 +25,7 @@ import heroTitleImage from '../images/11.png'
 import phoneDiscImage from '../images/12.png'
 import { songLanguages } from './data/songLanguages'
 import { styleCollectionOptions, styleCollectionsByStyleId, vocalOptions, weddingStyleOptions } from './data/weddingMusicOptions'
-import type { StyleCollectionId } from './data/weddingMusicOptions'
+import type { StyleCollectionId, WeddingStyleOption } from './data/weddingMusicOptions'
 import { readJsonSafe } from './readJsonSafe'
 
 type Locale = 'zh' | 'en'
@@ -1034,8 +1034,52 @@ function getStyleLabel(locale: Locale, id: string) {
   return locale === 'zh' ? style.zhLabel : style.enLabel
 }
 
+function getStyleOption(id: string) {
+  return weddingStyleOptions.find((item) => item.id === id) ?? null
+}
+
 function getStyleCollectionIds(styleId: string) {
   return styleCollectionsByStyleId[styleId] || ['wedding']
+}
+
+function buildStyleGenerationRequest(style: WeddingStyleOption | null, occasion: Occasion) {
+  if (!style?.area && !style?.continent && !style?.region && !style?.community && !style?.weddingMusicType && !style?.proposalMusicType && !style?.coreFeature && !style?.signatureForm) {
+    return ''
+  }
+
+  const coreType = occasion === 'proposal'
+    ? style?.proposalMusicType || style?.weddingMusicType || ''
+    : style?.weddingMusicType || style?.proposalMusicType || ''
+  const sceneLabel = occasion === 'proposal' ? '求婚歌曲' : '婚礼歌曲'
+
+  return [
+    `请以 ${style?.area || style?.continent || '对应文化地区'} 的 ${style?.region || '对应国家 / 地区'} 文化语境来制作这首 ${sceneLabel}。`,
+    style?.community ? `重点参考的部落 / 社群是：${style.community}。` : '',
+    coreType ? `主导音乐类型要明确落在：${coreType}。` : '',
+    style?.coreFeature ? `核心特征必须体现：${style.coreFeature}。` : '',
+    style?.signatureForm ? `编曲和旋律请参考这些代表性曲目 / 形式：${style.signatureForm}。` : '',
+    '输出结果不要只是泛泛的 world music，要让听感、节奏、器乐与旋律语言都能听出清晰文化来源。',
+  ].filter(Boolean).join(' ')
+}
+
+function buildStyleLyricsRequest(style: WeddingStyleOption | null, occasion: Occasion) {
+  if (!style?.area && !style?.continent && !style?.region && !style?.community && !style?.weddingMusicType && !style?.proposalMusicType && !style?.coreFeature && !style?.signatureForm) {
+    return ''
+  }
+
+  const themeType = occasion === 'proposal'
+    ? style?.proposalMusicType || style?.weddingMusicType || ''
+    : style?.weddingMusicType || style?.proposalMusicType || ''
+  const sceneLabel = occasion === 'proposal' ? '求婚' : '婚礼'
+
+  return [
+    `歌词要贴合 ${style?.region || '对应地区'} 的 ${sceneLabel}表达方式。`,
+    style?.community ? `要体现 ${style.community} 的部落 / 社群婚俗语境。` : '',
+    themeType ? `情绪表达请向“${themeType}”靠拢。` : '',
+    style?.coreFeature ? `歌词里可融入这些核心特征：${style.coreFeature}。` : '',
+    style?.signatureForm ? `可以借鉴这些代表性形式中的意象、节奏或仪式动作：${style.signatureForm}。` : '',
+    '避免写成空泛的通用情歌，要有地域文化、仪式动作、亲友互动或传统意象。',
+  ].filter(Boolean).join(' ')
 }
 
 function getVocalLabel(locale: Locale, code: string) {
@@ -2699,7 +2743,10 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
     const languageCode = draft.languageCode.trim() || fallbackLanguage.code
     const languageLabel = draft.languageLabel.trim() || fallbackLanguage.label
     const style = draft.style.trim() || fallbackStyle.id
+    const selectedStyle = getStyleOption(style) ?? fallbackStyle
     const styleLabel = draft.style.trim() ? getStyleLabel(locale, draft.style) : (locale === 'zh' ? fallbackStyle.zhLabel : fallbackStyle.enLabel)
+    const styleGenerationRequest = buildStyleGenerationRequest(selectedStyle, draft.occasion)
+    const styleLyricsRequest = buildStyleLyricsRequest(selectedStyle, draft.occasion)
     const vocal = draft.vocal.trim() || fallbackVocal.code
     const vocalLabel = draft.vocal.trim() ? getVocalLabel(locale, draft.vocal) : (locale === 'zh' ? fallbackVocal.zhLabel : fallbackVocal.enLabel)
     const initialLyrics = [draft.loveStory, draft.meetingStory, draft.vowKeywords].filter(Boolean).join('\n\n').trim()
@@ -2744,6 +2791,13 @@ function HomePage({ locale, draft, setDraft, onOpenModal, onUpsertFloatingPlayer
           occasion: draft.occasion,
           style,
           styleLabel,
+          styleContinent: selectedStyle.continent || '',
+          styleRegion: selectedStyle.region || '',
+          styleWeddingMusicType: selectedStyle.weddingMusicType || '',
+          styleProposalMusicType: selectedStyle.proposalMusicType || '',
+          styleSignatureForm: selectedStyle.signatureForm || '',
+          styleGenerationRequest,
+          styleLyricsRequest,
           languageCode,
           languageLabel,
           vocal,
@@ -4092,6 +4146,9 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
   const [activeCollection, setActiveCollection] = useState<StyleCollectionId>(() => {
     if (draft.style) {
       const matchedCollections = getStyleCollectionIds(draft.style)
+      if (matchedCollections.includes('china')) {
+        return 'china'
+      }
       return matchedCollections.includes('proposal')
         ? 'proposal'
         : matchedCollections[0]
@@ -4141,26 +4198,48 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
       </section>
 
       <section className="styles-grid styles-page-grid">
-        {filteredStyles.map((card, index) => (
-          <article
-            key={card.id}
-            className={`glass-card style-card ${draft.style === card.id ? 'selected' : ''}`}
-          >
-            <div className="step-badge">{index + 1}</div>
-            <h3>{locale === 'zh' ? card.zhLabel : card.enLabel}</h3>
-            <p>{locale === 'zh' ? card.zhDescription : card.enDescription}</p>
-            <button
-              type="button"
-              className="primary-button compact"
-              onClick={() => {
-                setDraft((current) => ({ ...current, style: card.id }))
-                navigate(withLocale(locale))
-              }}
+        {filteredStyles.map((card, index) => {
+          const metaRows = [
+            { label: copy(locale, { zh: '区域', en: 'Area' }), value: card.area || card.continent },
+            { label: copy(locale, { zh: '部落 / 社群', en: 'Tribe / Community' }), value: card.community },
+            { label: copy(locale, { zh: '国家 / 地区', en: 'Country / Region' }), value: card.region },
+            { label: copy(locale, { zh: '婚礼音乐类型', en: 'Wedding Music Type' }), value: card.weddingMusicType },
+            { label: copy(locale, { zh: '求婚歌曲类型', en: 'Proposal Song Type' }), value: card.proposalMusicType },
+            { label: copy(locale, { zh: '核心特征', en: 'Core Feature' }), value: card.coreFeature },
+            { label: copy(locale, { zh: '代表性曲目 / 形式', en: 'Signature Form' }), value: card.signatureForm },
+          ].filter((item) => item.value && item.value.trim())
+
+          return (
+            <article
+              key={card.id}
+              className={`glass-card style-card ${draft.style === card.id ? 'selected' : ''}`}
             >
-              {copy(locale, { zh: '选择曲风', en: 'Select Style' })}
-            </button>
-          </article>
-        ))}
+              <div className="step-badge">{index + 1}</div>
+              <h3>{locale === 'zh' ? card.zhLabel : card.enLabel}</h3>
+              <p>{locale === 'zh' ? card.zhDescription : card.enDescription}</p>
+              {metaRows.length ? (
+                <div className="styles-page-meta">
+                  {metaRows.map((item) => (
+                    <div key={`${card.id}-${item.label}`} className="styles-page-meta-row">
+                      <span>{item.label}</span>
+                      <strong>{item.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="primary-button compact"
+                onClick={() => {
+                  setDraft((current) => ({ ...current, style: card.id }))
+                  navigate(withLocale(locale))
+                }}
+              >
+                {copy(locale, { zh: '选择曲风', en: 'Select Style' })}
+              </button>
+            </article>
+          )
+        })}
         {!filteredStyles.length ? (
           <article className="glass-card styles-page-empty">
             <h3>{copy(locale, { zh: '该分类还没有曲风', en: 'No styles in this category yet' })}</h3>
