@@ -8431,6 +8431,76 @@
 }
 
 @media (max-width: 720px) {
+  .styles-page-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .styles-page-grid .style-card {
+    gap: 4px;
+    padding: 10px 9px 9px;
+    border-radius: 20px;
+  }
+
+  .styles-page-grid .style-card::before {
+    inset: 6px;
+    border-radius: 14px;
+  }
+
+  .styles-page-grid .step-badge {
+    width: 26px;
+    height: 26px;
+    font-size: 0.66rem;
+  }
+
+  .styles-page-grid .style-card h3 {
+    margin-top: 1px;
+    font-size: 0.68rem;
+    line-height: 1.14;
+  }
+
+  .styles-page-grid .style-card p {
+    font-size: 0.54rem;
+    line-height: 1.26;
+    -webkit-line-clamp: 2;
+  }
+
+  .styles-page-meta {
+    gap: 4px;
+    margin-top: 5px;
+    margin-bottom: 6px;
+    padding: 7px 6px;
+    border-radius: 13px;
+  }
+
+  .styles-page-meta-row span {
+    font-size: 0.5rem;
+  }
+
+  .styles-page-meta-row strong {
+    font-size: 0.6rem;
+    line-height: 1.28;
+  }
+
+  .styles-page-grid .style-card .compact {
+    min-height: 28px;
+    margin-top: 2px;
+    padding: 0 8px;
+    font-size: 0.62rem;
+  }
+
+  .styles-page-switch {
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.7rem;
+  }
+
+  .styles-page-switch strong {
+    min-width: 18px;
+    height: 18px;
+    font-size: 0.6rem;
+  }
+
   .modal-backdrop {
     padding: 14px;
     place-items: center;
