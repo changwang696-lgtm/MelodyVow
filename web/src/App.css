@@ -50,35 +50,19 @@
 }
 
 .site-shell[data-background-theme='elegant_dark'] {
-  --site-grad-spot-1: rgba(255, 184, 77, 0.18);
-  --site-grad-spot-2: rgba(115, 82, 255, 0.16);
-  --site-grad-spot-3: rgba(66, 196, 255, 0.14);
-  --site-grad-spot-4: rgba(255, 90, 145, 0.14);
-  --site-grad-base: linear-gradient(135deg, #09090d 0%, #16111f 36%, #25192f 68%, #34202f 100%);
-}
-
-.site-shell[data-background-theme='soft_pink_gold'] {
-  --site-grad-spot-1: rgba(82, 66, 255, 0.2);
-  --site-grad-spot-2: rgba(47, 96, 255, 0.16);
-  --site-grad-spot-3: rgba(165, 91, 255, 0.16);
-  --site-grad-spot-4: rgba(23, 167, 255, 0.12);
-  --site-grad-base: linear-gradient(135deg, #040409 0%, #090b16 22%, #12152a 46%, #171438 68%, #0d1021 100%);
-}
-
-.site-shell[data-background-theme='ocean_dream'] {
-  --site-grad-spot-1: rgba(255, 218, 170, 0.35);
-  --site-grad-spot-2: rgba(255, 209, 224, 0);
-  --site-grad-spot-3: rgba(255, 228, 214, 0);
-  --site-grad-spot-4: rgba(255, 247, 234, 0);
-  --site-grad-spot-1-position: 50% 25%;
-  --site-grad-spot-2-position: 50% 50%;
-  --site-grad-spot-3-position: 50% 50%;
-  --site-grad-spot-4-position: 50% 50%;
-  --site-grad-spot-1-size: 58%;
-  --site-grad-spot-2-size: 0%;
-  --site-grad-spot-3-size: 0%;
-  --site-grad-spot-4-size: 0%;
-  --site-grad-base: linear-gradient(180deg, #FFE6EF 0%, #FFD1E0 35%, #FFE4D6 70%, #FFF7EA 100%);
+  --site-grad-spot-1: rgba(151, 11, 31, 0.72);
+  --site-grad-spot-2: rgba(227, 174, 134, 0.5);
+  --site-grad-spot-3: rgba(144, 85, 67, 0.36);
+  --site-grad-spot-4: rgba(128, 66, 51, 0.48);
+  --site-grad-spot-1-position: 8% 8%;
+  --site-grad-spot-2-position: 29% 16%;
+  --site-grad-spot-3-position: 84% 84%;
+  --site-grad-spot-4-position: 4% 94%;
+  --site-grad-spot-1-size: 34%;
+  --site-grad-spot-2-size: 28%;
+  --site-grad-spot-3-size: 24%;
+  --site-grad-spot-4-size: 30%;
+  --site-grad-base: linear-gradient(135deg, #240002 0%, #804233 26%, #e3ae86 50%, #970b1f 76%, #905543 100%);
 }
 
 .site-shell[data-locale='zh'] {

@@ -101,8 +101,6 @@ type Copy = {
 type BackgroundThemeId =
   | 'vivid_rainbow'
   | 'elegant_dark'
-  | 'soft_pink_gold'
-  | 'ocean_dream'
 
 type HistoryItem = {
   id: string
@@ -504,17 +502,7 @@ const backgroundThemeOptions: Array<{
   {
     id: 'elegant_dark',
     label: '欧美黑金',
-    description: '偏欧美用户喜好的黑色系渐变，整体更高级、更克制。',
-  },
-  {
-    id: 'soft_pink_gold',
-    label: '深夜紫蓝',
-    description: '更深黑、更神秘，带深紫蓝氛围，适合欧美审美和高级夜色风格。',
-  },
-  {
-    id: 'ocean_dream',
-    label: '中东鎏金',
-    description: '偏中东国家喜欢的金碧辉煌质感，整体更华丽、更贵气。',
+    description: '延续绚彩渐变的流动感，但改为深酒红与黑金调，更适合欧美高定婚礼气质。',
   },
 ]
 
@@ -1055,6 +1043,15 @@ function getStyleOption(id: string) {
 
 function getStyleCollectionIds(styleId: string) {
   return styleCollectionsByStyleId[styleId] || ['wedding']
+}
+
+function getStyleCollectionLabel(locale: Locale, collectionId: StyleCollectionId) {
+  const collection = styleCollectionOptions.find((item) => item.id === collectionId)
+  if (!collection) {
+    return collectionId
+  }
+
+  return locale === 'zh' ? collection.zhLabel : collection.enLabel
 }
 
 type StyleMetaField =
@@ -4394,21 +4391,26 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
       hideHero
     >
       <section className="styles-page-toolbar glass-card">
-        <div className="styles-page-switcher" role="tablist" aria-label={copy(locale, { zh: '曲风分类切换', en: 'Style category switcher' })}>
+        <div
+          key={`style-switcher-${locale}`}
+          className="styles-page-switcher"
+          role="tablist"
+          aria-label={copy(locale, { zh: '曲风分类切换', en: 'Style category switcher' })}
+        >
           {styleCollectionOptions.map((collection) => {
             const count = weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(collection.id)).length
             const active = activeCollection === collection.id
 
             return (
               <button
-                key={collection.id}
+                key={`${locale}-${collection.id}`}
                 type="button"
                 role="tab"
                 aria-selected={active}
                 className={`styles-page-switch ${active ? 'is-active' : ''}`}
                 onClick={() => setActiveCollection(collection.id)}
               >
-                <span>{locale === 'zh' ? collection.zhLabel : collection.enLabel}</span>
+                <span>{getStyleCollectionLabel(locale, collection.id)}</span>
                 <strong>{count}</strong>
               </button>
             )
