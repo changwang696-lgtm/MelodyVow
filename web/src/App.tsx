@@ -6011,8 +6011,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
       setRedeemFeedback({
         type: 'error',
         message: copy(locale, {
-          zh: '请输入有效的 12 位充值卡码。',
-          en: 'Please enter a valid 12-character recharge code.',
+          zh: '请输入有效的 12 位 SVIP 卡码。',
+          en: 'Please enter a valid 12-character SVIP card code.',
         }),
       })
       return
@@ -6033,8 +6033,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
       const result = (await readJsonSafe(response)) as MemberRechargeCodeResponse | { message?: string }
       if (!response.ok) {
         throw new Error('message' in result && result.message ? result.message : copy(locale, {
-          zh: '充值卡码兑换失败，请稍后重试。',
-          en: 'Recharge code redemption failed. Please try again later.',
+          zh: 'SVIP 卡兑换失败，请稍后重试。',
+          en: 'SVIP card redemption failed. Please try again later.',
         }))
       }
 
@@ -6052,8 +6052,8 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
       setRedeemFeedback({
         type: 'error',
         message: error instanceof Error ? error.message : copy(locale, {
-          zh: '充值卡码兑换失败，请稍后重试。',
-          en: 'Recharge code redemption failed. Please try again later.',
+          zh: 'SVIP 卡兑换失败，请稍后重试。',
+          en: 'SVIP card redemption failed. Please try again later.',
         }),
       })
     } finally {
@@ -6234,17 +6234,17 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
           </section>
 
           <section className="glass-card account-recharge-card">
-            <p className="mini-eyebrow">{copy(locale, { zh: '充值卡码', en: 'Recharge Code' })}</p>
-            <h3>{copy(locale, { zh: '输入 12 位卡码，立即到账服务点数', en: 'Enter your 12-character code and add credits instantly' })}</h3>
+            <p className="mini-eyebrow">{copy(locale, { zh: 'SVIP 卡', en: 'SVIP Card' })}</p>
+            <h3>{copy(locale, { zh: '输入 12 位 SVIP 卡码，立即到账服务点数', en: 'Enter your 12-character SVIP card code and add credits instantly' })}</h3>
             <p>
               {copy(locale, {
-                zh: '卡码仅限已登录会员兑换，点数会直接进入你的充值额度余额。',
-                en: 'Redeem while logged in and the credits will land directly in your top-up balance.',
+                zh: 'SVIP 卡仅限已登录会员兑换，点数会直接进入你的充值额度余额。',
+                en: 'Redeem your SVIP card while logged in and the credits will land directly in your top-up balance.',
               })}
             </p>
             <div className="account-recharge-form">
               <label className="field">
-                <span>{copy(locale, { zh: '12 位充值卡码', en: '12-character recharge code' })}</span>
+                <span>{copy(locale, { zh: '12 位 SVIP 卡码', en: '12-character SVIP card code' })}</span>
                 <input
                   value={rechargeCodeInput}
                   maxLength={12}
@@ -6272,7 +6272,7 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             </div>
             <div className="account-recharge-meta">
               <span className="soft-pill">{copy(locale, { zh: `当前充值额度 ${topupHeartBeansBalance}`, en: `Top-up balance ${topupHeartBeansBalance}` })}</span>
-              <span className="soft-pill">{copy(locale, { zh: '卡码已写入数据库并防重复兑换', en: 'Codes are stored securely and cannot be redeemed twice' })}</span>
+              <span className="soft-pill">{copy(locale, { zh: 'SVIP 卡已写入数据库并防重复兑换', en: 'SVIP cards are stored securely and cannot be redeemed twice' })}</span>
             </div>
             {redeemFeedback ? (
               <p className={`account-recharge-feedback ${redeemFeedback.type === 'success' ? 'is-success' : 'is-error'}`}>
@@ -6560,7 +6560,7 @@ function AdminDashboardPage({
           { key: 'payments', path: '/api/admin/payment-methods', label: '支付方式' },
           { key: 'orders', path: '/api/admin/orders', label: '订单' },
           { key: 'messages', path: '/api/admin/messages', label: '留言' },
-          { key: 'codes', path: '/api/admin/recharge-codes', label: '充值卡码' },
+          { key: 'codes', path: '/api/admin/recharge-codes', label: 'SVIP 卡' },
           { key: 'config', path: '/api/admin/config', label: '配置' },
         ] as const
 
@@ -7080,7 +7080,7 @@ function AdminDashboardPage({
     }
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError('请输入有效的卡码数量。')
+      setError('请输入有效的 SVIP 卡数量。')
       return
     }
 
@@ -7098,7 +7098,7 @@ function AdminDashboardPage({
       })
       const result = (await readJsonSafe(response)) as GeneratedRechargeBatch | { message?: string }
       if (!response.ok) {
-        throw new Error('message' in result && result.message ? result.message : '充值卡码生成失败。')
+        throw new Error('message' in result && result.message ? result.message : 'SVIP 卡生成失败。')
       }
 
       const batch = result as GeneratedRechargeBatch
@@ -7112,7 +7112,7 @@ function AdminDashboardPage({
       })
       const reloadData = (await readJsonSafe(reloadResponse)) as { items?: AdminRechargeCode[]; message?: string }
       if (!reloadResponse.ok) {
-        throw new Error(reloadData.message || '充值卡码列表刷新失败。')
+        throw new Error(reloadData.message || 'SVIP 卡列表刷新失败。')
       }
 
       const nextItems = Array.isArray(reloadData.items) ? reloadData.items : []
@@ -7125,7 +7125,7 @@ function AdminDashboardPage({
         redeemedRechargeCodes: nextItems.filter((item) => item.status === 'redeemed').length,
       }))
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '充值卡码生成失败。')
+      setError(saveError instanceof Error ? saveError.message : 'SVIP 卡生成失败。')
     } finally {
       setGeneratingRechargeCodes(false)
     }
@@ -7186,7 +7186,7 @@ function AdminDashboardPage({
     { key: 'payments', label: '支付方式' },
     { key: 'orders', label: '订单' },
     { key: 'messages', label: '留言管理' },
-    { key: 'codes', label: '充值卡码' },
+    { key: 'codes', label: 'SVIP 卡' },
     { key: 'config', label: '配置' },
   ] as const
 
@@ -7283,15 +7283,15 @@ function AdminDashboardPage({
               </article>
               <article className="glass-card admin-metric-card">
                 <strong>{metrics.totalRechargeCodes}</strong>
-                <span>充值卡总数</span>
+                <span>SVIP 卡总数</span>
               </article>
               <article className="glass-card admin-metric-card">
                 <strong>{metrics.activeRechargeCodes}</strong>
-                <span>可兑换卡码</span>
+                <span>可兑换 SVIP 卡</span>
               </article>
               <article className="glass-card admin-metric-card">
                 <strong>{metrics.redeemedRechargeCodes}</strong>
-                <span>已兑换卡码</span>
+                <span>已兑换 SVIP 卡</span>
               </article>
             </section>
           ) : null}
@@ -8270,7 +8270,7 @@ function AdminDashboardPage({
             <section className="admin-detail-layout">
               <section className="admin-table glass-card">
                 <div className="admin-table-head">
-                  <strong>充值卡码列表</strong>
+                  <strong>SVIP 卡列表</strong>
                   <span>{rechargeCodes.length} 条</span>
                 </div>
                 <div className="admin-table-list">
@@ -8296,13 +8296,13 @@ function AdminDashboardPage({
 
               <aside className="glass-card admin-detail-card">
                 <div className="admin-table-head">
-                  <strong>充值卡码生成器</strong>
+                  <strong>SVIP 卡生成器</strong>
                   <span>{selectedRechargeCode?.maskedCode ?? '未选择'}</span>
                 </div>
                 <div className="admin-detail-stack">
                   <section className="admin-member-summary-grid">
                     <article className="admin-mini-card">
-                      <span>卡码总数</span>
+                      <span>SVIP 卡总数</span>
                       <strong>{rechargeCodes.length}</strong>
                     </article>
                     <article className="admin-mini-card">
@@ -8343,7 +8343,7 @@ function AdminDashboardPage({
 
                   <div className="admin-link-actions">
                     <button type="button" className="primary-button" disabled={generatingRechargeCodes} onClick={() => void handleGenerateRechargeCodes()}>
-                      {generatingRechargeCodes ? '生成中...' : '生成并下载 CSV'}
+                      {generatingRechargeCodes ? '生成中...' : '生成 SVIP 卡并下载 CSV'}
                     </button>
                     {latestRechargeBatch ? (
                       <button type="button" className="ghost-button" onClick={() => downloadRechargeBatchCsv(latestRechargeBatch)}>
@@ -8378,7 +8378,7 @@ function AdminDashboardPage({
                   {selectedRechargeCode ? (
                     <article className="glass-card admin-inline-card">
                       <div className="admin-inline-head">
-                        <strong>卡码详情</strong>
+                        <strong>SVIP 卡详情</strong>
                         <span>{selectedRechargeCode.status === 'redeemed' ? '已兑换' : '可兑换'}</span>
                       </div>
                       <div className="admin-inline-list">
@@ -8405,7 +8405,7 @@ function AdminDashboardPage({
                       </div>
                     </article>
                   ) : (
-                    <p className="empty-state compact">请选择一张充值卡码查看兑换详情。</p>
+                    <p className="empty-state compact">请选择一张 SVIP 卡查看兑换详情。</p>
                   )}
                 </div>
               </aside>
