@@ -1129,7 +1129,7 @@ function createRechargeCodeBatch({ heartBeans, quantity, createdBy }) {
     generatedAt,
     items: plainItems,
     storedItems,
-    csvFilename: `melodyvow-recharge-codes-${batchId}.csv`,
+    csvFilename: `melodyvow-svip-cards-${batchId}.csv`,
     csvContent: buildRechargeCodeCsv(plainItems),
   }
 }
@@ -1137,28 +1137,28 @@ function createRechargeCodeBatch({ heartBeans, quantity, createdBy }) {
 function redeemRechargeCodeForMember(member, rawCode) {
   const normalizedCode = normalizeRechargeCode(rawCode)
   if (normalizedCode.length !== RECHARGE_CODE_LENGTH) {
-    return { ok: false, status: 400, message: '请输入有效的 12 位充值卡码。' }
+    return { ok: false, status: 400, message: '请输入有效的 12 位 SVIP 卡码。' }
   }
 
   const codeHash = hashRechargeCode(normalizedCode)
   const codeIndex = (adminData.rechargeCodes || []).findIndex((item) => String(item?.codeHash || '').trim() === codeHash)
   if (codeIndex === -1) {
-    return { ok: false, status: 404, message: '充值卡码不存在，请检查后重试。' }
+    return { ok: false, status: 404, message: 'SVIP 卡不存在，请检查后重试。' }
   }
 
   const currentCode = normalizeRechargeCodeRecord(adminData.rechargeCodes[codeIndex])
   if (currentCode.status === 'redeemed' || currentCode.redeemedAt) {
-    return { ok: false, status: 409, message: '该充值卡码已被兑换。' }
+    return { ok: false, status: 409, message: '该 SVIP 卡已被兑换。' }
   }
 
   if (currentCode.status === 'disabled') {
-    return { ok: false, status: 409, message: '该充值卡码已停用。' }
+    return { ok: false, status: 409, message: '该 SVIP 卡已停用。' }
   }
 
   const normalizedEmail = normalizeEmail(member?.email)
   const heartBeans = normalizePositiveNumber(currentCode.heartBeans, 0)
   if (!normalizedEmail || heartBeans <= 0) {
-    return { ok: false, status: 400, message: '充值卡码数据无效，请联系管理员。' }
+    return { ok: false, status: 400, message: 'SVIP 卡数据无效，请联系管理员。' }
   }
 
   const currentBalance = buildMemberCreditSnapshot(member)
@@ -1184,7 +1184,7 @@ function redeemRechargeCodeForMember(member, rawCode) {
     balanceType: 'topup',
     sourceType: 'recharge_code',
     sourceId: currentCode.id,
-    note: `Redeemed recharge code ${maskRechargeCode(currentCode.codeLast4)}`,
+    note: `Redeemed SVIP card ${maskRechargeCode(currentCode.codeLast4)}`,
     createdAt: timestamp,
   }
 
@@ -3103,7 +3103,7 @@ app.post('/api/admin/recharge-codes/generate', requireAdminAuth, (req, res) => {
   })
 
   if (!batch) {
-    res.status(400).json({ message: '充值卡码生成失败，请检查输入。' })
+    res.status(400).json({ message: 'SVIP 卡生成失败，请检查输入。' })
     return
   }
 
