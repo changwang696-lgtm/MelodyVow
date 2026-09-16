@@ -24,6 +24,7 @@ const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || '').trim()
 const PAYPAL_CLIENT_SECRET = String(process.env.PAYPAL_CLIENT_SECRET || '').trim()
 const PAYPAL_WEBHOOK_ID = String(process.env.PAYPAL_WEBHOOK_ID || '').trim()
 const PAYPAL_MODE = String(process.env.PAYPAL_MODE || '').trim().toLowerCase() === 'live' ? 'live' : 'sandbox'
+const SIGNUP_POLICY_VERSION = '2026-09-15'
 const JOB_TTL_MS = 1000 * 60 * 60 * 6
 const POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS ?? 12000)
 const MAX_POLL_ATTEMPTS = Number(process.env.SUNO_POLL_MAX_ATTEMPTS ?? 40)
@@ -40,6 +41,10 @@ const PAYMENT_PROVIDERS = new Set(['stripe_checkout', 'paypal', 'alipay'])
 const CREDIT_BALANCE_TYPES = new Set(['subscription', 'topup'])
 const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
 const CREDIT_LEDGER_LIMIT = 20000
+const RECHARGE_CODE_LENGTH = 12
+const RECHARGE_CODE_BATCH_LIMIT = 500
+const RECHARGE_CODE_HISTORY_LIMIT = 50000
+const RECHARGE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const require = createRequire(import.meta.url)
 let StripeModule = null
 let stripe = null
@@ -143,6 +148,85 @@ function normalizePositiveNumber(value, fallback = 0) {
 
 function normalizeBoolean(value, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
+}
+
+function normalizeTimestampString(value) {
+  return String(value || '').trim()
+}
+
+function normalizeRechargeCode(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function hashRechargeCode(code) {
+  return crypto.createHash('sha256').update(String(code || '').trim()).digest('hex')
+}
+
+function maskRechargeCode(last4 = '') {
+  return `${'•'.repeat(Math.max(0, RECHARGE_CODE_LENGTH - 4))}${String(last4 || '').trim().slice(-4)}`
+}
+
+function createRechargeCodeValue() {
+  let next = ''
+  while (next.length < RECHARGE_CODE_LENGTH) {
+    const randomIndex = crypto.randomInt(0, RECHARGE_CODE_ALPHABET.length)
+    next += RECHARGE_CODE_ALPHABET[randomIndex]
+  }
+  return next
+}
+
+function buildRechargeBatchId() {
+  const stamp = Date.now().toString(36).toUpperCase()
+  const suffix = crypto.randomBytes(3).toString('hex').toUpperCase()
+  return `RC-${stamp}-${suffix}`
+}
+
+function escapeCsvCell(value) {
+  const normalized = String(value ?? '')
+  if (/[",\r\n]/.test(normalized)) {
+    return `"${normalized.replace(/"/g, '""')}"`
+  }
+  return normalized
+}
+
+function normalizeRechargeCodeRecord(item) {
+  return {
+    id: String(item?.id || crypto.randomUUID()).trim(),
+    batchId: String(item?.batchId || '').trim(),
+    codeHash: String(item?.codeHash || '').trim(),
+    codeLast4: normalizeRechargeCode(item?.codeLast4).slice(-4),
+    heartBeans: normalizePositiveNumber(item?.heartBeans, 0),
+    createdAt: String(item?.createdAt || nowIso()).trim(),
+    updatedAt: String(item?.updatedAt || item?.createdAt || nowIso()).trim(),
+    createdBy: String(item?.createdBy || '').trim(),
+    status: String(item?.status || (item?.redeemedAt ? 'redeemed' : 'active')).trim() || 'active',
+    redeemedAt: String(item?.redeemedAt || '').trim(),
+    redeemedByEmail: normalizeEmail(item?.redeemedByEmail),
+  }
+}
+
+function serializeRechargeCodeForAdmin(item) {
+  return {
+    id: item.id,
+    batchId: item.batchId,
+    maskedCode: maskRechargeCode(item.codeLast4),
+    codeLast4: item.codeLast4,
+    heartBeans: item.heartBeans,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    createdBy: item.createdBy,
+    status: item.status,
+    redeemedAt: item.redeemedAt,
+    redeemedByEmail: item.redeemedByEmail,
+  }
+}
+
+function buildRechargeCodeCsv(items) {
+  const rows = [
+    ['code', 'heartBeans', 'batchId', 'createdAt'],
+    ...items.map((item) => [item.code, String(item.heartBeans || 0), item.batchId, item.createdAt]),
+  ]
+  return rows.map((row) => row.map(escapeCsvCell).join(',')).join('\r\n')
 }
 
 function normalizeBackgroundTheme(value, fallback = 'vivid_rainbow') {
@@ -378,6 +462,7 @@ function createDefaultAdminData() {
     ],
     songs: [],
     creditLedger: [],
+    rechargeCodes: [],
     processedStripeEvents: [],
     config: {
       deepseekProvider: 'DeepSeek',
@@ -418,6 +503,9 @@ function normalizeLoadedAdminData(parsed) {
           stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
           paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
           subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
+          acceptedAccountPolicyAt: normalizeTimestampString(member?.acceptedAccountPolicyAt),
+          acceptedTransactionPolicyAt: normalizeTimestampString(member?.acceptedTransactionPolicyAt),
+          policyConsentVersion: normalizeTimestampString(member?.policyConsentVersion),
         }))
       : [],
     contactMessages: Array.isArray(parsed?.contactMessages)
@@ -488,6 +576,12 @@ function normalizeLoadedAdminData(parsed) {
       : createDefaultAdminData().orders,
     songs: Array.isArray(parsed?.songs) ? parsed.songs : [],
     creditLedger: Array.isArray(parsed?.creditLedger) ? parsed.creditLedger.slice(0, CREDIT_LEDGER_LIMIT) : [],
+    rechargeCodes: Array.isArray(parsed?.rechargeCodes)
+      ? parsed.rechargeCodes
+        .map((item) => normalizeRechargeCodeRecord(item))
+        .filter((item) => item.codeHash && item.heartBeans > 0)
+        .slice(0, RECHARGE_CODE_HISTORY_LIMIT)
+      : [],
     processedStripeEvents: Array.isArray(parsed?.processedStripeEvents)
       ? parsed.processedStripeEvents.map((item) => String(item || '').trim()).filter(Boolean).slice(0, WEBHOOK_EVENT_HISTORY_LIMIT)
       : [],
@@ -542,6 +636,7 @@ function buildPersistenceSnapshot() {
       { key: 'paymentMethods', value: adminData.paymentMethods, updatedAt: timestamp },
       { key: 'showcaseTracks', value: adminData.showcaseTracks, updatedAt: timestamp },
       { key: 'creditLedger', value: adminData.creditLedger, updatedAt: timestamp },
+      { key: 'rechargeCodes', value: adminData.rechargeCodes, updatedAt: timestamp },
       { key: 'processedStripeEvents', value: adminData.processedStripeEvents, updatedAt: timestamp },
     ],
     members: adminData.members,
@@ -598,6 +693,7 @@ function restoreStateFromSnapshot(snapshot) {
     paymentMethods: settingsMap.get('paymentMethods'),
     showcaseTracks: settingsMap.get('showcaseTracks'),
     creditLedger: settingsMap.get('creditLedger'),
+    rechargeCodes: settingsMap.get('rechargeCodes'),
     processedStripeEvents: settingsMap.get('processedStripeEvents'),
   })
 
@@ -859,7 +955,7 @@ function syncJobToAdminData(job) {
   const nextSongs = [
     ...entries,
     ...adminData.songs.filter((item) => item.id !== job.id && item.jobId !== job.id),
-  ].slice(0, 100)
+  ]
   adminData = {
     ...adminData,
     songs: nextSongs,
@@ -929,9 +1025,9 @@ function buildMemberCreditSnapshot(member) {
   }
 }
 
-function upsertMember(member) {
+function buildPersistedMember(member) {
   const creditSnapshot = buildMemberCreditSnapshot(member)
-  const nextMember = {
+  return {
     ...member,
     email: normalizeEmail(member.email),
     ...creditSnapshot,
@@ -941,7 +1037,14 @@ function upsertMember(member) {
     stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
     paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
     subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
+    acceptedAccountPolicyAt: normalizeTimestampString(member?.acceptedAccountPolicyAt),
+    acceptedTransactionPolicyAt: normalizeTimestampString(member?.acceptedTransactionPolicyAt),
+    policyConsentVersion: normalizeTimestampString(member?.policyConsentVersion),
   }
+}
+
+function upsertMember(member) {
+  const nextMember = buildPersistedMember(member)
 
   adminData = {
     ...adminData,
@@ -970,6 +1073,152 @@ function appendCreditLedger(entry) {
   }
   saveAdminData()
   return nextEntry
+}
+
+function createRechargeCodeBatch({ heartBeans, quantity, createdBy }) {
+  const normalizedHeartBeans = normalizePositiveNumber(heartBeans, 0)
+  const normalizedQuantity = Math.max(1, Math.min(RECHARGE_CODE_BATCH_LIMIT, Number(quantity || 0)))
+
+  if (normalizedHeartBeans <= 0 || normalizedQuantity <= 0) {
+    return null
+  }
+
+  const generatedAt = nowIso()
+  const batchId = buildRechargeBatchId()
+  const usedHashes = new Set((adminData.rechargeCodes || []).map((item) => String(item?.codeHash || '').trim()).filter(Boolean))
+  const plainItems = []
+  const storedItems = []
+
+  while (plainItems.length < normalizedQuantity) {
+    const code = createRechargeCodeValue()
+    const codeHash = hashRechargeCode(code)
+    if (usedHashes.has(codeHash)) {
+      continue
+    }
+
+    usedHashes.add(codeHash)
+    plainItems.push({
+      code,
+      heartBeans: normalizedHeartBeans,
+      batchId,
+      createdAt: generatedAt,
+    })
+    storedItems.push(normalizeRechargeCodeRecord({
+      id: crypto.randomUUID(),
+      batchId,
+      codeHash,
+      codeLast4: code.slice(-4),
+      heartBeans: normalizedHeartBeans,
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+      createdBy: String(createdBy || '').trim(),
+      status: 'active',
+      redeemedAt: '',
+      redeemedByEmail: '',
+    }))
+  }
+
+  adminData = {
+    ...adminData,
+    rechargeCodes: [...storedItems, ...(Array.isArray(adminData.rechargeCodes) ? adminData.rechargeCodes : [])].slice(0, RECHARGE_CODE_HISTORY_LIMIT),
+  }
+  saveAdminData()
+
+  return {
+    batchId,
+    generatedAt,
+    items: plainItems,
+    storedItems,
+    csvFilename: `melodyvow-recharge-codes-${batchId}.csv`,
+    csvContent: buildRechargeCodeCsv(plainItems),
+  }
+}
+
+function redeemRechargeCodeForMember(member, rawCode) {
+  const normalizedCode = normalizeRechargeCode(rawCode)
+  if (normalizedCode.length !== RECHARGE_CODE_LENGTH) {
+    return { ok: false, status: 400, message: '请输入有效的 12 位充值卡码。' }
+  }
+
+  const codeHash = hashRechargeCode(normalizedCode)
+  const codeIndex = (adminData.rechargeCodes || []).findIndex((item) => String(item?.codeHash || '').trim() === codeHash)
+  if (codeIndex === -1) {
+    return { ok: false, status: 404, message: '充值卡码不存在，请检查后重试。' }
+  }
+
+  const currentCode = normalizeRechargeCodeRecord(adminData.rechargeCodes[codeIndex])
+  if (currentCode.status === 'redeemed' || currentCode.redeemedAt) {
+    return { ok: false, status: 409, message: '该充值卡码已被兑换。' }
+  }
+
+  if (currentCode.status === 'disabled') {
+    return { ok: false, status: 409, message: '该充值卡码已停用。' }
+  }
+
+  const normalizedEmail = normalizeEmail(member?.email)
+  const heartBeans = normalizePositiveNumber(currentCode.heartBeans, 0)
+  if (!normalizedEmail || heartBeans <= 0) {
+    return { ok: false, status: 400, message: '充值卡码数据无效，请联系管理员。' }
+  }
+
+  const currentBalance = buildMemberCreditSnapshot(member)
+  const timestamp = nowIso()
+  const savedMember = buildPersistedMember({
+    ...member,
+    email: normalizedEmail,
+    topupHeartBeansBalance: currentBalance.topupHeartBeansBalance + heartBeans,
+    subscriptionHeartBeansBalance: currentBalance.subscriptionHeartBeansBalance,
+    updatedAt: timestamp,
+  })
+  const nextCode = normalizeRechargeCodeRecord({
+    ...currentCode,
+    status: 'redeemed',
+    redeemedAt: timestamp,
+    redeemedByEmail: normalizedEmail,
+    updatedAt: timestamp,
+  })
+  const ledgerEntry = {
+    id: crypto.randomUUID(),
+    memberEmail: normalizedEmail,
+    delta: heartBeans,
+    balanceType: 'topup',
+    sourceType: 'recharge_code',
+    sourceId: currentCode.id,
+    note: `Redeemed recharge code ${maskRechargeCode(currentCode.codeLast4)}`,
+    createdAt: timestamp,
+  }
+
+  adminData = {
+    ...adminData,
+    members: [savedMember, ...adminData.members.filter((item) => normalizeEmail(item.email) !== normalizedEmail)].slice(0, 5000),
+    rechargeCodes: adminData.rechargeCodes.map((item, index) => (index === codeIndex ? nextCode : item)),
+    creditLedger: [ledgerEntry, ...(Array.isArray(adminData.creditLedger) ? adminData.creditLedger : [])].slice(0, CREDIT_LEDGER_LIMIT),
+  }
+  saveAdminData()
+
+  return {
+    ok: true,
+    status: 200,
+    message: `充值成功，已到账 ${heartBeans} 点服务额度。`,
+    creditsAdded: heartBeans,
+    profile: {
+      email: savedMember.email,
+      partnerName: String(savedMember.partnerName || '').trim(),
+      plan: String(savedMember.plan || '').trim(),
+      heartBeansBalance: savedMember.heartBeansBalance,
+      topupHeartBeansBalance: savedMember.topupHeartBeansBalance,
+      subscriptionHeartBeansBalance: savedMember.subscriptionHeartBeansBalance,
+      subscriptionStatus: String(savedMember.subscriptionStatus || '').trim(),
+      subscriptionPlanId: String(savedMember.subscriptionPlanId || '').trim(),
+      subscriptionCurrentPeriodEnd: String(savedMember.subscriptionCurrentPeriodEnd || '').trim(),
+      stripeCustomerId: String(savedMember.stripeCustomerId || '').trim(),
+      paypalSubscriptionId: String(savedMember.paypalSubscriptionId || '').trim(),
+      subscriptionProvider: String(savedMember.subscriptionProvider || '').trim(),
+      lastAuthAt: String(savedMember.lastAuthAt || '').trim(),
+      avatarUrl: String(savedMember.avatarUrl || '').trim(),
+    },
+    code: serializeRechargeCodeForAdmin(nextCode),
+  }
 }
 
 function hasProcessedStripeEvent(eventId) {
@@ -2603,6 +2852,9 @@ app.post('/api/member/signup', (req, res) => {
   const email = normalizeEmail(req.body?.email)
   const password = String(req.body?.password || '').trim()
   const partnerName = String(req.body?.partnerName || '').trim()
+  const acceptedAccountPolicy = normalizeBoolean(req.body?.acceptedAccountPolicy, false)
+  const acceptedTransactionPolicy = normalizeBoolean(req.body?.acceptedTransactionPolicy, false)
+  const policyConsentVersion = String(req.body?.policyConsentVersion || '').trim() || SIGNUP_POLICY_VERSION
 
   if (!email) {
     res.status(400).json({ message: '请先填写邮箱。' })
@@ -2624,6 +2876,11 @@ app.post('/api/member/signup', (req, res) => {
     return
   }
 
+  if (!acceptedAccountPolicy || !acceptedTransactionPolicy) {
+    res.status(400).json({ message: '注册前必须同意隐私、条款与交易政策。' })
+    return
+  }
+
   const existing = findMemberByEmail(email)
   if (existing?.disabled) {
     res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
@@ -2641,6 +2898,9 @@ app.post('/api/member/signup', (req, res) => {
     email,
     partnerName,
     passwordHash: createPasswordHash(password),
+    acceptedAccountPolicyAt: timestamp,
+    acceptedTransactionPolicyAt: timestamp,
+    policyConsentVersion,
     topupHeartBeansBalance: normalizePositiveNumber(
       existing?.topupHeartBeansBalance,
       normalizePositiveNumber(existing?.heartBeansBalance, 0),
@@ -2734,6 +2994,21 @@ app.get('/api/member/messages', requireMemberAuth, (req, res) => {
   res.json({ items })
 })
 
+app.post('/api/member/recharge-codes/redeem', requireMemberAuth, (req, res) => {
+  const result = redeemRechargeCodeForMember(req.member, req.body?.code)
+  if (!result.ok) {
+    res.status(result.status).json({ message: result.message })
+    return
+  }
+
+  res.json({
+    message: result.message,
+    creditsAdded: result.creditsAdded,
+    profile: result.profile,
+    code: result.code,
+  })
+})
+
 app.post('/api/member/logout', requireMemberAuth, (req, res) => {
   memberSessions.delete(readMemberToken(req))
   queuePersistenceSync('member session removed')
@@ -2744,6 +3019,7 @@ app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
   const songs = adminData.songs
   const orders = adminData.orders
   const contactMessages = adminData.contactMessages
+  const rechargeCodes = adminData.rechargeCodes || []
   const readySongs = songs.filter((item) => item.status === 'ready').length
   const totalRevenue = orders
     .filter((item) => item.status === 'paid')
@@ -2759,6 +3035,9 @@ app.get('/api/admin/overview', requireAdminAuth, (_req, res) => {
       totalRevenue,
       totalMessages: contactMessages.length,
       pendingMessages: contactMessages.filter((item) => !String(item.adminReply || '').trim() && item.status !== 'archived').length,
+      totalRechargeCodes: rechargeCodes.length,
+      activeRechargeCodes: rechargeCodes.filter((item) => item.status !== 'redeemed' && !String(item.redeemedAt || '').trim()).length,
+      redeemedRechargeCodes: rechargeCodes.filter((item) => item.status === 'redeemed' || String(item.redeemedAt || '').trim()).length,
     },
     latestSongs: songs.slice(0, 8),
     latestOrders: orders.slice(0, 8),
@@ -2792,6 +3071,49 @@ app.get('/api/admin/messages', requireAdminAuth, (_req, res) => {
   res.json({
     items: [...adminData.contactMessages]
       .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime()),
+  })
+})
+
+app.get('/api/admin/recharge-codes', requireAdminAuth, (_req, res) => {
+  const items = [...(adminData.rechargeCodes || [])]
+    .map((item) => serializeRechargeCodeForAdmin(normalizeRechargeCodeRecord(item)))
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0).getTime() - new Date(left.updatedAt || left.createdAt || 0).getTime())
+
+  res.json({ items })
+})
+
+app.post('/api/admin/recharge-codes/generate', requireAdminAuth, (req, res) => {
+  const heartBeans = normalizePositiveNumber(req.body?.heartBeans, 0)
+  const quantity = Math.max(1, Math.min(RECHARGE_CODE_BATCH_LIMIT, Number(req.body?.quantity || 0)))
+
+  if (heartBeans <= 0) {
+    res.status(400).json({ message: '请输入大于 0 的服务点数。' })
+    return
+  }
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    res.status(400).json({ message: '请输入有效的生成数量。' })
+    return
+  }
+
+  const batch = createRechargeCodeBatch({
+    heartBeans,
+    quantity,
+    createdBy: req.adminSession?.username || 'admin',
+  })
+
+  if (!batch) {
+    res.status(400).json({ message: '充值卡码生成失败，请检查输入。' })
+    return
+  }
+
+  res.json({
+    batchId: batch.batchId,
+    generatedAt: batch.generatedAt,
+    count: batch.items.length,
+    items: batch.items,
+    csvFilename: batch.csvFilename,
+    csvContent: batch.csvContent,
   })
 })
 
