@@ -4672,8 +4672,46 @@
   margin: 8px 0 0;
 }
 
+.account-recharge-card h3,
 .account-welcome-card h3 {
   margin-top: 10px;
+}
+
+.account-recharge-card p {
+  margin: 8px 0 0;
+}
+
+.account-recharge-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.account-recharge-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.account-recharge-feedback {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-family: var(--font-ui);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.account-recharge-feedback.is-success {
+  color: rgba(40, 104, 66, 0.96);
+  background: rgba(229, 250, 237, 0.82);
+}
+
+.account-recharge-feedback.is-error {
+  color: rgba(166, 42, 79, 0.98);
+  background: rgba(255, 234, 241, 0.84);
 }
 
 .account-metrics {
@@ -5469,6 +5507,7 @@
   }
 
   .site-shell-account .account-member-card,
+  .site-shell-account .account-recharge-card,
   .site-shell-account .account-welcome-card,
   .site-shell-account .account-song-row {
     position: relative;
@@ -5487,6 +5526,7 @@
   }
 
   .site-shell-account .account-member-card::before,
+  .site-shell-account .account-recharge-card::before,
   .site-shell-account .account-welcome-card::before,
   .site-shell-account .account-song-row::before {
     content: '';
@@ -5501,6 +5541,7 @@
   }
 
   .site-shell-account .account-member-card > *,
+  .site-shell-account .account-recharge-card > *,
   .site-shell-account .account-welcome-card > *,
   .site-shell-account .account-song-row > * {
     position: relative;
@@ -5508,6 +5549,7 @@
   }
 
   .site-shell-account .account-member-card,
+  .site-shell-account .account-recharge-card,
   .site-shell-account .account-welcome-card {
     padding: 11px 11px 10px;
     border-radius: 22px;
@@ -5519,6 +5561,7 @@
   }
 
   .site-shell-account .account-member-card h3,
+  .site-shell-account .account-recharge-card h3,
   .site-shell-account .account-welcome-card h3,
   .site-shell-account .account-song-title {
     color: rgba(20, 12, 24, 0.92);
@@ -5538,6 +5581,7 @@
   .site-shell-account .account-member-email,
   .site-shell-account .account-song-subtitle,
   .site-shell-account .account-song-meta,
+  .site-shell-account .account-recharge-card p,
   .site-shell-account .account-welcome-card p,
   .site-shell-account .account-metric span,
   .site-shell-account .mini-eyebrow {
@@ -5567,6 +5611,23 @@
     margin: 3px 0 0;
     font-size: 0.78rem;
     line-height: 1.16;
+  }
+
+  .site-shell-account .account-recharge-form {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .site-shell-account .account-recharge-meta {
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .site-shell-account .account-recharge-feedback {
+    margin-top: 10px;
+    padding: 8px 10px;
+    font-size: 0.68rem;
+    line-height: 1.45;
   }
 
   .site-shell-account .account-welcome-card p {
@@ -7453,6 +7514,11 @@
     justify-items: start;
   }
 
+  .admin-code-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
   .service-hub-ribbon-copy,
   .service-hub-inline-links {
     gap: 8px;
@@ -8345,6 +8411,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.admin-code-row {
+  grid-template-columns: minmax(0, 1.5fr) 90px 90px minmax(120px, 1fr) 110px;
+}
+
+.admin-code-preview-row strong {
+  font-family: var(--font-ui);
+  letter-spacing: 0.06em;
 }
 
 

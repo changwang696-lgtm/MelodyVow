@@ -265,6 +265,25 @@ type MemberInboxMessage = {
   repliedAt?: string
 }
 
+type MemberRechargeCodeResponse = {
+  message: string
+  creditsAdded: number
+  profile: MemberProfile
+  code: {
+    id: string
+    batchId: string
+    maskedCode: string
+    codeLast4: string
+    heartBeans: number
+    createdAt: string
+    updatedAt: string
+    createdBy: string
+    status: string
+    redeemedAt?: string
+    redeemedByEmail?: string
+  }
+}
+
 type AdminContactMessage = {
   id: string
   name: string
@@ -352,6 +371,34 @@ type AdminMember = {
   lastManualAdjustmentBy?: string
 }
 
+type AdminRechargeCode = {
+  id: string
+  batchId: string
+  maskedCode: string
+  codeLast4: string
+  heartBeans: number
+  createdAt: string
+  updatedAt: string
+  createdBy: string
+  status: string
+  redeemedAt?: string
+  redeemedByEmail?: string
+}
+
+type GeneratedRechargeBatch = {
+  batchId: string
+  generatedAt: string
+  count: number
+  csvFilename: string
+  csvContent: string
+  items: Array<{
+    code: string
+    heartBeans: number
+    batchId: string
+    createdAt: string
+  }>
+}
+
 type LayoutProps = {
   locale: Locale
   title: string
@@ -428,6 +475,7 @@ type AccountPageProps = {
   onLogout: () => void
   authSession: AuthSession | null
   onUpsertFloatingPlayer: (payload: FloatingPhonePlayerPayload) => void
+  onAuthSessionUpdate: (profile: MemberProfile) => void
 }
 
 type CompletePageProps = {
@@ -512,6 +560,7 @@ type FloatingPhonePlayerPayload = Partial<FloatingPhonePlayerState> & {
 
 const SONG_HISTORY_KEY = 'melodyvow-song-history'
 const SONG_DRAFT_SESSION_KEY = 'melodyvow-song-draft'
+const SIGNUP_POLICY_VERSION = '2026-09-15'
 const SHOWCASE_SESSION_KEY = 'melodyvow-showcase-context'
 const SHOWCASE_GENERATING_SESSION_KEY = 'melodyvow-showcase-generating-context'
 const AUTH_SESSION_KEY = 'melodyvow-auth-session'
@@ -1909,6 +1958,32 @@ function App() {
     setAuthSession(session)
   }, [])
 
+  const handleAuthProfileUpdate = useCallback((profile: MemberProfile) => {
+    setAuthSession((current) => {
+      if (!current || current.authToken.trim() === '' || current.email !== profile.email) {
+        return current
+      }
+
+      return {
+        ...current,
+        email: profile.email || current.email,
+        partnerName: profile.partnerName || current.partnerName,
+        plan: profile.plan || current.plan,
+        heartBeansBalance: typeof profile.heartBeansBalance === 'number' ? profile.heartBeansBalance : current.heartBeansBalance,
+        topupHeartBeansBalance: typeof profile.topupHeartBeansBalance === 'number' ? profile.topupHeartBeansBalance : current.topupHeartBeansBalance,
+        subscriptionHeartBeansBalance: typeof profile.subscriptionHeartBeansBalance === 'number' ? profile.subscriptionHeartBeansBalance : current.subscriptionHeartBeansBalance,
+        subscriptionStatus: profile.subscriptionStatus || current.subscriptionStatus,
+        subscriptionPlanId: profile.subscriptionPlanId || current.subscriptionPlanId,
+        subscriptionCurrentPeriodEnd: profile.subscriptionCurrentPeriodEnd || current.subscriptionCurrentPeriodEnd,
+        stripeCustomerId: profile.stripeCustomerId || current.stripeCustomerId,
+        paypalSubscriptionId: profile.paypalSubscriptionId || current.paypalSubscriptionId,
+        subscriptionProvider: profile.subscriptionProvider || current.subscriptionProvider,
+        lastAuthAt: profile.lastAuthAt || current.lastAuthAt,
+        avatarUrl: profile.avatarUrl || current.avatarUrl,
+      }
+    })
+  }, [])
+
   const handleLogout = useCallback(() => {
     const currentSession = authSession
     if (currentSession?.authToken) {
@@ -2137,6 +2212,7 @@ function App() {
               onLogout={handleLogout}
               authSession={authSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
+              onAuthSessionUpdate={handleAuthProfileUpdate}
             />
           ))}
         />
@@ -2246,6 +2322,7 @@ function App() {
               onLogout={handleLogout}
               authSession={authSession}
               onUpsertFloatingPlayer={upsertFloatingPlayer}
+              onAuthSessionUpdate={handleAuthProfileUpdate}
             />
           }
         />
@@ -5510,6 +5587,9 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
           email: email.trim(),
           password,
           partnerName: normalizedPartnerName,
+          acceptedAccountPolicy: tab === 'signup' ? acceptedAccountPolicy : undefined,
+          acceptedTransactionPolicy: tab === 'signup' ? acceptedTransactionPolicy : undefined,
+          policyConsentVersion: tab === 'signup' ? SIGNUP_POLICY_VERSION : undefined,
         }),
       })
 
@@ -5736,11 +5816,14 @@ function AuthPage({ locale, draft, selectedPlan, onOpenModal, onAuthSuccess, onL
   )
 }
 
-function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer }: AccountPageProps) {
+function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, authSession, onUpsertFloatingPlayer, onAuthSessionUpdate }: AccountPageProps) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isMobileViewport = useIsMobileViewport()
   const [openingPortal, setOpeningPortal] = useState(false)
+  const [rechargeCodeInput, setRechargeCodeInput] = useState('')
+  const [redeemLoading, setRedeemLoading] = useState(false)
+  const [redeemFeedback, setRedeemFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const displayName = authSession?.partnerName
     ? `${authSession.partnerName} & MelodyVow`
     : locale === 'zh'
@@ -5922,6 +6005,62 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
     }
   }
 
+  async function handleRedeemRechargeCode() {
+    const normalizedCode = rechargeCodeInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (normalizedCode.length !== 12) {
+      setRedeemFeedback({
+        type: 'error',
+        message: copy(locale, {
+          zh: '请输入有效的 12 位充值卡码。',
+          en: 'Please enter a valid 12-character recharge code.',
+        }),
+      })
+      return
+    }
+
+    setRedeemLoading(true)
+    setRedeemFeedback(null)
+
+    try {
+      const response = await fetch(apiUrl('/api/member/recharge-codes/redeem'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getMemberAuthHeaders(authSession),
+        },
+        body: JSON.stringify({ code: normalizedCode }),
+      })
+      const result = (await readJsonSafe(response)) as MemberRechargeCodeResponse | { message?: string }
+      if (!response.ok) {
+        throw new Error('message' in result && result.message ? result.message : copy(locale, {
+          zh: '充值卡码兑换失败，请稍后重试。',
+          en: 'Recharge code redemption failed. Please try again later.',
+        }))
+      }
+
+      const payload = result as MemberRechargeCodeResponse
+      onAuthSessionUpdate(payload.profile)
+      setRechargeCodeInput('')
+      setRedeemFeedback({
+        type: 'success',
+        message: payload.message || copy(locale, {
+          zh: `兑换成功，已到账 ${payload.creditsAdded} 点服务额度。`,
+          en: `${payload.creditsAdded} service credits were added successfully.`,
+        }),
+      })
+    } catch (error) {
+      setRedeemFeedback({
+        type: 'error',
+        message: error instanceof Error ? error.message : copy(locale, {
+          zh: '充值卡码兑换失败，请稍后重试。',
+          en: 'Recharge code redemption failed. Please try again later.',
+        }),
+      })
+    } finally {
+      setRedeemLoading(false)
+    }
+  }
+
   async function handleTogglePlay(item: HistoryItem) {
     try {
       const groupJobId = item.jobId || item.id
@@ -6091,6 +6230,54 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
                   ? copy(locale, { zh: '打开中...', en: 'Opening...' })
                   : copy(locale, { zh: '管理订阅', en: 'Manage Subscription' })}
               </button>
+            ) : null}
+          </section>
+
+          <section className="glass-card account-recharge-card">
+            <p className="mini-eyebrow">{copy(locale, { zh: '充值卡码', en: 'Recharge Code' })}</p>
+            <h3>{copy(locale, { zh: '输入 12 位卡码，立即到账服务点数', en: 'Enter your 12-character code and add credits instantly' })}</h3>
+            <p>
+              {copy(locale, {
+                zh: '卡码仅限已登录会员兑换，点数会直接进入你的充值额度余额。',
+                en: 'Redeem while logged in and the credits will land directly in your top-up balance.',
+              })}
+            </p>
+            <div className="account-recharge-form">
+              <label className="field">
+                <span>{copy(locale, { zh: '12 位充值卡码', en: '12-character recharge code' })}</span>
+                <input
+                  value={rechargeCodeInput}
+                  maxLength={12}
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  placeholder={copy(locale, { zh: '例如 AB12CD34EF56', en: 'Example: AB12CD34EF56' })}
+                  onChange={(event) => {
+                    setRechargeCodeInput(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12))
+                    if (redeemFeedback) {
+                      setRedeemFeedback(null)
+                    }
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={redeemLoading || rechargeCodeInput.trim().length !== 12}
+                onClick={() => void handleRedeemRechargeCode()}
+              >
+                {redeemLoading
+                  ? copy(locale, { zh: '兑换中...', en: 'Redeeming...' })
+                  : copy(locale, { zh: '立即兑换', en: 'Redeem Now' })}
+              </button>
+            </div>
+            <div className="account-recharge-meta">
+              <span className="soft-pill">{copy(locale, { zh: `当前充值额度 ${topupHeartBeansBalance}`, en: `Top-up balance ${topupHeartBeansBalance}` })}</span>
+              <span className="soft-pill">{copy(locale, { zh: '卡码已写入数据库并防重复兑换', en: 'Codes are stored securely and cannot be redeemed twice' })}</span>
+            </div>
+            {redeemFeedback ? (
+              <p className={`account-recharge-feedback ${redeemFeedback.type === 'success' ? 'is-success' : 'is-error'}`}>
+                {redeemFeedback.message}
+              </p>
             ) : null}
           </section>
 
@@ -6297,7 +6484,7 @@ function AdminDashboardPage({
 }) {
   const navigate = useNavigate()
   const activeSession = session
-  const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'messages' | 'config'>('overview')
+  const [tab, setTab] = useState<'overview' | 'members' | 'songs' | 'showcase' | 'plans' | 'payments' | 'orders' | 'messages' | 'codes' | 'config'>('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [metrics, setMetrics] = useState({
@@ -6308,6 +6495,9 @@ function AdminDashboardPage({
     totalRevenue: 0,
     totalMessages: 0,
     pendingMessages: 0,
+    totalRechargeCodes: 0,
+    activeRechargeCodes: 0,
+    redeemedRechargeCodes: 0,
   })
   const [songs, setSongs] = useState<AdminSong[]>([])
   const [members, setMembers] = useState<AdminMember[]>([])
@@ -6323,6 +6513,12 @@ function AdminDashboardPage({
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodAdmin[]>([])
   const [messages, setMessages] = useState<AdminContactMessage[]>([])
   const [selectedMessage, setSelectedMessage] = useState<AdminContactMessage | null>(null)
+  const [rechargeCodes, setRechargeCodes] = useState<AdminRechargeCode[]>([])
+  const [selectedRechargeCode, setSelectedRechargeCode] = useState<AdminRechargeCode | null>(null)
+  const [rechargeCodeHeartBeans, setRechargeCodeHeartBeans] = useState('15')
+  const [rechargeCodeQuantity, setRechargeCodeQuantity] = useState('20')
+  const [generatingRechargeCodes, setGeneratingRechargeCodes] = useState(false)
+  const [latestRechargeBatch, setLatestRechargeBatch] = useState<GeneratedRechargeBatch | null>(null)
   const [config, setConfig] = useState<AdminConfig>({
     deepseekProvider: '',
     sunoProvider: '',
@@ -6364,6 +6560,7 @@ function AdminDashboardPage({
           { key: 'payments', path: '/api/admin/payment-methods', label: '支付方式' },
           { key: 'orders', path: '/api/admin/orders', label: '订单' },
           { key: 'messages', path: '/api/admin/messages', label: '留言' },
+          { key: 'codes', path: '/api/admin/recharge-codes', label: '充值卡码' },
           { key: 'config', path: '/api/admin/config', label: '配置' },
         ] as const
 
@@ -6402,6 +6599,7 @@ function AdminDashboardPage({
         let nextPayments: PaymentMethodAdmin[] | null = null
         let nextOrders: AdminOrder[] | null = null
         let nextMessages: AdminContactMessage[] | null = null
+        let nextRechargeCodes: AdminRechargeCode[] | null = null
         let nextConfig: AdminConfig | null = null
 
         settled.forEach((result) => {
@@ -6446,6 +6644,9 @@ function AdminDashboardPage({
               break
             case 'messages':
               nextMessages = Array.isArray(data?.items) ? data.items : []
+              break
+            case 'codes':
+              nextRechargeCodes = Array.isArray(data?.items) ? data.items : []
               break
             case 'config':
               nextConfig = data as AdminConfig
@@ -6512,6 +6713,17 @@ function AdminDashboardPage({
               return messageData.find((item) => item.id === current.id) ?? messageData[0] ?? null
             }
             return messageData[0] ?? null
+          })
+        }
+
+        if (nextRechargeCodes) {
+          const codeData: AdminRechargeCode[] = nextRechargeCodes
+          setRechargeCodes(codeData)
+          setSelectedRechargeCode((current) => {
+            if (current) {
+              return codeData.find((item) => item.id === current.id) ?? codeData[0] ?? null
+            }
+            return codeData[0] ?? null
           })
         }
 
@@ -6846,6 +7058,79 @@ function AdminDashboardPage({
     }
   }
 
+  function downloadRechargeBatchCsv(batch: GeneratedRechargeBatch) {
+    const blob = new Blob([batch.csvContent], { type: 'text/csv;charset=utf-8' })
+    const blobUrl = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = blobUrl
+    anchor.download = batch.csvFilename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.URL.revokeObjectURL(blobUrl)
+  }
+
+  async function handleGenerateRechargeCodes() {
+    const heartBeans = Math.max(1, Number(rechargeCodeHeartBeans || 0))
+    const quantity = Math.max(1, Math.min(500, Number(rechargeCodeQuantity || 0)))
+
+    if (!Number.isFinite(heartBeans) || heartBeans <= 0) {
+      setError('请输入有效的服务点数。')
+      return
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError('请输入有效的卡码数量。')
+      return
+    }
+
+    setGeneratingRechargeCodes(true)
+    setError('')
+
+    try {
+      const response = await fetch(apiUrl('/api/admin/recharge-codes/generate'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': activeSession!.token,
+        },
+        body: JSON.stringify({ heartBeans, quantity }),
+      })
+      const result = (await readJsonSafe(response)) as GeneratedRechargeBatch | { message?: string }
+      if (!response.ok) {
+        throw new Error('message' in result && result.message ? result.message : '充值卡码生成失败。')
+      }
+
+      const batch = result as GeneratedRechargeBatch
+      setLatestRechargeBatch(batch)
+      downloadRechargeBatchCsv(batch)
+
+      const reloadResponse = await fetch(apiUrl('/api/admin/recharge-codes'), {
+        headers: {
+          'x-admin-token': activeSession!.token,
+        },
+      })
+      const reloadData = (await readJsonSafe(reloadResponse)) as { items?: AdminRechargeCode[]; message?: string }
+      if (!reloadResponse.ok) {
+        throw new Error(reloadData.message || '充值卡码列表刷新失败。')
+      }
+
+      const nextItems = Array.isArray(reloadData.items) ? reloadData.items : []
+      setRechargeCodes(nextItems)
+      setSelectedRechargeCode(nextItems[0] ?? null)
+      setMetrics((current) => ({
+        ...current,
+        totalRechargeCodes: nextItems.length,
+        activeRechargeCodes: nextItems.filter((item) => item.status !== 'redeemed').length,
+        redeemedRechargeCodes: nextItems.filter((item) => item.status === 'redeemed').length,
+      }))
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '充值卡码生成失败。')
+    } finally {
+      setGeneratingRechargeCodes(false)
+    }
+  }
+
   async function handleSaveSong() {
     if (!selectedSong) {
       return
@@ -6901,6 +7186,7 @@ function AdminDashboardPage({
     { key: 'payments', label: '支付方式' },
     { key: 'orders', label: '订单' },
     { key: 'messages', label: '留言管理' },
+    { key: 'codes', label: '充值卡码' },
     { key: 'config', label: '配置' },
   ] as const
 
@@ -6930,6 +7216,8 @@ function AdminDashboardPage({
   const failedSongCount = selectedMemberSongs.filter((item) => item.status === 'error').length
   const selectedSongStreamUrl = selectedSong ? getSongStreamUrl(selectedSong.id) : ''
   const selectedSongDownloadUrl = selectedSong ? getSongDownloadUrl(selectedSong.id) : ''
+  const activeRechargeCodeCount = rechargeCodes.filter((item) => item.status !== 'redeemed').length
+  const redeemedRechargeCodeCount = rechargeCodes.filter((item) => item.status === 'redeemed').length
 
   return (
     <div className="admin-shell">
@@ -6992,6 +7280,18 @@ function AdminDashboardPage({
               <article className="glass-card admin-metric-card">
                 <strong>{metrics.pendingMessages}</strong>
                 <span>待回复留言</span>
+              </article>
+              <article className="glass-card admin-metric-card">
+                <strong>{metrics.totalRechargeCodes}</strong>
+                <span>充值卡总数</span>
+              </article>
+              <article className="glass-card admin-metric-card">
+                <strong>{metrics.activeRechargeCodes}</strong>
+                <span>可兑换卡码</span>
+              </article>
+              <article className="glass-card admin-metric-card">
+                <strong>{metrics.redeemedRechargeCodes}</strong>
+                <span>已兑换卡码</span>
               </article>
             </section>
           ) : null}
@@ -7962,6 +8262,152 @@ function AdminDashboardPage({
                 ) : (
                   <p className="empty-state">请选择一条留言查看详情。</p>
                 )}
+              </aside>
+            </section>
+          ) : null}
+
+          {!loading && tab === 'codes' ? (
+            <section className="admin-detail-layout">
+              <section className="admin-table glass-card">
+                <div className="admin-table-head">
+                  <strong>充值卡码列表</strong>
+                  <span>{rechargeCodes.length} 条</span>
+                </div>
+                <div className="admin-table-list">
+                  {rechargeCodes.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`admin-table-row admin-select-row admin-code-row ${selectedRechargeCode?.id === item.id ? 'is-active' : ''}`}
+                      onClick={() => setSelectedRechargeCode(item)}
+                    >
+                      <div>
+                        <h3>{item.maskedCode}</h3>
+                        <p>{item.batchId || '未分批次'} · {item.createdBy || 'admin'}</p>
+                      </div>
+                      <div>{item.heartBeans} 点</div>
+                      <div>{item.status === 'redeemed' ? '已兑换' : '可兑换'}</div>
+                      <div>{item.redeemedByEmail || '-'}</div>
+                      <div>{new Date(item.updatedAt || item.createdAt).toLocaleDateString('zh-CN')}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <aside className="glass-card admin-detail-card">
+                <div className="admin-table-head">
+                  <strong>充值卡码生成器</strong>
+                  <span>{selectedRechargeCode?.maskedCode ?? '未选择'}</span>
+                </div>
+                <div className="admin-detail-stack">
+                  <section className="admin-member-summary-grid">
+                    <article className="admin-mini-card">
+                      <span>卡码总数</span>
+                      <strong>{rechargeCodes.length}</strong>
+                    </article>
+                    <article className="admin-mini-card">
+                      <span>可兑换</span>
+                      <strong>{activeRechargeCodeCount}</strong>
+                    </article>
+                    <article className="admin-mini-card">
+                      <span>已兑换</span>
+                      <strong>{redeemedRechargeCodeCount}</strong>
+                    </article>
+                    <article className="admin-mini-card">
+                      <span>最近批次</span>
+                      <strong>{latestRechargeBatch?.count ?? 0}</strong>
+                    </article>
+                  </section>
+
+                  <section className="admin-member-edit-grid">
+                    <label className="field">
+                      <span>每张卡点数</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={rechargeCodeHeartBeans}
+                        onChange={(event) => setRechargeCodeHeartBeans(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>批量数量</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="500"
+                        value={rechargeCodeQuantity}
+                        onChange={(event) => setRechargeCodeQuantity(event.target.value)}
+                      />
+                    </label>
+                  </section>
+
+                  <div className="admin-link-actions">
+                    <button type="button" className="primary-button" disabled={generatingRechargeCodes} onClick={() => void handleGenerateRechargeCodes()}>
+                      {generatingRechargeCodes ? '生成中...' : '生成并下载 CSV'}
+                    </button>
+                    {latestRechargeBatch ? (
+                      <button type="button" className="ghost-button" onClick={() => downloadRechargeBatchCsv(latestRechargeBatch)}>
+                        重新下载最近批次
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {latestRechargeBatch ? (
+                    <article className="glass-card admin-inline-card">
+                      <div className="admin-inline-head">
+                        <strong>最近生成批次</strong>
+                        <span>{latestRechargeBatch.batchId}</span>
+                      </div>
+                      <div className="admin-inline-list">
+                        {latestRechargeBatch.items.slice(0, 8).map((item) => (
+                          <div key={item.code} className="admin-inline-row admin-code-preview-row">
+                            <div>
+                              <strong>{item.code}</strong>
+                              <p>{item.heartBeans} 点服务额度</p>
+                            </div>
+                            <div className="admin-inline-meta">
+                              <span>{item.batchId}</span>
+                              <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ) : null}
+
+                  {selectedRechargeCode ? (
+                    <article className="glass-card admin-inline-card">
+                      <div className="admin-inline-head">
+                        <strong>卡码详情</strong>
+                        <span>{selectedRechargeCode.status === 'redeemed' ? '已兑换' : '可兑换'}</span>
+                      </div>
+                      <div className="admin-inline-list">
+                        <div className="admin-inline-row">
+                          <div>
+                            <strong>{selectedRechargeCode.maskedCode}</strong>
+                            <p>{selectedRechargeCode.heartBeans} 点服务额度 · 批次 {selectedRechargeCode.batchId}</p>
+                          </div>
+                          <div className="admin-inline-meta">
+                            <span>{selectedRechargeCode.createdBy || 'admin'}</span>
+                            <span>{new Date(selectedRechargeCode.createdAt).toLocaleString('zh-CN')}</span>
+                          </div>
+                        </div>
+                        <div className="admin-inline-row">
+                          <div>
+                            <strong>兑换状态</strong>
+                            <p>{selectedRechargeCode.redeemedByEmail || '尚未兑换'}</p>
+                          </div>
+                          <div className="admin-inline-meta">
+                            <span>{selectedRechargeCode.status === 'redeemed' ? '已到账' : '待兑换'}</span>
+                            <span>{selectedRechargeCode.redeemedAt ? new Date(selectedRechargeCode.redeemedAt).toLocaleString('zh-CN') : '-'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ) : (
+                    <p className="empty-state compact">请选择一张充值卡码查看兑换详情。</p>
+                  )}
+                </div>
               </aside>
             </section>
           ) : null}
