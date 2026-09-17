@@ -66,7 +66,6 @@ const VIP_STYLE_IDS = new Set([
   'chinese_vow_gratitude_ballad',
   'forbidden_city_bride_entrance',
 ])
-const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
 const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
 const CREDIT_LEDGER_LIMIT = 20000
 const RECHARGE_CODE_LENGTH = 12
@@ -956,12 +955,7 @@ function resolveMemberSubscriptionPlan(member) {
 
 function memberCanUseVipModels(member) {
   const matchedPlan = resolveMemberSubscriptionPlan(member)
-  if (!planAllowsVipModels(matchedPlan)) {
-    return false
-  }
-
-  const normalizedStatus = String(member?.subscriptionStatus || '').trim().toLowerCase()
-  return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
+  return planAllowsVipModels(matchedPlan)
 }
 
 function supportsPlanType(method, planType) {
