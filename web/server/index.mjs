@@ -46,6 +46,25 @@ const VIP_STYLE_IDS = new Set([
   'cinematic_desert_ritual',
   'cinematic_tropical_fiesta',
   'cinematic_orchestra',
+  'royal_epic_ceremony',
+  'cinematic_timeless_love_theme',
+  'japanese_shinto_ceremonial_epic',
+  'japanese_fateful_jrock_theme',
+  'bollywood_grand_wedding_spectacle',
+  'monsoon_spiritual_fusion',
+  'desert_processional_hymn',
+  'west_african_juju_praise',
+  'swahili_taarab_romance',
+  'latin_bolero_epic',
+  'celtic_bagpipe_destiny',
+  'russian_ritual_tension',
+  'greek_syrtaki_cinema',
+  'flamenco_blood_wedding',
+  'chinese_royal_dragon_phoenix',
+  'chinese_desert_film_epic',
+  'chinese_hundred_birds_festive',
+  'chinese_vow_gratitude_ballad',
+  'forbidden_city_bride_entrance',
 ])
 const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
 const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
@@ -269,6 +288,19 @@ function normalizePlanTypeList(value, fallback = ['credit_pack']) {
 function normalizeCreditBalanceType(value, fallback = 'topup') {
   const normalized = String(value || '').trim().toLowerCase()
   return CREDIT_BALANCE_TYPES.has(normalized) ? normalized : fallback
+}
+
+function getPlanIdentityKey(input) {
+  return `${String(input?.id || '').trim()} ${String(input?.name || '').trim()}`.toLowerCase()
+}
+
+function looksLikeLegacySubscriptionPlan(input) {
+  const key = getPlanIdentityKey(input)
+  return key.includes('starter') || key.includes('pro') || key.includes('premium')
+}
+
+function looksLikeLegacyPremiumPlan(input) {
+  return getPlanIdentityKey(input).includes('premium')
 }
 
 function normalizePayPalCurrencyCode(value) {
@@ -545,14 +577,23 @@ function normalizeLoadedAdminData(parsed) {
           name: String(plan?.name || ''),
           price: normalizePositiveNumber(plan?.price, 0),
           heartBeans: normalizePositiveNumber(plan?.heartBeans, getDefaultHeartBeansForPlan(plan)),
-          type: normalizePlanType(plan?.type, String(plan?.billingInterval || '').trim() ? 'subscription' : 'credit_pack'),
-          billingInterval: normalizeBillingInterval(plan?.billingInterval),
+          type: normalizePlanType(
+            plan?.type,
+            String(plan?.billingInterval || '').trim()
+              ? 'subscription'
+              : looksLikeLegacySubscriptionPlan(plan)
+                ? 'subscription'
+                : 'credit_pack',
+          ),
+          billingInterval: normalizeBillingInterval(plan?.billingInterval || (looksLikeLegacySubscriptionPlan(plan) ? 'month' : '')),
           stripePriceId: String(plan?.stripePriceId || '').trim(),
           paypalPlanId: String(plan?.paypalPlanId || '').trim(),
           currency: String(plan?.currency || 'USD'),
           badge: String(plan?.badge || ''),
           features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
-          canUseVipModels: normalizeBoolean(plan?.canUseVipModels, false),
+          canUseVipModels: typeof plan?.canUseVipModels === 'boolean'
+            ? plan.canUseVipModels
+            : looksLikeLegacyPremiumPlan(plan),
         }))
       : defaults.plans,
     showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
