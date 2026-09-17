@@ -1613,7 +1613,6 @@ function normalizePricingPlan(plan: PlanItem): PlanItem {
   }
 }
 
-const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
 const PREMIUM_VIP_PLAN_ID_PREFIX = 'premium'
 const VIP_CHINESE_FEATURED_STYLE_IDS: string[] = [
   'chinese_royal_dragon_phoenix',
@@ -1669,12 +1668,7 @@ function resolveMemberVipPlan(authSession: AuthSession | null | undefined, plans
 
 function memberHasVipModelAccess(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
   const matchedPlan = resolveMemberVipPlan(authSession, plans)
-  if (!planSupportsVipModels(matchedPlan)) {
-    return false
-  }
-
-  const normalizedStatus = String(authSession?.subscriptionStatus || '').trim().toLowerCase()
-  return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
+  return planSupportsVipModels(matchedPlan)
 }
 
 function syncAdminMemberPlanFields(
