@@ -65,6 +65,26 @@
   --site-grad-base: linear-gradient(135deg, #070803 0%, #572d17 24%, #e3ae86 48%, #070803 74%, #572d17 100%);
 }
 
+.site-shell[data-background-theme='elegant_dark'] .nav-link {
+  color: rgba(255, 244, 231, 0.92);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.18),
+    0 0 12px rgba(255, 216, 168, 0.18);
+}
+
+.site-shell[data-background-theme='elegant_dark'] .nav-link:hover,
+.site-shell[data-background-theme='elegant_dark'] .nav-link.active {
+  color: #fffdf8;
+  background: linear-gradient(135deg, rgba(214, 151, 88, 0.3), rgba(132, 66, 38, 0.18));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 234, 0.24),
+    0 10px 22px rgba(9, 8, 5, 0.18),
+    0 0 24px rgba(255, 214, 150, 0.14);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.24),
+    0 0 16px rgba(255, 231, 193, 0.24);
+}
+
 .site-shell[data-locale='zh'] {
   --font-ui: var(--font-zh);
   --font-display: var(--font-zh-display);
@@ -4893,6 +4913,12 @@
   margin-top: 10px;
 }
 
+.account-recharge-card.account-recharge-card-compact h3 {
+  margin-top: 6px;
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
 .account-recharge-card p {
   margin: 8px 0 0;
 }
@@ -4903,11 +4929,36 @@
   margin-top: 16px;
 }
 
+.account-recharge-card.account-recharge-card-compact {
+  padding-block: 14px;
+}
+
+.account-recharge-card.account-recharge-card-compact .account-recharge-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.account-recharge-card.account-recharge-card-compact .account-recharge-form .field {
+  margin: 0;
+}
+
+.account-recharge-card.account-recharge-card-compact .account-recharge-form .primary-button {
+  min-height: 42px;
+  padding-inline: 18px;
+  white-space: nowrap;
+}
+
 .account-recharge-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.account-recharge-card.account-recharge-card-compact .account-recharge-meta {
+  margin-top: 10px;
 }
 
 .account-recharge-feedback {
@@ -5462,6 +5513,19 @@
     -ms-overflow-style: none;
   }
 
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .site-nav,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .site-nav,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .site-nav,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .site-nav,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .site-nav {
+    background: rgba(255, 247, 236, 0.12);
+    border-color: rgba(255, 233, 201, 0.22);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 245, 230, 0.18),
+      0 12px 24px rgba(5, 4, 2, 0.18),
+      0 0 24px rgba(255, 220, 169, 0.08);
+  }
+
   .site-shell-home .header-actions,
   .site-shell-showcase .header-actions,
   .site-shell-styles .header-actions,
@@ -5573,6 +5637,17 @@
     transform: none;
   }
 
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link {
+    color: rgba(255, 244, 231, 0.96);
+    text-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.24),
+      0 0 10px rgba(255, 214, 165, 0.16);
+  }
+
   .site-shell-home .nav-link:hover,
   .site-shell-home .nav-link.active,
   .site-shell-showcase .nav-link:hover,
@@ -5586,6 +5661,22 @@
     color: #ffffff;
     background: transparent;
     transform: none;
+  }
+
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link.active {
+    color: #fffdf8;
+    text-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.3),
+      0 0 14px rgba(255, 233, 197, 0.24);
   }
 
   .header-cta {
@@ -5832,6 +5923,18 @@
   .site-shell-account .account-recharge-form {
     gap: 8px;
     margin-top: 10px;
+  }
+
+  .site-shell-account .account-recharge-card.account-recharge-card-compact .account-recharge-form {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .site-shell-account .account-recharge-card.account-recharge-card-compact .account-recharge-form .primary-button {
+    width: 100%;
+    min-height: 38px;
+    padding-inline: 12px;
   }
 
   .site-shell-account .account-recharge-meta {
@@ -6088,6 +6191,17 @@
     transform: none;
   }
 
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link {
+    color: rgba(255, 244, 231, 0.96);
+    text-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.24),
+      0 0 10px rgba(255, 214, 165, 0.16);
+  }
+
   .site-shell-home .nav-link:hover,
   .site-shell-home .nav-link.active,
   .site-shell-showcase .nav-link:hover,
@@ -6101,6 +6215,22 @@
     color: #ffffff;
     background: transparent;
     transform: none;
+  }
+
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-home .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-showcase .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-styles .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-pricing .nav-link.active,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link:hover,
+  .site-shell[data-background-theme='elegant_dark'].site-shell-account .nav-link.active {
+    color: #fffdf8;
+    text-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.3),
+      0 0 14px rgba(255, 233, 197, 0.24);
   }
 
   .site-shell-home .page-container.page-container-home {

@@ -6473,15 +6473,9 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             ) : null}
           </section>
 
-          <section className="glass-card account-recharge-card">
+          <section className="glass-card account-recharge-card account-recharge-card-compact">
             <p className="mini-eyebrow">{copy(locale, { zh: 'SVIP 卡', en: 'SVIP Card' })}</p>
             <h3>{copy(locale, { zh: '输入 12 位 SVIP 卡码，立即到账服务点数', en: 'Enter your 12-character SVIP card code and add credits instantly' })}</h3>
-            <p>
-              {copy(locale, {
-                zh: 'SVIP 卡仅限已登录会员兑换，点数会直接进入你的充值额度余额。',
-                en: 'Redeem your SVIP card while logged in and the credits will land directly in your top-up balance.',
-              })}
-            </p>
             <div className="account-recharge-form">
               <label className="field">
                 <span>{copy(locale, { zh: '12 位 SVIP 卡码', en: '12-character SVIP card code' })}</span>
@@ -6512,7 +6506,6 @@ function AccountPage({ locale, selectedPlan, onOpenModal, history, onLogout, aut
             </div>
             <div className="account-recharge-meta">
               <span className="soft-pill">{copy(locale, { zh: `当前充值额度 ${topupHeartBeansBalance}`, en: `Top-up balance ${topupHeartBeansBalance}` })}</span>
-              <span className="soft-pill">{copy(locale, { zh: 'SVIP 卡已写入数据库并防重复兑换', en: 'SVIP cards are stored securely and cannot be redeemed twice' })}</span>
             </div>
             {redeemFeedback ? (
               <p className={`account-recharge-feedback ${redeemFeedback.type === 'success' ? 'is-success' : 'is-error'}`}>
