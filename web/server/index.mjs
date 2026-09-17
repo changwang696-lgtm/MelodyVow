@@ -4193,7 +4193,7 @@ app.patch('/api/admin/members/:email', requireAdminAuth, (req, res) => {
     next.plan = matchedPlan.name
     if (normalizePlanType(matchedPlan.type, 'credit_pack') === 'subscription') {
       next.subscriptionPlanId = matchedPlan.id
-      next.subscriptionStatus = sanitizeCompactText(patch.subscriptionStatus ?? current.subscriptionStatus, 40) || 'active'
+      next.subscriptionStatus = sanitizeCompactText(patch.subscriptionStatus, 40) || 'active'
     }
     else {
       next.subscriptionPlanId = ''
