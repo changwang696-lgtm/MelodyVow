@@ -1648,16 +1648,23 @@ function isVipStyle(styleId: string) {
 
 function resolveMemberVipPlan(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
   const subscriptionPlanId = String(authSession?.subscriptionPlanId || '').trim()
+  const currentPlanName = String(authSession?.plan || '').trim()
+  const matchedPlanByName = currentPlanName
+    ? plans.find((item) => String(item.name || '').trim() === currentPlanName) || null
+    : null
+  if (matchedPlanByName && planSupportsVipModels(matchedPlanByName)) {
+    return matchedPlanByName
+  }
+
   if (subscriptionPlanId) {
     return plans.find((item) => item.id === subscriptionPlanId) || null
   }
 
-  const currentPlanName = String(authSession?.plan || '').trim()
   if (!currentPlanName) {
     return null
   }
 
-  return plans.find((item) => String(item.name || '').trim() === currentPlanName) || null
+  return matchedPlanByName
 }
 
 function memberHasVipModelAccess(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
@@ -1674,7 +1681,7 @@ function syncAdminMemberPlanFields(
   member: AdminMember,
   planName: string,
   plans: PlanItem[],
-  options?: { preserveEmptySubscriptionStatus?: boolean },
+  options?: { preserveExistingSubscriptionStatus?: boolean },
 ) {
   const normalizedPlanName = String(planName || '').trim()
   const matchedPlan = plans.find((item) => String(item.name || '').trim() === normalizedPlanName) || null
@@ -1686,11 +1693,14 @@ function syncAdminMemberPlanFields(
   }
 
   if (matchedPlan.type === 'subscription') {
+    const nextSubscriptionStatus = options?.preserveExistingSubscriptionStatus
+      ? String(member.subscriptionStatus || '').trim()
+      : 'active'
     return {
       ...member,
       plan: matchedPlan.name,
       subscriptionPlanId: matchedPlan.id,
-      subscriptionStatus: String(member.subscriptionStatus || '').trim() || (options?.preserveEmptySubscriptionStatus ? '' : 'active'),
+      subscriptionStatus: nextSubscriptionStatus,
     }
   }
 
@@ -6894,11 +6904,11 @@ function AdminDashboardPage({
             if (current) {
               const matchedMember = membersData.find((item) => item.email === current.email) ?? membersData[0] ?? null
               return matchedMember
-                ? syncAdminMemberPlanFields(matchedMember, matchedMember.plan || '', plans, { preserveEmptySubscriptionStatus: true })
+                ? syncAdminMemberPlanFields(matchedMember, matchedMember.plan || '', plans, { preserveExistingSubscriptionStatus: true })
                 : null
             }
             return membersData[0]
-              ? syncAdminMemberPlanFields(membersData[0], membersData[0].plan || '', plans, { preserveEmptySubscriptionStatus: true })
+              ? syncAdminMemberPlanFields(membersData[0], membersData[0].plan || '', plans, { preserveExistingSubscriptionStatus: true })
               : null
           })
         }
@@ -7550,7 +7560,7 @@ function AdminDashboardPage({
                       type="button"
                       className={`admin-table-row admin-select-row admin-member-row ${selectedMember?.email === item.email ? 'is-active' : ''}`}
                       onClick={() => {
-                        setSelectedMember(syncAdminMemberPlanFields(item, item.plan || '', plans, { preserveEmptySubscriptionStatus: true }))
+                        setSelectedMember(syncAdminMemberPlanFields(item, item.plan || '', plans, { preserveExistingSubscriptionStatus: true }))
                         setManualTopupAmount('0')
                         setManualTopupNote('')
                       }}
