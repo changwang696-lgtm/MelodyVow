@@ -1641,6 +1641,12 @@ function planSupportsVipModels(plan: Pick<PlanItem, 'id' | 'type' | 'canUseVipMo
     && normalizedPlanId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
 }
 
+function authSessionLooksPremium(authSession: AuthSession | null | undefined) {
+  const planName = String(authSession?.plan || '').trim().toLowerCase()
+  const planId = String(authSession?.subscriptionPlanId || '').trim().toLowerCase()
+  return planName.includes(PREMIUM_VIP_PLAN_ID_PREFIX) || planId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
+}
+
 function isVipStyle(styleId: string) {
   return getStyleCollectionIds(styleId).includes('vip')
 }
@@ -1667,6 +1673,9 @@ function resolveMemberVipPlan(authSession: AuthSession | null | undefined, plans
 }
 
 function memberHasVipModelAccess(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
+  if (authSessionLooksPremium(authSession)) {
+    return true
+  }
   const matchedPlan = resolveMemberVipPlan(authSession, plans)
   return planSupportsVipModels(matchedPlan)
 }
