@@ -1601,6 +1601,7 @@ function normalizePricingPlan(plan: PlanItem): PlanItem {
 }
 
 const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
+const PREMIUM_VIP_PLAN_ID_PREFIX = 'premium'
 const VIP_CHINESE_FEATURED_STYLE_IDS: string[] = [
   'chinese_royal_dragon_phoenix',
   'forbidden_city_bride_entrance',
@@ -1621,8 +1622,11 @@ function getDefaultPlanAccessFallback(): PlanItem[] {
   ]
 }
 
-function planSupportsVipModels(plan: Pick<PlanItem, 'type' | 'canUseVipModels'> | null | undefined) {
-  return Boolean(plan?.canUseVipModels) && (plan?.type || 'subscription') === 'subscription'
+function planSupportsVipModels(plan: Pick<PlanItem, 'id' | 'type' | 'canUseVipModels'> | null | undefined) {
+  const normalizedPlanId = String(plan?.id || '').trim().toLowerCase()
+  return Boolean(plan?.canUseVipModels)
+    && (plan?.type || 'subscription') === 'subscription'
+    && normalizedPlanId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
 }
 
 function isVipStyle(styleId: string) {
@@ -1651,6 +1655,33 @@ function memberHasVipModelAccess(authSession: AuthSession | null | undefined, pl
 
   const normalizedStatus = String(authSession?.subscriptionStatus || '').trim().toLowerCase()
   return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
+}
+
+function syncAdminMemberPlanFields(member: AdminMember, planName: string, plans: PlanItem[]) {
+  const normalizedPlanName = String(planName || '').trim()
+  const matchedPlan = plans.find((item) => String(item.name || '').trim() === normalizedPlanName) || null
+  if (!matchedPlan) {
+    return {
+      ...member,
+      plan: normalizedPlanName,
+    }
+  }
+
+  if (matchedPlan.type === 'subscription') {
+    return {
+      ...member,
+      plan: matchedPlan.name,
+      subscriptionPlanId: matchedPlan.id,
+      subscriptionStatus: String(member.subscriptionStatus || '').trim() || 'active',
+    }
+  }
+
+  return {
+    ...member,
+    plan: matchedPlan.name,
+    subscriptionPlanId: '',
+    subscriptionStatus: '',
+  }
 }
 
 function formatPlanPrice(plan: Pick<PlanItem, 'price'>) {
@@ -7020,7 +7051,7 @@ function AdminDashboardPage({
     const currentSubscriptionBalance = Number(selectedMember.subscriptionHeartBeansBalance ?? 0)
     const manualNote = manualTopupNote.trim()
     const nextMemberPayload: AdminMember = {
-      ...selectedMember,
+      ...syncAdminMemberPlanFields(selectedMember, selectedMember.plan || '', plans),
       topupHeartBeansBalance: currentTopupBalance + topupAmount,
       subscriptionHeartBeansBalance: currentSubscriptionBalance,
       heartBeansBalance: currentTopupBalance + topupAmount + currentSubscriptionBalance,
@@ -7542,12 +7573,12 @@ function AdminDashboardPage({
                         <span>套餐</span>
                         <select
                           value={selectedMember.plan || ''}
-                          onChange={(event) => setSelectedMember((current) => current ? { ...current, plan: event.target.value } : current)}
+                          onChange={(event) => setSelectedMember((current) => current ? syncAdminMemberPlanFields(current, event.target.value, plans) : current)}
                         >
                           <option value="">未设置</option>
                           {plans.map((plan) => (
                             <option key={plan.id} value={plan.name}>
-                              {plan.name}
+                              {plan.name}{plan.id === 'premium-monthly' ? ' · 可用VIP模型' : ''}
                             </option>
                           ))}
                         </select>
