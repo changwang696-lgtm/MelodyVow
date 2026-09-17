@@ -39,6 +39,15 @@ const PLAN_TYPES = new Set(['subscription', 'credit_pack'])
 const BILLING_INTERVALS = new Set(['month', 'year'])
 const PAYMENT_PROVIDERS = new Set(['stripe_checkout', 'paypal', 'alipay'])
 const CREDIT_BALANCE_TYPES = new Set(['subscription', 'topup'])
+const VIP_STYLE_IDS = new Set([
+  'cinematic_grand_ceremony',
+  'cinematic_promise_ballad',
+  'cinematic_eastern_romance',
+  'cinematic_desert_ritual',
+  'cinematic_tropical_fiesta',
+  'cinematic_orchestra',
+])
+const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
 const WEBHOOK_EVENT_HISTORY_LIMIT = 5000
 const CREDIT_LEDGER_LIMIT = 20000
 const RECHARGE_CODE_LENGTH = 12
@@ -326,6 +335,7 @@ function createDefaultAdminData() {
         currency: 'USD',
         badge: '',
         features: ['每月自动续费', '每月发放 5 点订阅额度', 'AI 歌词生成', 'MP3 下载'],
+        canUseVipModels: false,
       },
       {
         id: 'pro-monthly',
@@ -339,6 +349,7 @@ function createDefaultAdminData() {
         currency: 'USD',
         badge: '推荐',
         features: ['每月自动续费', '每月发放 15 点订阅额度', '完整歌词', '高清音频'],
+        canUseVipModels: false,
       },
       {
         id: 'premium-monthly',
@@ -351,7 +362,8 @@ function createDefaultAdminData() {
         paypalPlanId: '',
         currency: 'USD',
         badge: '',
-        features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音'],
+        features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音', '可使用 VIP模型'],
+        canUseVipModels: true,
       },
       {
         id: 'boost-5',
@@ -365,6 +377,7 @@ function createDefaultAdminData() {
         currency: 'USD',
         badge: '',
         features: ['一次性购买', '立即到账 5 点充值额度', '适合低频用户'],
+        canUseVipModels: false,
       },
       {
         id: 'signature-15',
@@ -378,6 +391,7 @@ function createDefaultAdminData() {
         currency: 'USD',
         badge: '热门',
         features: ['一次性购买', '立即到账 15 点充值额度', '适合婚礼筹备期集中使用'],
+        canUseVipModels: false,
       },
       {
         id: 'celebration-40',
@@ -391,6 +405,7 @@ function createDefaultAdminData() {
         currency: 'USD',
         badge: '',
         features: ['一次性购买', '立即到账 40 点充值额度', '适合工作室或高频用户'],
+        canUseVipModels: false,
       },
     ],
     showcaseTracks: productShowcaseTracks,
@@ -537,6 +552,7 @@ function normalizeLoadedAdminData(parsed) {
           currency: String(plan?.currency || 'USD'),
           badge: String(plan?.badge || ''),
           features: Array.isArray(plan?.features) ? plan.features.map((item) => String(item || '').trim()).filter(Boolean) : [],
+          canUseVipModels: normalizeBoolean(plan?.canUseVipModels, false),
         }))
       : defaults.plans,
     showcaseTracks: Array.isArray(parsed?.showcaseTracks) && parsed.showcaseTracks.length ? parsed.showcaseTracks : defaults.showcaseTracks,
@@ -867,6 +883,29 @@ function findPlanByStripePriceId(priceId) {
 function findPlanByPayPalPlanId(planId) {
   const normalized = String(planId || '').trim()
   return adminData.plans.find((item) => String(item?.paypalPlanId || '').trim() === normalized) || null
+}
+
+function planAllowsVipModels(plan) {
+  return normalizeBoolean(plan?.canUseVipModels, false) && normalizePlanType(plan?.type, 'subscription') === 'subscription'
+}
+
+function isVipStyle(styleId) {
+  return VIP_STYLE_IDS.has(String(styleId || '').trim())
+}
+
+function memberCanUseVipModels(member) {
+  const subscriptionPlanId = String(member?.subscriptionPlanId || '').trim()
+  const memberPlanName = String(member?.plan || '').trim()
+  const matchedPlan = subscriptionPlanId
+    ? findPlanById(subscriptionPlanId)
+    : adminData.plans.find((item) => String(item?.name || '').trim() === memberPlanName) || null
+
+  if (!planAllowsVipModels(matchedPlan)) {
+    return false
+  }
+
+  const normalizedStatus = String(member?.subscriptionStatus || '').trim().toLowerCase()
+  return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
 }
 
 function supportsPlanType(method, planType) {
@@ -4151,6 +4190,7 @@ app.put('/api/admin/plans', requireAdminAuth, (req, res) => {
       currency: String(item?.currency || 'USD').trim() || 'USD',
       badge: String(item?.badge || '').trim(),
       features: Array.isArray(item?.features) ? item.features.map((feature) => String(feature || '').trim()).filter(Boolean) : [],
+      canUseVipModels: normalizeBoolean(item?.canUseVipModels, false),
     })),
   }
   saveAdminData()
@@ -4359,6 +4399,11 @@ app.post('/api/generate-song', async (req, res) => {
     })
   } catch (error) {
     res.status(400).json({ message: error instanceof Error ? error.message : '请求参数错误。' })
+    return
+  }
+
+  if (isVipStyle(input.style) && !memberCanUseVipModels(member)) {
+    res.status(403).json({ message: '当前订阅未开通 VIP模型 权限。' })
     return
   }
 
