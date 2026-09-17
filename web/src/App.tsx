@@ -1943,8 +1943,25 @@ function App() {
 
     void syncMemberSession()
 
+    const handleRefresh = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
+
+      void syncMemberSession()
+    }
+
+    const timer = window.setInterval(() => {
+      void syncMemberSession()
+    }, 5000)
+    window.addEventListener('focus', handleRefresh)
+    document.addEventListener('visibilitychange', handleRefresh)
+
     return () => {
       disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', handleRefresh)
+      document.removeEventListener('visibilitychange', handleRefresh)
     }
   }, [activeMemberToken])
 
