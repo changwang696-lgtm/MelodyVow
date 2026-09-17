@@ -885,8 +885,13 @@ function findPlanByPayPalPlanId(planId) {
   return adminData.plans.find((item) => String(item?.paypalPlanId || '').trim() === normalized) || null
 }
 
+const PREMIUM_VIP_PLAN_ID_PREFIX = 'premium'
+
 function planAllowsVipModels(plan) {
-  return normalizeBoolean(plan?.canUseVipModels, false) && normalizePlanType(plan?.type, 'subscription') === 'subscription'
+  const normalizedPlanId = String(plan?.id || '').trim().toLowerCase()
+  return normalizeBoolean(plan?.canUseVipModels, false)
+    && normalizePlanType(plan?.type, 'subscription') === 'subscription'
+    && normalizedPlanId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
 }
 
 function isVipStyle(styleId) {
@@ -4119,10 +4124,26 @@ app.patch('/api/admin/members/:email', requireAdminAuth, (req, res) => {
 
   const patch = req.body && typeof req.body === 'object' ? req.body : {}
   const current = adminData.members.find((item) => String(item.email || '').trim().toLowerCase() === email) || { email }
+  const rawPlanName = sanitizeCompactText(patch.plan ?? current.plan, 120)
+  const matchedPlan = rawPlanName
+    ? adminData.plans.find((item) => String(item?.name || '').trim() === rawPlanName) || null
+    : null
   const next = {
     ...current,
     ...patch,
     email,
+  }
+
+  if (matchedPlan) {
+    next.plan = matchedPlan.name
+    if (normalizePlanType(matchedPlan.type, 'credit_pack') === 'subscription') {
+      next.subscriptionPlanId = matchedPlan.id
+      next.subscriptionStatus = sanitizeCompactText(patch.subscriptionStatus ?? current.subscriptionStatus, 40) || 'active'
+    }
+    else {
+      next.subscriptionPlanId = ''
+      next.subscriptionStatus = ''
+    }
   }
 
   const savedMember = upsertMember(next)
