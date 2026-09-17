@@ -1657,7 +1657,12 @@ function memberHasVipModelAccess(authSession: AuthSession | null | undefined, pl
   return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
 }
 
-function syncAdminMemberPlanFields(member: AdminMember, planName: string, plans: PlanItem[]) {
+function syncAdminMemberPlanFields(
+  member: AdminMember,
+  planName: string,
+  plans: PlanItem[],
+  options?: { preserveEmptySubscriptionStatus?: boolean },
+) {
   const normalizedPlanName = String(planName || '').trim()
   const matchedPlan = plans.find((item) => String(item.name || '').trim() === normalizedPlanName) || null
   if (!matchedPlan) {
@@ -1672,7 +1677,7 @@ function syncAdminMemberPlanFields(member: AdminMember, planName: string, plans:
       ...member,
       plan: matchedPlan.name,
       subscriptionPlanId: matchedPlan.id,
-      subscriptionStatus: String(member.subscriptionStatus || '').trim() || 'active',
+      subscriptionStatus: String(member.subscriptionStatus || '').trim() || (options?.preserveEmptySubscriptionStatus ? '' : 'active'),
     }
   }
 
@@ -6874,9 +6879,14 @@ function AdminDashboardPage({
           setMembers(membersData)
           setSelectedMember((current) => {
             if (current) {
-              return membersData.find((item) => item.email === current.email) ?? membersData[0] ?? null
+              const matchedMember = membersData.find((item) => item.email === current.email) ?? membersData[0] ?? null
+              return matchedMember
+                ? syncAdminMemberPlanFields(matchedMember, matchedMember.plan || '', plans, { preserveEmptySubscriptionStatus: true })
+                : null
             }
-            return membersData[0] ?? null
+            return membersData[0]
+              ? syncAdminMemberPlanFields(membersData[0], membersData[0].plan || '', plans, { preserveEmptySubscriptionStatus: true })
+              : null
           })
         }
 
@@ -7527,7 +7537,7 @@ function AdminDashboardPage({
                       type="button"
                       className={`admin-table-row admin-select-row admin-member-row ${selectedMember?.email === item.email ? 'is-active' : ''}`}
                       onClick={() => {
-                        setSelectedMember(item)
+                        setSelectedMember(syncAdminMemberPlanFields(item, item.plan || '', plans, { preserveEmptySubscriptionStatus: true }))
                         setManualTopupAmount('0')
                         setManualTopupNote('')
                       }}
@@ -7658,8 +7668,8 @@ function AdminDashboardPage({
                         <span>订阅计划 ID</span>
                         <input
                           value={selectedMember.subscriptionPlanId || ''}
-                          onChange={(event) => setSelectedMember((current) => current ? { ...current, subscriptionPlanId: event.target.value } : current)}
-                          placeholder="pro-monthly"
+                          readOnly
+                          placeholder="跟随套餐自动同步"
                         />
                       </label>
                     </section>
