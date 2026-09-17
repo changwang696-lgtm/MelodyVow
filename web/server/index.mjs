@@ -898,13 +898,23 @@ function isVipStyle(styleId) {
   return VIP_STYLE_IDS.has(String(styleId || '').trim())
 }
 
-function memberCanUseVipModels(member) {
+function resolveMemberSubscriptionPlan(member) {
   const subscriptionPlanId = String(member?.subscriptionPlanId || '').trim()
   const memberPlanName = String(member?.plan || '').trim()
-  const matchedPlan = subscriptionPlanId
-    ? findPlanById(subscriptionPlanId)
-    : adminData.plans.find((item) => String(item?.name || '').trim() === memberPlanName) || null
+  const matchedPlanByName = memberPlanName
+    ? adminData.plans.find((item) => String(item?.name || '').trim() === memberPlanName) || null
+    : null
+  const matchedPlanById = subscriptionPlanId ? findPlanById(subscriptionPlanId) : null
 
+  if (matchedPlanByName && normalizePlanType(matchedPlanByName.type, 'credit_pack') === 'subscription') {
+    return matchedPlanByName
+  }
+
+  return matchedPlanById || matchedPlanByName || null
+}
+
+function memberCanUseVipModels(member) {
+  const matchedPlan = resolveMemberSubscriptionPlan(member)
   if (!planAllowsVipModels(matchedPlan)) {
     return false
   }
@@ -3002,15 +3012,19 @@ app.post('/api/member/login', (req, res) => {
 
 app.get('/api/member/session', requireMemberAuth, (req, res) => {
   const creditSnapshot = buildMemberCreditSnapshot(req.member)
+  const resolvedPlan = resolveMemberSubscriptionPlan(req.member)
+  const resolvedSubscriptionPlanId = normalizePlanType(resolvedPlan?.type, 'credit_pack') === 'subscription'
+    ? String(resolvedPlan?.id || '').trim()
+    : String(req.member.subscriptionPlanId || '').trim()
   res.json({
     email: normalizeEmail(req.member.email),
     partnerName: String(req.member.partnerName || '').trim(),
-    plan: String(req.member.plan || '').trim(),
+    plan: String(resolvedPlan?.name || req.member.plan || '').trim(),
     heartBeansBalance: creditSnapshot.heartBeansBalance,
     topupHeartBeansBalance: creditSnapshot.topupHeartBeansBalance,
     subscriptionHeartBeansBalance: creditSnapshot.subscriptionHeartBeansBalance,
     subscriptionStatus: String(req.member.subscriptionStatus || '').trim(),
-    subscriptionPlanId: String(req.member.subscriptionPlanId || '').trim(),
+    subscriptionPlanId: resolvedSubscriptionPlanId,
     subscriptionCurrentPeriodEnd: String(req.member.subscriptionCurrentPeriodEnd || '').trim(),
     stripeCustomerId: String(req.member.stripeCustomerId || '').trim(),
     paypalSubscriptionId: String(req.member.paypalSubscriptionId || '').trim(),
