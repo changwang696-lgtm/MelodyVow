@@ -310,6 +310,7 @@ type PlanItem = {
   currency?: string
   badge?: string
   features?: string[]
+  canUseVipModels?: boolean
 }
 
 type PaymentMethod = {
@@ -1595,7 +1596,61 @@ function normalizePricingPlan(plan: PlanItem): PlanItem {
     stripePriceId: String(plan.stripePriceId || '').trim(),
     paypalPlanId: String(plan.paypalPlanId || '').trim(),
     currency: 'USD',
+    canUseVipModels: Boolean(plan.canUseVipModels),
   }
+}
+
+const VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing', 'paid'])
+const VIP_CHINESE_FEATURED_STYLE_IDS: string[] = [
+  'chinese_royal_dragon_phoenix',
+  'forbidden_city_bride_entrance',
+  'chinese_hundred_birds_festive',
+  'chinese_vow_gratitude_ballad',
+  'chinese_desert_film_epic',
+]
+const VIP_CHINESE_FEATURED_STYLE_PRIORITY = new Map<string, number>(VIP_CHINESE_FEATURED_STYLE_IDS.map((id, index) => [id, index]))
+
+function getDefaultPlanAccessFallback(): PlanItem[] {
+  return [
+    { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [], canUseVipModels: false },
+    { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [], canUseVipModels: false },
+    { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [], canUseVipModels: true },
+    { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: [], canUseVipModels: false },
+    { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '', features: [], canUseVipModels: false },
+    { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: [], canUseVipModels: false },
+  ]
+}
+
+function planSupportsVipModels(plan: Pick<PlanItem, 'type' | 'canUseVipModels'> | null | undefined) {
+  return Boolean(plan?.canUseVipModels) && (plan?.type || 'subscription') === 'subscription'
+}
+
+function isVipStyle(styleId: string) {
+  return getStyleCollectionIds(styleId).includes('vip')
+}
+
+function resolveMemberVipPlan(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
+  const subscriptionPlanId = String(authSession?.subscriptionPlanId || '').trim()
+  if (subscriptionPlanId) {
+    return plans.find((item) => item.id === subscriptionPlanId) || null
+  }
+
+  const currentPlanName = String(authSession?.plan || '').trim()
+  if (!currentPlanName) {
+    return null
+  }
+
+  return plans.find((item) => String(item.name || '').trim() === currentPlanName) || null
+}
+
+function memberHasVipModelAccess(authSession: AuthSession | null | undefined, plans: PlanItem[]) {
+  const matchedPlan = resolveMemberVipPlan(authSession, plans)
+  if (!planSupportsVipModels(matchedPlan)) {
+    return false
+  }
+
+  const normalizedStatus = String(authSession?.subscriptionStatus || '').trim().toLowerCase()
+  return !normalizedStatus || VIP_ACCESSIBLE_SUBSCRIPTION_STATUSES.has(normalizedStatus)
 }
 
 function formatPlanPrice(plan: Pick<PlanItem, 'price'>) {
@@ -1626,6 +1681,20 @@ function formatPlanCreditsText(locale: Locale, plan: PlanItem) {
     zh: `每月发放 ${plan.heartBeans || 0} 点订阅额度`,
     en: `${plan.heartBeans || 0} subscription credits every month`,
   })
+}
+
+function getPlanFeatureItems(locale: Locale, plan: PlanItem) {
+  const items = [...(plan.features || [])]
+  const vipAccessLabel = copy(locale, {
+    zh: '可使用 VIP模型',
+    en: 'VIP Models access',
+  })
+
+  if (planSupportsVipModels(plan) && !items.some((item) => String(item || '').toLowerCase().includes('vip'))) {
+    items.push(vipAccessLabel)
+  }
+
+  return items
 }
 
 function ScrollManager() {
@@ -4950,6 +5019,7 @@ function ShowcasePage({ locale, authSession, onLogout, onUpsertFloatingPlayer }:
 
 function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPageProps) {
   const navigate = useNavigate()
+  const [plans, setPlans] = useState<PlanItem[]>(() => getDefaultPlanAccessFallback().map(normalizePricingPlan))
   const [activeCollection, setActiveCollection] = useState<StyleCollectionId>(() => {
     if (draft.style) {
       const matchedCollections = getStyleCollectionIds(draft.style)
@@ -4963,9 +5033,63 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
 
     return draft.occasion === 'proposal' ? 'proposal' : 'wedding'
   })
+  const hasVipModelAccess = useMemo(() => memberHasVipModelAccess(authSession, plans), [authSession, plans])
+
+  useEffect(() => {
+    let disposed = false
+
+    async function loadPlans() {
+      try {
+        const response = await fetch(apiUrl('/api/plans'))
+        const data = (await readJsonSafe(response)) as { items?: PlanItem[]; message?: string }
+        if (!response.ok) {
+          throw new Error(data.message || '套餐加载失败。')
+        }
+
+        const items = Array.isArray(data.items) ? data.items.map(normalizePricingPlan) : []
+        if (!disposed && items.length) {
+          setPlans(items)
+        }
+      } catch {
+        // Fall back to local defaults so VIP visibility still works when plans are temporarily unavailable.
+      }
+    }
+
+    void loadPlans()
+
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!draft.style || hasVipModelAccess || !isVipStyle(draft.style)) {
+      return
+    }
+
+    setDraft((current) => {
+      const currentStyle = String(current.style || '').trim()
+      if (!currentStyle || !isVipStyle(currentStyle)) {
+        return current
+      }
+
+      return { ...current, style: '' }
+    })
+  }, [draft.style, hasVipModelAccess, setDraft])
 
   const filteredStyles = useMemo(
-    () => weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(activeCollection)),
+    () => {
+      const items = weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(activeCollection))
+      if (activeCollection !== 'vip') {
+        return items
+      }
+
+      return [...items].sort((left, right) => {
+        const leftPriority = VIP_CHINESE_FEATURED_STYLE_PRIORITY.get(left.id) ?? Number.MAX_SAFE_INTEGER
+        const rightPriority = VIP_CHINESE_FEATURED_STYLE_PRIORITY.get(right.id) ?? Number.MAX_SAFE_INTEGER
+        return leftPriority - rightPriority
+      })
+    },
     [activeCollection],
   )
 
@@ -4981,7 +5105,7 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
       authSession={authSession}
       hideHero
     >
-      <section className="styles-page-toolbar glass-card">
+      <section className={`styles-page-toolbar glass-card ${activeCollection === 'vip' ? 'is-vip-active' : ''}`}>
         <div
           key={`style-switcher-${locale}`}
           className="styles-page-switcher"
@@ -4991,6 +5115,7 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
           {styleCollectionOptions.map((collection) => {
             const count = weddingStyleOptions.filter((card) => getStyleCollectionIds(card.id).includes(collection.id)).length
             const active = activeCollection === collection.id
+            const locked = collection.id === 'vip' && !hasVipModelAccess
 
             return (
               <button
@@ -4998,7 +5123,11 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={`styles-page-switch ${active ? 'is-active' : ''}`}
+                className={`styles-page-switch ${active ? 'is-active' : ''} ${locked ? 'is-locked' : ''}`}
+                title={locked ? copy(locale, {
+                  zh: 'VIP模型需开通带有 VIP 权限的订阅套餐后才能选择。',
+                  en: 'VIP Models require a subscription plan with VIP access.',
+                }) : undefined}
                 onClick={() => setActiveCollection(collection.id)}
               >
                 <span>{getStyleCollectionLabel(locale, collection.id)}</span>
@@ -5009,8 +5138,31 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
         </div>
       </section>
 
-      <section className="styles-grid styles-page-grid">
+      {activeCollection === 'vip' ? (
+        <section className={`glass-card styles-page-vip-note ${hasVipModelAccess ? 'is-unlocked' : 'is-locked'}`}>
+          <span className="styles-page-vip-kicker">{copy(locale, { zh: 'Imperial Selection', en: 'Imperial Selection' })}</span>
+          <strong>{copy(locale, { zh: 'VIP模型专区', en: 'VIP Models' })}</strong>
+          <p>{hasVipModelAccess
+            ? copy(locale, {
+                zh: '当前账号订阅已开通 VIP模型权限，可直接选择下方高阶模型。',
+                en: 'Your current subscription includes VIP Models access, so you can select any premium model below.',
+              })
+            : copy(locale, {
+                zh: authSession?.email
+                  ? '当前账号套餐未开通 VIP模型 权限，请升级到后台已开启该权限的订阅套餐后使用。'
+                  : '登录并开通带有 VIP模型 权限的 Premium 订阅后，才可选择该分类下的模型。',
+                en: authSession?.email
+                  ? 'Your current plan does not include VIP Models access. Upgrade to a subscription plan with VIP access enabled.'
+                  : 'Sign in and activate a Premium subscription with VIP Models access to use this category.',
+              })}</p>
+        </section>
+      ) : null}
+
+      <section className={`styles-grid styles-page-grid ${activeCollection === 'vip' ? 'is-vip-active' : ''}`}>
         {filteredStyles.map((card, index) => {
+          const vipStyle = isVipStyle(card.id)
+          const vipFeatured = activeCollection === 'vip' && VIP_CHINESE_FEATURED_STYLE_PRIORITY.has(card.id)
+          const canSelectStyle = !vipStyle || hasVipModelAccess
           const baseMetaRows: Array<{ field: StyleMetaField, value?: string }> = [
             { field: 'area', value: card.area || card.continent },
             { field: 'community', value: card.community },
@@ -5046,9 +5198,13 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
           return (
             <article
               key={card.id}
-              className={`glass-card style-card ${draft.style === card.id ? 'selected' : ''}`}
+              className={`glass-card style-card ${draft.style === card.id ? 'selected' : ''} ${vipStyle ? 'is-vip' : ''} ${vipFeatured ? 'is-vip-featured' : ''} ${!canSelectStyle ? 'is-locked' : ''}`}
             >
               <div className="step-badge">{index + 1}</div>
+              {vipStyle ? <span className="style-card-badge">VIP</span> : null}
+              {vipFeatured ? (
+                <span className="style-card-featured-badge">{copy(locale, { zh: '中式史诗精选', en: 'Chinese Epic Pick' })}</span>
+              ) : null}
               <h3>{locale === 'zh' ? card.zhLabel : card.enLabel}</h3>
               <p>{locale === 'zh' ? card.zhDescription : card.enDescription}</p>
               {metaRows.length ? (
@@ -5065,15 +5221,27 @@ function StylesPage({ locale, draft, setDraft, authSession, onLogout }: StylesPa
                   ))}
                 </div>
               ) : null}
+              {vipStyle && !canSelectStyle ? (
+                <p className="style-card-lock-note">{copy(locale, {
+                  zh: '需开通带有 VIP模型 权限的 Premium 订阅后才能选择。',
+                  en: 'Upgrade to a Premium subscription with VIP Models access to select this style.',
+                })}</p>
+              ) : null}
               <button
                 type="button"
                 className="primary-button compact"
+                disabled={!canSelectStyle}
                 onClick={() => {
+                  if (!canSelectStyle) {
+                    return
+                  }
                   setDraft((current) => ({ ...current, style: card.id }))
                   navigate(withLocale(locale))
                 }}
               >
-                {copy(locale, { zh: '选择曲风', en: 'Select Style' })}
+                {canSelectStyle
+                  ? copy(locale, { zh: '选择曲风', en: 'Select Style' })
+                  : copy(locale, { zh: 'Premium 解锁', en: 'Unlock with Premium' })}
               </button>
             </article>
           )
@@ -5178,20 +5346,20 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
 
     const fallbackPlans: PlanItem[] = locale === 'zh'
       ? [
-          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 5 点订阅额度', 'AI 歌词生成', 'MP3 下载'] },
-          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['每月自动续费', '每月发放 15 点订阅额度', '完整歌词', '高清音频'] },
-          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音'] },
-          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 5 点充值额度', '适合低频用户'] },
-          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '热门', features: ['一次性购买', '立即到账 15 点充值额度', '适合婚礼筹备期集中使用'] },
-          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 40 点充值额度', '适合高频用户'] },
+          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 5 点订阅额度', 'AI 歌词生成', 'MP3 下载'], canUseVipModels: false },
+          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '推荐', features: ['每月自动续费', '每月发放 15 点订阅额度', '完整歌词', '高清音频'], canUseVipModels: false },
+          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['每月自动续费', '每月发放 40 点订阅额度', '真人演唱', '双版本混音', '可使用 VIP模型'], canUseVipModels: true },
+          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 5 点充值额度', '适合低频用户'], canUseVipModels: false },
+          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '热门', features: ['一次性购买', '立即到账 15 点充值额度', '适合婚礼筹备期集中使用'], canUseVipModels: false },
+          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['一次性购买', '立即到账 40 点充值额度', '适合高频用户'], canUseVipModels: false },
         ]
       : [
-          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['Auto-renews monthly', '5 subscription credits every month', 'AI lyrics', 'MP3 download'] },
-          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['Auto-renews monthly', '15 subscription credits every month', 'Full lyrics', 'HD audio'] },
-          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['Auto-renews monthly', '40 subscription credits every month', 'Real singer', 'Dual mix'] },
-          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['One-time payment', '5 top-up credits instantly', 'Ideal for occasional orders'] },
-          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: 'Popular', features: ['One-time payment', '15 top-up credits instantly', 'Ideal for wedding production bursts'] },
-          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['One-time payment', '40 top-up credits instantly', 'Ideal for studios and heavy usage'] },
+          { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: ['Auto-renews monthly', '5 subscription credits every month', 'AI lyrics', 'MP3 download'], canUseVipModels: false },
+          { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: 'Recommended', features: ['Auto-renews monthly', '15 subscription credits every month', 'Full lyrics', 'HD audio'], canUseVipModels: false },
+          { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: ['Auto-renews monthly', '40 subscription credits every month', 'Real singer', 'Dual mix', 'VIP Models access'], canUseVipModels: true },
+          { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: ['One-time payment', '5 top-up credits instantly', 'Ideal for occasional orders'], canUseVipModels: false },
+          { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: 'Popular', features: ['One-time payment', '15 top-up credits instantly', 'Ideal for wedding production bursts'], canUseVipModels: false },
+          { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: ['One-time payment', '40 top-up credits instantly', 'Ideal for studios and heavy usage'], canUseVipModels: false },
         ]
 
     async function loadPlans() {
@@ -5278,7 +5446,7 @@ function PricingPage({ locale, selectedPlan, setSelectedPlan, authSession, onLog
                   <div className="price-tag">{formatPlanPrice(plan)}</div>
                   <p>{formatPlanCreditsText(locale, plan)}</p>
                   <ul>
-                    {(plan.features || []).map((item) => (
+                    {getPlanFeatureItems(locale, plan).map((item) => (
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
@@ -5323,14 +5491,7 @@ function CheckoutPage({ locale, selectedPlan, setSelectedPlan, authSession, onLo
   useEffect(() => {
     let disposed = false
 
-    const fallbackPlans: PlanItem[] = [
-      { id: 'starter-monthly', name: 'Starter Monthly', type: 'subscription', billingInterval: 'month', price: 89, heartBeans: 5, currency: 'USD', badge: '', features: [] },
-      { id: 'pro-monthly', name: 'Pro Monthly', type: 'subscription', billingInterval: 'month', price: 199, heartBeans: 15, currency: 'USD', badge: '', features: [] },
-      { id: 'premium-monthly', name: 'Premium Monthly', type: 'subscription', billingInterval: 'month', price: 499, heartBeans: 40, currency: 'USD', badge: '', features: [] },
-      { id: 'boost-5', name: 'Boost 5', type: 'credit_pack', billingInterval: '', price: 69, heartBeans: 5, currency: 'USD', badge: '', features: [] },
-      { id: 'signature-15', name: 'Signature 15', type: 'credit_pack', billingInterval: '', price: 169, heartBeans: 15, currency: 'USD', badge: '', features: [] },
-      { id: 'celebration-40', name: 'Celebration 40', type: 'credit_pack', billingInterval: '', price: 429, heartBeans: 40, currency: 'USD', badge: '', features: [] },
-    ]
+    const fallbackPlans: PlanItem[] = getDefaultPlanAccessFallback()
 
     async function loadCheckoutData() {
       setLoading(true)
@@ -6940,7 +7101,7 @@ function AdminDashboardPage({
       if (!response.ok) {
         throw new Error(result.message || '套餐保存失败。')
       }
-      setPlans(Array.isArray(result.items) ? result.items : plans)
+      setPlans(Array.isArray(result.items) ? result.items.map(normalizePricingPlan) : plans)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : '套餐保存失败。')
     }
@@ -7898,6 +8059,18 @@ function AdminDashboardPage({
                           }
                         />
                       </label>
+                      <label className="admin-switch form-span-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(plan.canUseVipModels)}
+                          onChange={(event) =>
+                            setPlans((current) =>
+                              current.map((item, i) => (i === index ? { ...item, canUseVipModels: event.target.checked } : item)),
+                            )
+                          }
+                        />
+                        <span>允许该订阅使用 VIP模型</span>
+                      </label>
                       <label className="field form-span-2">
                         <span>权益(每行一条)</span>
                         <textarea
@@ -7941,6 +8114,7 @@ function AdminDashboardPage({
                       currency: 'USD',
                       badge: '',
                       features: [],
+                      canUseVipModels: false,
                     },
                   ])
                 }
