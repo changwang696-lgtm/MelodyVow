@@ -1589,14 +1589,27 @@ function loadGeneratingShowcaseSession() {
 }
 
 function normalizePricingPlan(plan: PlanItem): PlanItem {
+  const identityKey = `${String(plan.id || '').trim()} ${String(plan.name || '').trim()}`.toLowerCase()
+  const looksLikeLegacySubscriptionPlan = identityKey.includes('starter') || identityKey.includes('pro') || identityKey.includes('premium')
+  const looksLikeLegacyPremiumPlan = identityKey.includes('premium')
   return {
     ...plan,
-    type: plan.type === 'credit_pack' ? 'credit_pack' : 'subscription',
-    billingInterval: plan.billingInterval === 'year' ? 'year' : plan.billingInterval === 'month' ? 'month' : '',
+    type: plan.type
+      ? (plan.type === 'credit_pack' ? 'credit_pack' : 'subscription')
+      : looksLikeLegacySubscriptionPlan
+        ? 'subscription'
+        : 'credit_pack',
+    billingInterval: plan.billingInterval === 'year'
+      ? 'year'
+      : plan.billingInterval === 'month'
+        ? 'month'
+        : looksLikeLegacySubscriptionPlan
+          ? 'month'
+          : '',
     stripePriceId: String(plan.stripePriceId || '').trim(),
     paypalPlanId: String(plan.paypalPlanId || '').trim(),
     currency: 'USD',
-    canUseVipModels: Boolean(plan.canUseVipModels),
+    canUseVipModels: typeof plan.canUseVipModels === 'boolean' ? plan.canUseVipModels : looksLikeLegacyPremiumPlan,
   }
 }
 
