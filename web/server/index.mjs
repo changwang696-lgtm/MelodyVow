@@ -934,6 +934,12 @@ function planAllowsVipModels(plan) {
     && normalizedPlanId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
 }
 
+function memberLooksPremium(member) {
+  const planName = String(member?.plan || '').trim().toLowerCase()
+  const subscriptionPlanId = String(member?.subscriptionPlanId || '').trim().toLowerCase()
+  return planName.includes(PREMIUM_VIP_PLAN_ID_PREFIX) || subscriptionPlanId.startsWith(PREMIUM_VIP_PLAN_ID_PREFIX)
+}
+
 function isVipStyle(styleId) {
   return VIP_STYLE_IDS.has(String(styleId || '').trim())
 }
@@ -954,6 +960,9 @@ function resolveMemberSubscriptionPlan(member) {
 }
 
 function memberCanUseVipModels(member) {
+  if (memberLooksPremium(member)) {
+    return true
+  }
   const matchedPlan = resolveMemberSubscriptionPlan(member)
   return planAllowsVipModels(matchedPlan)
 }
