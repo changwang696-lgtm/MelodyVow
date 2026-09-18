@@ -24,6 +24,7 @@ const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || '').trim()
 const PAYPAL_CLIENT_SECRET = String(process.env.PAYPAL_CLIENT_SECRET || '').trim()
 const PAYPAL_WEBHOOK_ID = String(process.env.PAYPAL_WEBHOOK_ID || '').trim()
 const PAYPAL_MODE = String(process.env.PAYPAL_MODE || '').trim().toLowerCase() === 'live' ? 'live' : 'sandbox'
+const MINIAPP_BRIDGE_SECRET = String(process.env.MINIAPP_BRIDGE_SECRET || '').trim()
 const SIGNUP_POLICY_VERSION = '2026-09-15'
 const JOB_TTL_MS = 1000 * 60 * 60 * 6
 const POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS ?? 12000)
@@ -549,6 +550,9 @@ function normalizeLoadedAdminData(parsed) {
           stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
           paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
           subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
+          wechatOpenId: String(member?.wechatOpenId || '').trim(),
+          wechatUnionId: String(member?.wechatUnionId || '').trim(),
+          wechatLinkedAt: normalizeTimestampString(member?.wechatLinkedAt),
           acceptedAccountPolicyAt: normalizeTimestampString(member?.acceptedAccountPolicyAt),
           acceptedTransactionPolicyAt: normalizeTimestampString(member?.acceptedTransactionPolicyAt),
           policyConsentVersion: normalizeTimestampString(member?.policyConsentVersion),
@@ -1109,6 +1113,57 @@ function findMemberByEmail(email) {
   return adminData.members.find((item) => normalizeEmail(item.email) === normalizedEmail) || null
 }
 
+function normalizeMiniappIdentity(value) {
+  return String(value || '').trim()
+}
+
+function findMemberByMiniappIdentity(openId = '', unionId = '') {
+  const normalizedOpenId = normalizeMiniappIdentity(openId)
+  const normalizedUnionId = normalizeMiniappIdentity(unionId)
+
+  if (!normalizedOpenId && !normalizedUnionId) {
+    return null
+  }
+
+  return adminData.members.find((item) => {
+    const memberOpenId = normalizeMiniappIdentity(item?.wechatOpenId)
+    const memberUnionId = normalizeMiniappIdentity(item?.wechatUnionId)
+    return (
+      (normalizedOpenId && memberOpenId === normalizedOpenId)
+      || (normalizedUnionId && memberUnionId === normalizedUnionId)
+    )
+  }) || null
+}
+
+function attachMiniappIdentityToMember(member, { openId = '', unionId = '' } = {}) {
+  const normalizedOpenId = normalizeMiniappIdentity(openId)
+  const normalizedUnionId = normalizeMiniappIdentity(unionId)
+  const existingByIdentity = findMemberByMiniappIdentity(normalizedOpenId, normalizedUnionId)
+  const targetEmail = normalizeEmail(member?.email)
+
+  if (existingByIdentity && normalizeEmail(existingByIdentity.email) !== targetEmail) {
+    throw new Error('当前微信身份已绑定其他网站会员，请先使用原账号登录。')
+  }
+
+  const currentOpenId = normalizeMiniappIdentity(member?.wechatOpenId)
+  const currentUnionId = normalizeMiniappIdentity(member?.wechatUnionId)
+
+  if (currentOpenId && normalizedOpenId && currentOpenId !== normalizedOpenId) {
+    throw new Error('当前网站会员已绑定其他微信身份，请联系管理员处理。')
+  }
+
+  if (currentUnionId && normalizedUnionId && currentUnionId !== normalizedUnionId) {
+    throw new Error('当前网站会员已绑定其他微信身份，请联系管理员处理。')
+  }
+
+  return {
+    ...member,
+    wechatOpenId: normalizedOpenId || currentOpenId,
+    wechatUnionId: normalizedUnionId || currentUnionId,
+    wechatLinkedAt: member?.wechatLinkedAt || nowIso(),
+  }
+}
+
 function buildMemberCreditSnapshot(member) {
   const topupHeartBeansBalance = normalizePositiveNumber(
     member?.topupHeartBeansBalance,
@@ -1135,6 +1190,9 @@ function buildPersistedMember(member) {
     stripeCustomerId: String(member?.stripeCustomerId || '').trim(),
     paypalSubscriptionId: String(member?.paypalSubscriptionId || '').trim(),
     subscriptionProvider: String(member?.subscriptionProvider || '').trim(),
+    wechatOpenId: normalizeMiniappIdentity(member?.wechatOpenId),
+    wechatUnionId: normalizeMiniappIdentity(member?.wechatUnionId),
+    wechatLinkedAt: normalizeTimestampString(member?.wechatLinkedAt),
     acceptedAccountPolicyAt: normalizeTimestampString(member?.acceptedAccountPolicyAt),
     acceptedTransactionPolicyAt: normalizeTimestampString(member?.acceptedTransactionPolicyAt),
     policyConsentVersion: normalizeTimestampString(member?.policyConsentVersion),
@@ -1151,6 +1209,22 @@ function upsertMember(member) {
   saveAdminData()
 
   return nextMember
+}
+
+function requireMiniappBridgeAuth(req, res, next) {
+  const bridgeSecret = String(req.headers['x-miniapp-bridge-secret'] || '').trim()
+
+  if (!MINIAPP_BRIDGE_SECRET) {
+    res.status(500).json({ message: '缺少 MINIAPP_BRIDGE_SECRET。' })
+    return
+  }
+
+  if (!bridgeSecret || bridgeSecret !== MINIAPP_BRIDGE_SECRET) {
+    res.status(403).json({ message: '小程序桥接鉴权失败。' })
+    return
+  }
+
+  next()
 }
 
 function appendCreditLedger(entry) {
@@ -3052,6 +3126,179 @@ app.post('/api/member/login', (req, res) => {
 
   const savedMember = upsertMember(nextMember)
   res.json(createMemberSession(savedMember))
+})
+
+app.post('/api/member/miniapp/login', requireMiniappBridgeAuth, (req, res) => {
+  const openId = normalizeMiniappIdentity(req.body?.openId)
+  const unionId = normalizeMiniappIdentity(req.body?.unionId)
+
+  if (!openId) {
+    res.status(400).json({ message: '缺少 openId。' })
+    return
+  }
+
+  const member = findMemberByMiniappIdentity(openId, unionId)
+  if (!member) {
+    res.json({ bindRequired: true })
+    return
+  }
+
+  if (member.disabled) {
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  const nextMember = {
+    ...attachMiniappIdentityToMember(member, { openId, unionId }),
+    lastAuthAt: nowIso(),
+    updatedAt: nowIso(),
+  }
+
+  const savedMember = upsertMember(nextMember)
+  res.json({
+    bindRequired: false,
+    ...createMemberSession(savedMember),
+  })
+})
+
+app.post('/api/member/miniapp/bind-existing', requireMiniappBridgeAuth, (req, res) => {
+  const openId = normalizeMiniappIdentity(req.body?.openId)
+  const unionId = normalizeMiniappIdentity(req.body?.unionId)
+  const email = normalizeEmail(req.body?.email)
+  const password = String(req.body?.password || '').trim()
+
+  if (!openId) {
+    res.status(400).json({ message: '缺少 openId。' })
+    return
+  }
+
+  if (!email) {
+    res.status(400).json({ message: '请先填写网站会员邮箱。' })
+    return
+  }
+
+  if (!password) {
+    res.status(400).json({ message: '请先填写网站会员密码。' })
+    return
+  }
+
+  const member = findMemberByEmail(email)
+  if (!member || !String(member.passwordHash || '').trim()) {
+    res.status(401).json({ message: '该邮箱尚未注册，请先创建网站会员。' })
+    return
+  }
+
+  if (member.disabled) {
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  if (!verifyPassword(password, member.passwordHash)) {
+    res.status(401).json({ message: '邮箱或密码错误。' })
+    return
+  }
+
+  try {
+    const nextMember = {
+      ...attachMiniappIdentityToMember(member, { openId, unionId }),
+      lastAuthAt: nowIso(),
+      updatedAt: nowIso(),
+    }
+    const savedMember = upsertMember(nextMember)
+    res.json({
+      bindRequired: false,
+      ...createMemberSession(savedMember),
+    })
+  } catch (error) {
+    res.status(409).json({ message: error instanceof Error ? error.message : '网站会员绑定失败。' })
+  }
+})
+
+app.post('/api/member/miniapp/create-with-email', requireMiniappBridgeAuth, (req, res) => {
+  if (!adminData.config.allowSignup) {
+    res.status(403).json({ message: '当前暂未开放会员注册，请联系管理员。' })
+    return
+  }
+
+  const openId = normalizeMiniappIdentity(req.body?.openId)
+  const unionId = normalizeMiniappIdentity(req.body?.unionId)
+  const email = normalizeEmail(req.body?.email)
+  const password = String(req.body?.password || '').trim()
+  const partnerName = String(req.body?.partnerName || '').trim()
+  const acceptedAccountPolicy = normalizeBoolean(req.body?.acceptedAccountPolicy, false)
+  const acceptedTransactionPolicy = normalizeBoolean(req.body?.acceptedTransactionPolicy, false)
+  const policyConsentVersion = String(req.body?.policyConsentVersion || '').trim() || SIGNUP_POLICY_VERSION
+
+  if (!openId) {
+    res.status(400).json({ message: '缺少 openId。' })
+    return
+  }
+
+  if (!email) {
+    res.status(400).json({ message: '请先填写邮箱。' })
+    return
+  }
+
+  if (!password) {
+    res.status(400).json({ message: '请先填写密码。' })
+    return
+  }
+
+  if (password.length < 6) {
+    res.status(400).json({ message: '密码至少需要 6 位。' })
+    return
+  }
+
+  if (!partnerName) {
+    res.status(400).json({ message: '请先填写伴侣姓名。' })
+    return
+  }
+
+  if (!acceptedAccountPolicy || !acceptedTransactionPolicy) {
+    res.status(400).json({ message: '注册前必须同意隐私、条款与交易政策。' })
+    return
+  }
+
+  const existing = findMemberByEmail(email)
+  if (existing?.disabled) {
+    res.status(403).json({ message: '该会员账号已被禁用，请联系管理员。' })
+    return
+  }
+
+  if (existing?.passwordHash) {
+    res.status(409).json({ message: '该邮箱已注册，请直接绑定已有网站会员。' })
+    return
+  }
+
+  try {
+    const timestamp = nowIso()
+    const nextMember = attachMiniappIdentityToMember({
+      ...existing,
+      email,
+      partnerName,
+      passwordHash: createPasswordHash(password),
+      acceptedAccountPolicyAt: timestamp,
+      acceptedTransactionPolicyAt: timestamp,
+      policyConsentVersion,
+      topupHeartBeansBalance: normalizePositiveNumber(
+        existing?.topupHeartBeansBalance,
+        normalizePositiveNumber(existing?.heartBeansBalance, 0),
+      ),
+      subscriptionHeartBeansBalance: normalizePositiveNumber(existing?.subscriptionHeartBeansBalance, 0),
+      createdAt: existing?.createdAt || timestamp,
+      updatedAt: timestamp,
+      lastAuthAt: timestamp,
+      disabled: false,
+    }, { openId, unionId })
+
+    const savedMember = upsertMember(nextMember)
+    res.status(existing ? 200 : 201).json({
+      bindRequired: false,
+      ...createMemberSession(savedMember),
+    })
+  } catch (error) {
+    res.status(409).json({ message: error instanceof Error ? error.message : '小程序会员创建失败。' })
+  }
 })
 
 app.get('/api/member/session', requireMemberAuth, (req, res) => {
